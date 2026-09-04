@@ -1,11 +1,10 @@
 /// 麦克风音频采集与重采样。
 ///
 /// 用 cpal 采集麦克风（系统音频线程），把各采样格式转成 mono f32 后经
-/// `mpsc` 发送；消费者在调用线程内用 sherpa-onnx 的 `LinearResampler` 把设备
+/// `mpsc` 发送；消费者在调用线程内用手写的线性插值 [`Resampler`] 把设备
 /// 采样率（macOS 常见 44.1k/48k）重采样到模型要求的 16k。
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Sample, SampleFormat, SizedSample, StreamConfig};
-use sherpa_onnx::LinearResampler;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -130,22 +129,95 @@ pub(crate) fn to_mono_f32<T: Sample<Float = f32>>(interleaved: &[T], channels: u
         .collect()
 }
 
-/// 包装 sherpa-onnx 线性重采样器（消费者侧使用）。
+/// 手写线性插值重采样器（消费者侧使用，跨 `process` 调用持久相位状态）。
+///
+/// 输出样本 j 的输入坐标 = `j * input_rate / output_rate`，在相邻两输入样本间
+/// 线性插值。**降采样不做抗混叠滤波**（专业实现会先用 windowed-sinc 低通限带），
+/// 高频能量可能混叠；目标场景（麦克风 48k/44.1k → 16k、TTS 语速微调）输入已是
+/// 语音带宽或近整数倍，该取舍可接受。换来的好处：零第三方依赖、无滤波延迟与
+/// 边缘振铃、同采样率零拷贝直通。
+///
+/// 长度约定：整段喂完后产出 `floor(n_in * output_rate / input_rate)` 个样本
+/// （尾部越界坐标按最后一个输入样本保持，见 [`Resampler::process`]）。
 pub struct Resampler {
-    inner: LinearResampler,
+    input_rate: i32,
+    output_rate: i32,
+    /// 尚未被后续输出完全消费的输入样本（绝对索引从 `buf_start` 起）。
+    buf: Vec<f32>,
+    /// `buf[0]` 的输入样本绝对序号（自流起点计，已丢弃样本计入）。
+    buf_start: u64,
+    /// 下一个待产出输出样本的绝对序号。
+    out_pos: u64,
 }
 
 impl Resampler {
     /// 从 `input_rate` 重采样到 `output_rate`。
     pub fn new(input_rate: i32, output_rate: i32) -> Result<Self, String> {
-        let inner = LinearResampler::create(input_rate, output_rate)
-            .ok_or_else(|| format!("无法创建重采样器: {input_rate} -> {output_rate}"))?;
-        Ok(Self { inner })
+        if input_rate <= 0 || output_rate <= 0 {
+            return Err(format!(
+                "无法创建重采样器: {input_rate} -> {output_rate}（采样率必须为正数）"
+            ));
+        }
+        Ok(Self {
+            input_rate,
+            output_rate,
+            buf: Vec::new(),
+            buf_start: 0,
+            out_pos: 0,
+        })
     }
 
-    /// 处理一帧音频。`flush=true` 处理最后一块以清空内部缓冲。
+    /// 处理一帧音频，返回重采样后的样本。
+    ///
+    /// 跨调用相位连续：流中间的块传 `flush=false`（右邻样本未到时留待下块，
+    /// 不产出、不丢样本），流结束时传 `flush=true` 冲刷尾部缓冲。因此逐块喂入
+    /// + 末尾冲刷的总产出与一次性喂入完全一致（无时长漂移、无块边界爆音）。
     pub fn process(&mut self, input: &[f32], flush: bool) -> Vec<f32> {
-        self.inner.resample(input, flush)
+        // 同采样率：零拷贝语义直通（逐样本恒等），不经过缓冲
+        if self.input_rate == self.output_rate {
+            return input.to_vec();
+        }
+        self.buf.extend_from_slice(input);
+        let in_rate = self.input_rate as u64;
+        let out_rate = self.output_rate as u64;
+        // 当前可用的输入样本总数（绝对序号）
+        let available = self.buf_start + self.buf.len() as u64;
+        // 产出上限 = floor(available * out / in)。两种模式共用同一账本：产出
+        // 序列只由「已喂入的输入总量」决定，与块边界无关（分块喂入与一次性
+        // 喂入产出逐样本一致，无时长漂移）
+        let limit = available * out_rate / in_rate;
+        let mut out = Vec::new();
+        while self.out_pos < limit {
+            // 输出样本的输入坐标 = out_pos * in / out，用整数分子/分母避免
+            // 浮点累积漂移（长流时 f64 累加会缓慢偏离网格）
+            let numer = self.out_pos * in_rate;
+            let left = numer / out_rate; // 坐标整数部分 = 左邻样本绝对索引
+            if !flush && left + 1 >= available {
+                break; // 右邻样本未到，留待下一块或冲刷
+            }
+            let frac = (numer % out_rate) as f32 / out_rate as f32;
+            let a = self.sample_at(left);
+            let b = self.sample_at(left + 1); // 冲刷阶段越界 → 保持最后样本
+            out.push(a + (b - a) * frac);
+            self.out_pos += 1;
+        }
+        // 丢弃后续输出不再引用的输入样本（最小需要索引 = floor(out_pos * in / out)）
+        let need = (self.out_pos * in_rate / out_rate).min(available) - self.buf_start;
+        self.buf.drain(..need as usize);
+        self.buf_start += need;
+        out
+    }
+
+    /// 取绝对索引 `i` 的输入样本；越界（仅冲刷阶段可达）按最后一个样本保持。
+    fn sample_at(&self, i: u64) -> f32 {
+        if self.buf.is_empty() {
+            return 0.0; // 不变量下不可达，防御音频路径 panic
+        }
+        let idx = i.saturating_sub(self.buf_start) as usize;
+        self.buf
+            .get(idx)
+            .copied()
+            .unwrap_or(self.buf[self.buf.len() - 1])
     }
 }
 
@@ -274,8 +346,8 @@ pub fn read_wav_mono(path: &Path) -> Result<(Vec<f32>, u32), String> {
 
 /// 读取 wav 文件为（mono f32 样本, 采样率）。
 ///
-/// 文件不存在 / 非 RIFF / 编码不支持一律返回 `None`（上游 sherpa `Wave::read`
-/// 不区分失败原因）；采样率不做归一，由调用方按需重采样。
+/// 文件不存在 / 非 RIFF / 编码不支持一律返回 `None`（不区分失败原因，调用方只
+/// 需判空）；采样率不做归一，由调用方按需重采样。
 pub fn read_wav_samples(path: &Path) -> Option<(Vec<f32>, i32)> {
     let wave = sherpa_onnx::Wave::read(&path.to_string_lossy())?;
     Some((wave.samples().to_vec(), wave.sample_rate()))
@@ -376,30 +448,71 @@ mod tests {
     }
 
     #[test]
+    fn resampler_identity_when_same_rate() {
+        let mut r = Resampler::new(16_000, 16_000).unwrap();
+        let input: Vec<f32> = (0..160).map(|i| (i as f32 * 0.1).sin()).collect();
+        assert_eq!(r.process(&input, true), input);
+    }
+
+    #[test]
+    fn resampler_scales_length_linearly() {
+        let mut r = Resampler::new(16_000, 48_000).unwrap();
+        let input = vec![0.0_f32; 1600]; // 0.1s @16k → 0.1s @48k = 4800 样本
+        assert_eq!(r.process(&input, true).len(), 4800);
+    }
+
+    #[test]
+    fn resampler_interpolates_midpoint() {
+        let mut r = Resampler::new(2, 4).unwrap(); // 2Hz→4Hz：[0,1] → [0,0.5,1,1.5]
+        assert!((r.process(&[0.0, 1.0], true)[1] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resampler_empty_input_yields_empty() {
+        let mut r = Resampler::new(48_000, 16_000).unwrap();
+        assert!(r.process(&[], false).is_empty());
+        assert!(r.process(&[], true).is_empty());
+    }
+
+    #[test]
+    fn resampler_chunked_matches_single_shot() {
+        // 流式连续性：分块喂入（flush=false）+ 末尾冲刷，结果须与一次性喂入一致
+        //（消费者 tts 语速 / dictate 录音都依赖跨 chunk 相位连续）。
+        let input: Vec<f32> = (0..2000).map(|i| ((i as f32) * 0.037).sin()).collect();
+        let mut one_shot = Resampler::new(48_000, 16_000).unwrap();
+        let expected = one_shot.process(&input, true);
+
+        let mut chunked = Resampler::new(48_000, 16_000).unwrap();
+        let mut got: Vec<f32> = Vec::new();
+        for chunk in input.chunks(137) {
+            got.extend(chunked.process(chunk, false));
+        }
+        got.extend(chunked.process(&[], true));
+        assert_eq!(got.len(), expected.len(), "总样本数应一致（无时长漂移）");
+        for (i, (a, b)) in got.iter().zip(expected.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "样本 {i} 不一致: {a} vs {b}");
+        }
+    }
+
+    #[test]
     fn test_resampler_identity_same_rate() {
         let mut rs = Resampler::new(16000, 16000).unwrap();
         let input: Vec<f32> = vec![0.1; 3200];
         let out = rs.process(&input, true);
-        // 同采样率线性重采样应接近原长度
-        assert!(
-            (out.len() as i64 - 3200).abs() <= 64,
-            "identity resample len={}",
-            out.len()
-        );
+        // 同采样率直通：长度与取值都应与输入完全一致
+        assert_eq!(out.len(), 3200);
+        assert_eq!(out, input);
     }
 
     #[test]
     fn test_resampler_downsample_48k_to_16k() {
         let mut rs = Resampler::new(48000, 16000).unwrap();
-        assert_eq!(rs.inner.input_sample_rate(), 48000);
+        assert_eq!(rs.input_rate, 48000);
+        assert_eq!(rs.output_rate, 16000);
         let input: Vec<f32> = vec![0.0; 48000]; // 1 秒
         let out = rs.process(&input, true);
-        // 48k -> 16k，1 秒应约 16000 个样本
-        assert!(
-            (out.len() as i64 - 16000).abs() <= 64,
-            "downsample len={}",
-            out.len()
-        );
+        // 48k -> 16k，1 秒应精确 16000 个样本（floor(n_in * out / in)）
+        assert_eq!(out.len(), 16000);
     }
 
     #[test]
