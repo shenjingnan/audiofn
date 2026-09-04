@@ -12,16 +12,14 @@ use serde::Serialize;
 use tauri::TitleBarStyle;
 #[cfg(target_os = "macos")]
 use tauri::menu::PredefinedMenuItem;
-use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu};
+use tauri::menu::{IsMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use zapmomo::asr::config::AsrParamsPatch;
 use zapmomo::asr::{AsrReaction, AsrResult, ReactionOutcome};
-use zapmomo::config::settings::{
-    self, AsrSettings, ChatboxSettings, CompanionWindowPosition, TtsSettings,
-};
+use zapmomo::config::settings::{self, AsrSettings, TtsSettings};
 use zapmomo::model_library;
 use zapmomo::model_library::{
     InstallState as LibInstallState, LibraryModel, RuntimeAction as LibRuntimeAction,
@@ -32,28 +30,6 @@ use zapmomo::tts::config::TtsParamsPatch;
 
 /// `download_tts_model` 缺省安装的模型库条目（Qwen3-TTS 0.6B，延迟优先档）。
 const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
-
-// 文字输入条的 macOS 非激活面板：聚焦输入框不需要激活整个 App（Spotlight 式），
-// 因此「显隐快捷键呼出输入条并聚焦」不会把本应用其它可见窗口（如设置窗）一并
-// 带到最前。可以成为 key window 以接收键盘与中文 IME 输入，但永不成为 main window。
-// 宏展开含 use 声明，须包在独立模块内。
-#[cfg(target_os = "macos")]
-mod chatbox_panel {
-    // 宏生成代码需调用 WebviewWindow::app_handle()（Manager trait 方法）
-    use tauri::Manager as _;
-
-    tauri_nspanel::tauri_panel! {
-        panel!(ChatboxPanel {
-            config: {
-                is_floating_panel: true,
-                can_become_key_window: true,
-                can_become_main_window: false,
-            }
-        })
-    }
-}
-#[cfg(target_os = "macos")]
-use chatbox_panel::ChatboxPanel;
 
 /// RAII：进入监听时置 `active_model_dir`，无论正常/错误/panic 退出监听线程都会清空。
 struct ActiveModelGuard {
@@ -907,120 +883,6 @@ async fn set_microphone(app: AppHandle, mic: String) -> Result<(), String> {
     .map_err(|e| format!("切换麦克风任务异常: {e}"))?
 }
 
-/// 持久化文字输入条窗口位置（逻辑像素），供下次启动恢复。
-///
-/// 由前端在用户手动拖动窗口后（debounce）调用，写入 `~/.zapmomo/settings.toml`
-/// 的 `[chatbox.window_position]` 段。
-#[tauri::command]
-fn save_chatbox_position(x: i32, y: i32) -> Result<(), String> {
-    let mut settings = settings::load_settings()?.unwrap_or_default();
-    let chatbox = settings
-        .chatbox
-        .get_or_insert_with(ChatboxSettings::default);
-    chatbox.window_position = Some(CompanionWindowPosition { x, y });
-    settings::save_settings(&settings)
-}
-
-/// 隐藏文字输入条窗口并持久化开关（前端 Esc 关闭时调用，保持菜单勾选态一致）。
-#[tauri::command]
-fn hide_chatbox(app: AppHandle) {
-    set_chatbox_visible(&app, false, false);
-}
-
-/// 显示/隐藏文字输入条窗口并持久化开关状态（托盘/右键菜单勾选共用）。
-///
-/// `focus` 仅显示时生效（显示后可直接打字）。macOS 上 chatbox 是非激活面板，
-/// 显示与聚焦走 NSPanel 专用 API（`orderFrontRegardless` + `makeKeyWindow`）：
-/// 聚焦输入不激活应用，不会把本应用其它可见窗口（如设置窗）一并带到最前；
-/// 其它平台为普通窗口，聚焦会激活应用。
-fn set_chatbox_visible(app: &AppHandle, visible: bool, focus: bool) {
-    if let Some(window) = app.get_webview_window("chatbox") {
-        // macOS：tao 的 window.show()/set_focus() 底层是 makeKeyAndOrderFront /
-        // activateIgnoringOtherApps——后者无条件激活整个 App，AppKit 激活时会把本应用
-        // 全部可见窗口（如一直开着的设置窗）整体带到最前，显隐快捷键因此表现为
-        // 「连带弹出主界面」。NonactivatingPanel mask 只抑制用户点击面板时的隐式
-        // 激活，管不住显式 activate 调用。改走 panel 的 orderFrontRegardless +
-        // makeKeyWindow：输入条成为 key window 可直接打字，但 App 不激活（Spotlight 式）。
-        #[cfg(target_os = "macos")]
-        {
-            use tauri_nspanel::ManagerExt;
-            match app.get_webview_panel("chatbox") {
-                Ok(panel) => {
-                    if visible {
-                        if focus {
-                            panel.show_and_make_key();
-                        } else {
-                            panel.show();
-                        }
-                    } else {
-                        panel.hide();
-                    }
-                }
-                // panel 注册前的时序兜底（正常运行不可达）：退回 tauri 原路径
-                Err(_) => {
-                    let _ = if visible {
-                        window.show()
-                    } else {
-                        window.hide()
-                    };
-                }
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = if visible && focus {
-                window.show().and_then(|()| window.set_focus())
-            } else if visible {
-                window.show()
-            } else {
-                window.hide()
-            };
-        }
-    }
-    if let Ok(mut settings) = settings::load_settings() {
-        let settings = settings.get_or_insert_with(Default::default);
-        let chatbox = settings
-            .chatbox
-            .get_or_insert_with(ChatboxSettings::default);
-        chatbox.visible = Some(visible);
-        let _ = settings::save_settings(settings);
-    }
-    rebuild_tray_menu(app);
-}
-
-/// 读取是否在 macOS Dock / Cmd+Tab 中隐藏应用图标（Accessory 模式）。
-#[tauri::command]
-fn get_hide_dock_icon() -> Result<bool, String> {
-    Ok(settings::load_settings()?
-        .unwrap_or_default()
-        .hide_dock_icon)
-}
-
-/// 设置并持久化是否在 macOS Dock / Cmd+Tab 中隐藏应用图标，并立即生效。
-///
-/// 写入 `~/.zapmomo/settings.toml` 顶层的 `hide_dock_icon` 字段；非 macOS 仅持久化，
-/// 不改变激活策略（该设置仅对 macOS 的 Dock / Cmd+Tab 有意义）。
-///
-/// `app` 仅在 macOS 上用于切换 ActivationPolicy，其它平台未使用，故非 macOS 允许未使用变量。
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-#[tauri::command]
-fn set_hide_dock_icon(app: AppHandle, hide: bool) -> Result<(), String> {
-    let mut settings = settings::load_settings()?.unwrap_or_default();
-    settings.hide_dock_icon = hide;
-    settings::save_settings(&settings)?;
-    #[cfg(target_os = "macos")]
-    {
-        let policy = if hide {
-            tauri::ActivationPolicy::Accessory
-        } else {
-            tauri::ActivationPolicy::Regular
-        };
-        app.set_activation_policy(policy)
-            .map_err(|e| format!("切换激活策略失败: {e}"))?;
-    }
-    Ok(())
-}
-
 /// 自启动拉起检测：命令行精确携带 `--autostart`（开启自启动时由插件附加到
 /// 系统启动项）。前缀/去杠变体（`--autostart-x`、`autostart`）不命中。
 fn is_launched_by_autostart<I>(args: I) -> bool
@@ -1042,12 +904,11 @@ fn autostart_item_labels(enabled: bool) -> (&'static str, &'static str) {
 
 /// 读当前开机自启动状态。
 ///
-/// 注意：与 hide_dock_icon 等落盘开关不同，自启动是系统级注册（注册表 Run 键 /
+/// 注意：与 settings.toml 里其它落盘开关不同，自启动是系统级注册（注册表 Run 键 /
 /// LaunchAgent / XDG .desktop），不随应用退出消失，用户可在系统设置外部增删；
 /// 系统状态即唯一真值，不在 settings.toml 落盘，读取直查插件（单次本地文件 /
 /// 注册表检查，调用点仅 command 与托盘重建，无需缓存）。
 fn current_autostart_enabled(app: &AppHandle) -> bool {
-    // 函数内 use：避免与 tauri-nspanel 的同名 ManagerExt trait 冲突。
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().unwrap_or(false)
 }
@@ -1092,30 +953,13 @@ fn show_settings_window(app: &AppHandle) {
     }
 }
 
-/// 仅显示设置窗口、不抢键盘焦点（启动 2 秒后自动打开用）：自动弹出只为可发现性，
-/// 键盘焦点应留给输入条（ChatboxBar 挂载即聚焦，见 set_chatbox_visible）。
-///
-/// macOS 不走 tao 的 `window.show()`——其底层 makeKeyAndOrderFront 会把 key window
-/// 从输入条抢走；`orderFront:` 只调整 Z 序、不改变 key 归属。AppKit 调用须在主线程，
-/// 经 `run_on_main_thread` 跳板（与 `rebuild_tray_menu_threadsafe` 同款）。
+/// 仅显示设置窗口、不抢键盘焦点（非 macOS 启动 2 秒后自动打开用）：自动弹出只为
+/// 可发现性，键盘焦点不主动抢占。
 fn show_settings_window_unfocused(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(window) = handle.get_webview_window("settings") {
-            #[cfg(target_os = "macos")]
-            {
-                use objc2_app_kit::NSWindow;
-                if let Ok(ns) = window.ns_window() {
-                    // SAFETY: ns_window 返回 tauri 持有的合法 NSWindow 指针，
-                    // 且本闭包经 run_on_main_thread 在主线程执行。
-                    let ns = unsafe { &*(ns.cast::<NSWindow>()) };
-                    ns.orderFront(None);
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = window.show();
-            }
+            let _ = window.show();
         }
     });
 }
@@ -1776,53 +1620,8 @@ fn open_storage_dir() -> Result<(), String> {
     open_path(&zapmomo::config::settings::get_models_dir())
 }
 
-/// 文字输入条窗口尺寸（逻辑像素，与 `setup` 中的 `inner_size` 保持一致）。
-/// 高度预留：底部 26px 透明外边距给 CSS 阴影留扩散空间（透明窗口会裁剪窗口外阴影），
-/// 其余留给多行生长与行内错误提示（发送失败时展示，正常时不占视觉空间——透明窗口）。
-const CHATBOX_W: f64 = 520.0;
-const CHATBOX_H: f64 = 96.0;
-/// 输入条默认位置距屏幕工作区底边的留白（逻辑像素）：galgame 对话框位，明显高于贴边。
-const CHATBOX_BOTTOM_MARGIN: f64 = 120.0;
-/// 计算输入条窗口首次出现的位置（逻辑像素）：主屏工作区底部居中
-/// （galgame 对话框位；排除 Dock / 任务栏）。拖动后由配置记忆接管。
-fn default_chatbox_position(app: &AppHandle) -> Option<(f64, f64)> {
-    let monitor = app.primary_monitor().ok().flatten()?;
-    let work = monitor.work_area();
-    let scale = monitor.scale_factor();
-    let left = work.position.x as f64 / scale;
-    let top = work.position.y as f64 / scale;
-    let w = work.size.width as f64 / scale;
-    let h = work.size.height as f64 / scale;
-    Some((
-        left + (w - CHATBOX_W) / 2.0,
-        top + h - CHATBOX_H - CHATBOX_BOTTOM_MARGIN,
-    ))
-}
-
-/// 逻辑像素坐标是否落在任一显示器的可见工作区内。
-///
-/// 用于过滤「拔掉外接屏后残留的屏幕外记忆位置」：多屏布局变化后恢复窗口
-/// 会导致窗口出现在不可见区域，此时应回退默认定位。查询失败时不拦截（保持恢复行为）。
-fn position_on_any_monitor(app: &AppHandle, x: f64, y: f64) -> bool {
-    match app.available_monitors() {
-        Ok(monitors) => monitors.iter().any(|m| {
-            let scale = m.scale_factor();
-            let work = m.work_area();
-            let left = work.position.x as f64 / scale;
-            let top = work.position.y as f64 / scale;
-            let right = left + work.size.width as f64 / scale;
-            let bottom = top + work.size.height as f64 / scale;
-            x >= left && x < right && y >= top && y < bottom
-        }),
-        Err(_) => true,
-    }
-}
-
 /// 托盘 id（档位变化后 `tray_by_id` 定位托盘并重建菜单）。
 const TRAY_ID: &str = "zapmomo-tray";
-
-/// macOS 面板层级：Floating（3）之上 1 级，恒高于普通窗口（输入条/气泡不遮挡）。
-const MACOS_OVERLAY_PANEL_LEVEL: i64 = 5;
 
 /// 构建托盘「开机自启动」动作项（按当前状态显示相反动作）。
 fn build_autostart_item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
@@ -1830,15 +1629,13 @@ fn build_autostart_item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> 
     MenuItem::with_id(app, id, label, true, None::<&str>)
 }
 
-/// 托盘菜单：文字输入条（可勾选）、开机自启动（可勾选）、打开设置、重启、退出。
+/// 托盘菜单：开机自启动、打开设置、重启、退出。
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let chatbox = build_chatbox_item(app)?;
     let autostart = build_autostart_item(app)?;
     let open_settings = MenuItem::with_id(app, "open_settings", "打开设置", true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "restart", "重启", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let items: Vec<&dyn IsMenuItem<tauri::Wry>> =
-        vec![&chatbox, &autostart, &open_settings, &restart, &quit];
+    let items: Vec<&dyn IsMenuItem<tauri::Wry>> = vec![&autostart, &open_settings, &restart, &quit];
     Menu::with_items(app, &items)
 }
 
@@ -1855,13 +1652,6 @@ fn rebuild_tray_menu(app: &AppHandle) {
 fn handle_menu(app: &AppHandle, id: &str) {
     match id {
         "show_settings" | "open_settings" => show_settings_window(app),
-        // 文字输入条：勾选态即目标态（点击时 muda 已自动翻转 checked，这里取反读到的
-        // 配置值等价于「切到另一态」；set_chatbox_visible 内 rebuild 刷新勾选）
-        "toggle_chatbox" => {
-            let visible = !current_chatbox_visible();
-            // 菜单勾选是用户显式打开输入条：显示后直接聚焦可打字
-            set_chatbox_visible(app, visible, true);
-        }
         // 退出/重启前回收 audio.cpp sidecar 进程（幂等）。
         "restart" => {
             zapmomo::audiocpp::server::shutdown_blocking();
@@ -1880,32 +1670,6 @@ fn handle_menu(app: &AppHandle, id: &str) {
         }
         _ => {}
     }
-}
-
-/// 读取文字输入条显隐开关（缺省显示）。
-fn resolve_chatbox_visible(chatbox: Option<&ChatboxSettings>) -> bool {
-    chatbox.and_then(|c| c.visible).unwrap_or(true)
-}
-
-/// 当前输入条显隐（托盘/菜单勾选态）。
-fn current_chatbox_visible() -> bool {
-    match settings::load_settings() {
-        Ok(Some(s)) => resolve_chatbox_visible(s.chatbox.as_ref()),
-        _ => true,
-    }
-}
-
-/// 构建托盘「文字输入条」勾选项。
-fn build_chatbox_item(app: &AppHandle) -> tauri::Result<CheckMenuItem<tauri::Wry>> {
-    let visible = current_chatbox_visible();
-    CheckMenuItem::with_id(
-        app,
-        "toggle_chatbox",
-        "文字输入条",
-        true,
-        visible,
-        None::<&str>,
-    )
 }
 
 /// Tauri 应用入口。
@@ -1973,10 +1737,6 @@ pub fn run() {
             migrate_storage,
             cancel_storage_migration,
             open_storage_dir,
-            save_chatbox_position,
-            hide_chatbox,
-            get_hide_dock_icon,
-            set_hide_dock_icon,
             get_autostart,
             set_autostart,
             open_settings,
@@ -1987,21 +1747,6 @@ pub fn run() {
             restart_app
         ])
         .setup(|app| {
-            // macOS：默认以普通应用出现（Dock + Cmd+Tab 可见，有全局菜单栏）；
-            // 用户可在设置中开启「隐藏应用图标」，此时切换为 Accessory（从 Dock 与 Cmd+Tab 消失）。
-            let loaded = settings::load_settings().ok().flatten();
-            #[cfg(target_os = "macos")]
-            let hide_dock_icon = loaded.as_ref().map(|s| s.hide_dock_icon).unwrap_or(false);
-
-            #[cfg(target_os = "macos")]
-            {
-                app.handle().set_activation_policy(if hide_dock_icon {
-                    tauri::ActivationPolicy::Accessory
-                } else {
-                    tauri::ActivationPolicy::Regular
-                })?;
-            }
-
             // audio.cpp sidecar 环境：注入引擎搜索目录（externalBin 落位点 = 主程序
             // 同目录 + resource 目录），并启用 45s 空闲保活（GUI 测试语音/会话在窗口
             // 内复用热 server，热请求 0.1s 级）。不在此预热：backend 缺省 sherpa 的
@@ -2082,93 +1827,24 @@ pub fn run() {
             //（不透明窗口性能更好）。同时关 tao shadow：undecorated+shadow 会被
             // tao 在 WM_NCCALCSIZE 里左右底三边缩进客户区、由 DWM 画黑色窗框，
             // 而顶部 inset 在 Win10 强制为 0（否则画出原生标题栏），形成三边黑框。
-            // 原生阴影改由建窗后 DwmExtendFrameIntoClientArea 注入（不触发 inset，
-            // Win10/Win11 通吃，见 apply_settings_window_shadow）；四边细边框仍由
-            // 前端 AppShell 用 CSS 自绘。三键悬浮右上角。
+            // 四边细边框由前端 AppShell 用 CSS 自绘。三键悬浮右上角。
             #[cfg(target_os = "windows")]
             {
                 settings = settings.decorations(false).shadow(false);
             }
             settings.build()?;
-            // Windows：注入 DWM 扩展边框换原生窗口阴影（其余平台无需处理：
-            // macOS 建窗参数已 shadow(true)，Linux 由窗口管理器绘制）。
-            #[cfg(windows)]
-            apply_settings_window_shadow(app.handle());
 
-            // 文字输入条窗口：显隐走持久化开关（缺省显示——首次启动随角色一同
-            // 出现），托盘/右键菜单「文字输入条」可勾选开关；关闭走全局
-            // CloseRequested → hide。macOS 建窗后转为非激活面板
-            // （见下方 to_panel::<ChatboxPanel>）：聚焦输入不激活应用，IME 行为
-            // 由 can_become_key_window 保证；其它平台保持普通可激活窗口。
-            let chatbox_cfg = loaded.as_ref().and_then(|s| s.chatbox.clone());
-            let mut chatbox =
-                WebviewWindowBuilder::new(app, "chatbox", WebviewUrl::App("chatbox.html".into()))
-                    .title("ZapMomo 输入")
-                    .inner_size(CHATBOX_W, CHATBOX_H)
-                    .resizable(false)
-                    .decorations(false)
-                    .transparent(true)
-                    .always_on_top(true)
-                    .skip_taskbar(true)
-                    // 透明窗口的原生阴影按整个窗口矩形绘制，与居中的圆角胶囊错位
-                    // （视觉上像错位的边框）——与角色窗口一致关闭，胶囊自带 CSS shadow。
-                    .shadow(false)
-                    .visible(false);
-            // macOS：首次点击直达 webview（无需先点一下聚焦），与角色窗口一致——
-            // 否则按住把手的第一下只用于激活窗口，第二下才能拖动。
-            #[cfg(target_os = "macos")]
-            {
-                chatbox = chatbox.accept_first_mouse(true);
-            }
-            // 定位：配置记忆（落在所有显示器之外时视为多屏布局已变化，回退默认）> 屏幕底部居中
-            let saved_pos = chatbox_cfg
-                .as_ref()
-                .and_then(|c| c.window_position.clone())
-                .map(|p| (p.x as f64, p.y as f64))
-                .filter(|&(x, y)| position_on_any_monitor(app.handle(), x, y));
-            if let Some((x, y)) = saved_pos.or_else(|| default_chatbox_position(app.handle())) {
-                chatbox = chatbox.position(x, y);
-            }
-            chatbox.build()?;
-            // macOS：转成非激活面板——聚焦输入框不激活应用（不会把开着的设置窗带到最前），
-            // 键盘/中文 IME 输入由 can_become_key_window 保证。
-            #[cfg(target_os = "macos")]
-            {
-                use tauri_nspanel::{CollectionBehavior, StyleMask, WebviewWindowExt};
-
-                if let Some(window) = app.get_webview_window("chatbox")
-                    && let Ok(panel) = window.to_panel::<ChatboxPanel>()
-                {
-                    panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
-                    panel.set_collection_behavior(
-                        CollectionBehavior::new()
-                            .stationary()
-                            .move_to_active_space()
-                            .full_screen_auxiliary()
-                            .into(),
-                    );
-                    // 层级常置 Floating 之上 1 级（3 = NSModalPanelWindowLevel 之上，
-                    // 恒高于普通窗口，输入条不被遮挡）。
-                    panel.set_level(MACOS_OVERLAY_PANEL_LEVEL);
-                }
-            }
-            // 恢复持久化的可见性（缺省显示）。
-            // 走与显隐快捷键相同的单一写点并聚焦：macOS 经 NSPanel show_and_make_key
-            // 使输入条持有 key window，配合前端挂载时的 textarea.focus()，启动即可直接
-            // 打字；自启动（--autostart）不聚焦——桌宠静默出现，不抢其它应用的键盘输入
-            // （与设置窗自启动不弹出同一原则）。
+            // 自启动拉起检测（开启自启动时由插件附加 `--autostart` 参数）：
+            // 静默启动，设置窗不自动弹出、不抢焦点。
             let launched_by_autostart = is_launched_by_autostart(std::env::args());
-            if resolve_chatbox_visible(chatbox_cfg.as_ref()) {
-                set_chatbox_visible(app.handle(), true, !launched_by_autostart);
-            }
 
-            // 自动打开设置窗口：仅用于「无全局菜单栏」的场景（macOS Accessory 模式或非 macOS），
-            // 否则 Cmd+, 快捷键不可靠，自动打开可避免「找不到设置」；普通模式有菜单栏，无需自动弹出。
-            // 弹出走 show_settings_window_unfocused：自动打开只为可发现性，键盘焦点留给输入条。
-            // 自启动拉起（--autostart）时跳过：桌宠静默出现，设置窗不自动弹出；
-            // 手动启动行为不变。
+            // 自动打开设置窗口：仅用于「无全局菜单栏」的平台（非 macOS）——
+            // 这些平台不设 app 级菜单，自动打开可避免「找不到设置」；macOS 恒有
+            // 全局菜单栏（偏好设置 Cmd+, + 托盘菜单），无需自动弹出。
+            // 弹出走 show_settings_window_unfocused：只为可发现性，不抢键盘焦点。
+            // 自启动拉起（--autostart）时跳过：静默启动，手动启动行为不变。
             #[cfg(target_os = "macos")]
-            let auto_open_settings = hide_dock_icon;
+            let auto_open_settings = false;
             #[cfg(not(target_os = "macos"))]
             let auto_open_settings = true;
             if auto_open_settings && !launched_by_autostart {
@@ -2226,7 +1902,7 @@ pub fn run() {
                 app.set_menu(app_menu)?;
             }
 
-            // 托盘菜单：文字输入条、开机自启动、打开设置、重启、退出。
+            // 托盘菜单：开机自启动、打开设置、重启、退出。
             let tray_menu = build_tray_menu(app.handle())?;
 
             // 托盘图标：使用专用托盘图标（tray-icon.png）——真实应用图标的无边距版本，
@@ -2237,7 +1913,7 @@ pub fn run() {
             // 菜单事件统一由 app 级 on_menu_event 处理（见下方 Builder::on_menu_event）。
             // 不可在 TrayIcon 上再注册 on_menu_event：tauri 会把 TrayIcon 的 handler
             // 也注册到全局菜单监听器，与 app 级并列，导致每个菜单事件被 handle_menu
-            // 处理两次（CheckMenuItem 取反因此净效果为零，表现为点击无效）。
+            // 处理两次（表现为菜单项点击执行两遍）。
             TrayIconBuilder::with_id(TRAY_ID)
                 .icon(tray_icon)
                 .menu(&tray_menu)
@@ -2251,7 +1927,7 @@ pub fn run() {
         .on_menu_event(|app, event| handle_menu(app, event.id().as_ref()))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // 关闭设置/输入条窗口时仅隐藏，不退出进程；退出走托盘/菜单 Cmd+Q
+                // 关闭设置窗口时仅隐藏，不退出进程；退出走托盘/菜单 Cmd+Q
                 //（菜单退出项须用自定义 MenuItem——原生 quit 会走 terminate: →
                 //  windowShouldClose:，被本拦截器取消，见上方菜单构建处注释）。
                 api.prevent_close();
@@ -2267,33 +1943,6 @@ pub fn run() {
                 zapmomo::audiocpp::server::shutdown_blocking();
             }
         });
-}
-
-#[cfg(test)]
-mod chatbox_visible_tests {
-    use super::resolve_chatbox_visible;
-    use zapmomo::config::settings::ChatboxSettings;
-
-    #[test]
-    fn test_resolve_chatbox_visible_missing_defaults_true() {
-        // 首次启动（无 [chatbox] 段）：输入条随角色默认显示
-        assert!(resolve_chatbox_visible(None));
-        assert!(resolve_chatbox_visible(Some(&ChatboxSettings::default())));
-    }
-
-    #[test]
-    fn test_resolve_chatbox_visible_reads_flag() {
-        let on = ChatboxSettings {
-            visible: Some(true),
-            ..Default::default()
-        };
-        let off = ChatboxSettings {
-            visible: Some(false),
-            ..Default::default()
-        };
-        assert!(resolve_chatbox_visible(Some(&on)));
-        assert!(!resolve_chatbox_visible(Some(&off)));
-    }
 }
 
 #[cfg(test)]

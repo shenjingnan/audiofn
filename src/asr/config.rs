@@ -834,8 +834,8 @@ pub fn resolve(
 
 /// `set_asr_params` 载荷：可调整的 ASR 引擎/运行参数（snake_case 直传，缺省项不修改）。
 ///
-/// 与 Tauri crate 的 `KwsParamsPatch` 对称，但放在 lib crate 内以便 `cargo test` 单测。
-/// 引擎参数在 `start_asr_listen` 时固化：保存后需重启识别才生效（由前端处理）。
+/// 放在 lib crate 内以便 `cargo test` 单测。
+/// 引擎参数在启动识别/听写时固化：保存后需重启识别才生效（由前端处理）。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AsrParamsPatch {
     pub num_threads: Option<i32>,

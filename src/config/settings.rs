@@ -207,9 +207,6 @@ pub struct AppConfig {
     /// 日志级别
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    /// 是否在 macOS Dock / Cmd+Tab 中隐藏应用图标（Accessory 模式），缺省 false 展示
-    #[serde(default)]
-    pub hide_dock_icon: bool,
     /// 自定义配置项（示例）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<std::collections::HashMap<String, String>>,
@@ -235,9 +232,6 @@ pub struct AppConfig {
     /// 全局快捷键配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shortcuts: Option<ShortcutsSettings>,
-    /// 文字输入条窗口配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chatbox: Option<ChatboxSettings>,
 }
 
 /// 用户「添加本地模型」注册的模型（external）。
@@ -423,54 +417,8 @@ pub struct TtsSettings {
     pub engine_path: Option<String>,
 }
 
-/// 角色窗口位置（逻辑像素）。
-///
-/// `None` 表示未记录 → 首次启动时定位到屏幕右下角；记录后用于恢复手动拖动的位置。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct CompanionWindowPosition {
-    /// 窗口左上角 x 坐标（逻辑像素）。
-    pub x: i32,
-    /// 窗口左上角 y 坐标（逻辑像素）。
-    pub y: i32,
-}
-
-/// 角色窗口显示层级。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum CompanionWindowLayer {
-    /// 置顶：悬浮在所有应用窗口之上（默认，现状）。
-    #[default]
-    Front,
-    /// 置底：作为背景装饰，沉到所有应用窗口之下并完全点穿。
-    Back,
-}
-
-/// 角色窗口拖拽模式。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum CompanionDragMode {
-    /// 直接拖动：按住左键即可移动窗口（默认，现状）。
-    #[default]
-    Direct,
-    /// 修饰键拖动：需按住 cmd（macOS）/ Ctrl（Windows、Linux）才能拖动。
-    Modifier,
-}
-
 fn default_log_level() -> String {
     "info".to_string()
-}
-
-/// 文字输入条窗口配置。
-///
-/// 字段可缺省：未配置时回退内置默认（显示 + 桌宠正上方/屏幕底部居中）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct ChatboxSettings {
-    /// 输入条是否显示（缺省视为 true：未配置时默认显示）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visible: Option<bool>,
-    /// 输入条窗口位置（逻辑像素；缺省表示未记录 → 定位到桌宠正上方）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_position: Option<CompanionWindowPosition>,
 }
 
 impl Default for AppConfig {
@@ -478,7 +426,6 @@ impl Default for AppConfig {
         Self {
             debug: false,
             log_level: default_log_level(),
-            hide_dock_icon: false,
             custom: None,
             microphone: None,
             data_dir: None,
@@ -487,7 +434,6 @@ impl Default for AppConfig {
             tts: None,
             model_library: None,
             shortcuts: None,
-            chatbox: None,
         }
     }
 }
@@ -665,7 +611,6 @@ mod tests {
         let config = AppConfig {
             debug: true,
             log_level: "warn".to_string(),
-            hide_dock_icon: true,
             custom: Some(std::collections::HashMap::new()),
             microphone: Some("内置麦克风".to_string()),
             data_dir: None,
@@ -674,23 +619,28 @@ mod tests {
             tts: None,
             model_library: None,
             shortcuts: None,
-            chatbox: None,
         };
         let toml_str = toml::to_string(&config).unwrap();
         let deserialized: AppConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(config, deserialized);
-        // 缺省字段应被反序列化为 false；microphone 应被序列化
-        assert!(toml_str.contains("hide_dock_icon"));
+        // microphone 应被序列化
         assert!(toml_str.contains("microphone"));
     }
 
     #[test]
-    fn test_load_settings_without_hide_dock_icon_defaults_false() {
-        // 旧配置文件没有 hide_dock_icon 字段时，应回退为 false（默认展示图标）。
+    fn test_load_settings_ignores_removed_fields() {
+        // 旧版本 settings.toml 里已删除的字段（hide_dock_icon / [chatbox]）应被
+        // serde 忽略：不报错、也不写回，保证老配置平滑升级。
         run_with_temp_home(|home| {
-            write_toml_settings(home, "debug = true\n");
+            write_toml_settings(
+                home,
+                "debug = true\nhide_dock_icon = true\n\n[chatbox]\nvisible = false\n",
+            );
             let result = load_settings().unwrap().unwrap();
-            assert!(!result.hide_dock_icon);
+            assert!(result.debug);
+            let toml_str = toml::to_string(&result).unwrap();
+            assert!(!toml_str.contains("hide_dock_icon"));
+            assert!(!toml_str.contains("chatbox"));
         });
     }
 
@@ -710,15 +660,6 @@ mod tests {
             write_toml_settings(home, "storage_prompt_acknowledged = true\n");
             let result = load_settings().unwrap().unwrap();
             assert!(result.storage_prompt_acknowledged);
-        });
-    }
-
-    #[test]
-    fn test_load_settings_with_hide_dock_icon() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "hide_dock_icon = true\n");
-            let result = load_settings().unwrap().unwrap();
-            assert!(result.hide_dock_icon);
         });
     }
 
@@ -832,7 +773,6 @@ mod tests {
             let config = AppConfig {
                 debug: true,
                 log_level: "debug".to_string(),
-                hide_dock_icon: false,
                 custom: None,
                 microphone: None,
                 data_dir: None,
@@ -841,7 +781,6 @@ mod tests {
                 tts: None,
                 model_library: None,
                 shortcuts: None,
-                chatbox: None,
             };
             save_settings(&config).unwrap();
             let loaded = load_settings().unwrap().unwrap();

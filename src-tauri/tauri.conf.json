@@ -11,7 +11,6 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "macOSPrivateApi": true,
     "security": {
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src 'self' blob:",
       "assetProtocol": {

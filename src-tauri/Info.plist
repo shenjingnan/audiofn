@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>需要访问麦克风以进行唤醒词检测</string>
+	<string>需要访问麦克风以进行语音识别（听写）与录音</string>
 </dict>
 </plist>

@@ -18,11 +18,11 @@ name = "ZapMomo"
 path = "src/main.rs"
 
 [dependencies]
-# Tauri 桌面框架（protocol-asset 用于通过 asset:// 协议把本地模型文件喂给 WebView；
-# tray-icon 用于常驻托盘图标；macos-private-api 用于 macOS 透明窗口）
-tauri = { version = "2", features = ["protocol-asset", "tray-icon", "macos-private-api", "image-png"] }
+# Tauri 桌面框架（protocol-asset 用于通过 asset:// 协议把本地音频/模型文件喂给
+# WebView；tray-icon 用于常驻托盘图标；image-png 用于加载托盘图标）
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
 
-# 文件/目录选择对话框（用户加载 Live2D 模型目录）
+# 文件/目录选择对话框（用户注册本地模型、选择参考音频）
 tauri-plugin-dialog = "2"
 
 # 系统级全局快捷键（Rust 侧注册与分发；设置页经自定义 command 间接操作）
@@ -42,28 +42,8 @@ serde_json = "1"
 # 日志（复用根 crate 的 init_logging 初始化双层 tracing）
 tracing = "0.1"
 
-# 复用根 crate 的 KWS / 音频 / 配置逻辑
+# 复用根 crate 的音频 / 配置 / 模型库逻辑
 zapmomo = { path = ".." }
-
-[target."cfg(target_os = \"macos\")".dependencies]
-# 把角色窗口转成 macOS 非激活面板（non-activating panel）：拖动/点击不抢前台焦点
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
-
-# 气泡子窗口联动需要 NSWindow addChildWindow:ordered:（objc2 以 NSGraphics feature 门控）：
-# AppKit 在窗口服务器同一事务内随父移动，替代 Moved 事件联动。已是 tauri-nspanel 的
-# 传递依赖（0.3.x），此处显式声明固定所需 feature，与下方 windows crate 同一模式。
-objc2-app-kit = { version = "0.3", features = ["NSGraphics"] }
-
-[target.'cfg(windows)'.dependencies]
-# 置底：SetWindowPos(HWND_BOTTOM) 把角色窗口沉到 Z 序底部；
-# 设置窗阴影：DwmExtendFrameIntoClientArea + MARGINS（Win32_Graphics_Dwm / Win32_UI_Controls）
-#（windows crate 已是 tauri 的传递依赖，此处显式声明为直接依赖并启用所需 feature）
-windows = { version = "0.61", features = [
-  "Win32_Foundation",
-  "Win32_Graphics_Dwm",
-  "Win32_UI_Controls",
-  "Win32_UI_WindowsAndMessaging",
-] }
 
 [dev-dependencies]
 tempfile = "3"
