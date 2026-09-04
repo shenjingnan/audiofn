@@ -87,7 +87,7 @@ pub const QWEN3_TTS_06B: AudiocppFamilyDesc = AudiocppFamilyDesc {
     voice_semantics: VoiceSemantics::ReferenceCloneRequired,
     allows_named_voice: false,
     supports_streaming: false,
-    registry_hint: "zapmomo tts install-model --registry-id tts-qwen3-06b-base-q8-audiocpp",
+    registry_hint: "audiofn tts install-model --registry-id tts-qwen3-06b-base-q8-audiocpp",
 };
 
 /// Qwen3-TTS 1.7B Base q8_0（质量优先变体；GGUF 为上游 `_v2` 重打包版，文件名带 `_v2`）。
@@ -102,7 +102,7 @@ pub const QWEN3_TTS_17B: AudiocppFamilyDesc = AudiocppFamilyDesc {
     voice_semantics: VoiceSemantics::ReferenceCloneRequired,
     allows_named_voice: false,
     supports_streaming: false,
-    registry_hint: "zapmomo tts install-model --registry-id tts-qwen3-17b-base-q8-audiocpp",
+    registry_hint: "audiofn tts install-model --registry-id tts-qwen3-17b-base-q8-audiocpp",
 };
 
 /// 已收录模型族全表（目录 GGUF 探测与覆盖断言共用）。

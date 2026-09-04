@@ -29,18 +29,19 @@ pub const DEFAULT_PUNCT_MODEL: &str = "model.onnx";
 /// 标点模型安装完成所需的文件（相对目标目录）。
 pub const PUNCT_REQUIRED_FILES: [&str; 1] = [DEFAULT_PUNCT_MODEL];
 
-/// ASR 模型类型（sherpa-onnx `OfflineModelConfig` / `OnlineModelConfig` 的分支）。
+/// ASR 模型类型（sherpa-onnx `OfflineModelConfig` / `OnlineModelConfig` 的分支名）。
 ///
 /// 全链路显式传递：`[asr].model_type`（持久化）→ `ResolvedAsrConfig.model_type` →
 /// 引擎构造分支（流式 zipformer/paraformer 仅剩配置兼容，识别能力已收敛到
-/// audiocpp qwen3_asr，见 `offline`/`dictate`）。默认 Zipformer
-/// （streaming zipformer transducer），老配置无该字段时按目录内容探测兜底。
-/// 注：模型库已精简为 zipformer + qwen3，但引擎仍识别全部族（兼容已装/手工导入目录）。
+/// audiocpp qwen3_asr，见 `offline`/`dictate`）。默认 Qwen3Asr（唯一在册 audiocpp 族），
+/// 老配置无该字段时按目录内容探测兜底。
+/// 注：模型库已精简为 zipformer + qwen3，但配置仍识别全部族（兼容已装/手工导入目录；
+/// sherpa 引擎已移除，非 qwen3 族仅在显式 `backend = "sherpa"` 的老配置下可达，
+/// 由 [`preflight`] 报「已移除」引导迁移）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AsrModelKind {
     /// 流式 zipformer transducer（encoder/decoder/joiner/tokens 四件套）
-    #[default]
     Zipformer,
     /// 流式 Paraformer：`encoder.onnx|int8` + `decoder.onnx|int8` + `tokens.txt`
     /// （仅 greedy_search；热词为 transducer 专属，本族忽略）
@@ -52,6 +53,7 @@ pub enum AsrModelKind {
     Whisper,
     /// 离线 Qwen3-ASR：`conv_frontend.onnx` + 裸名 `encoder/decoder.int8.onnx` +
     /// `tokenizer/` 目录（LLM 自回归解码，29 语言自动识别，离线族中唯一支持热词）
+    #[default]
     Qwen3Asr,
 }
 
@@ -93,16 +95,16 @@ impl AsrModelKind {
 /// ASR 引擎后端（镜像 `crate::tts::config::TtsBackendKind` 的正交语义：
 /// kind 表达模型族、backend 表达运行时）。
 ///
-/// - Sherpa（缺省）：sherpa-onnx 进程内引擎（现状全部 5 个族）；
-/// - Audiocpp：audio.cpp sidecar 进程（GGUF + Metal），当前仅 Qwen3Asr 可查
-///   （见 `crate::audiocpp::asr_families`）。
+/// 一期裁剪后引擎只保留 audio.cpp sidecar 一条路径（当前仅 Qwen3Asr 可查，见
+/// `crate::audiocpp::asr_families`）；`Sherpa` 变体仅为老配置
+/// （`[asr].backend = "sherpa"`）保留解析入口，[`preflight`] 明确报错引导迁移。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AsrBackendKind {
-    /// sherpa-onnx 进程内引擎（缺省，老配置无 backend 字段时的行为）
-    #[default]
+    /// sherpa-onnx 进程内引擎（一期裁剪后已移除，仅老配置可达）
     Sherpa,
-    /// audio.cpp sidecar 进程（audiocpp_server，OpenAI 风格 HTTP）
+    /// audio.cpp sidecar 进程（audiocpp_server，OpenAI 风格 HTTP；缺省）
+    #[default]
     Audiocpp,
 }
 
@@ -202,9 +204,9 @@ pub fn required_files(kind: AsrModelKind) -> &'static [&'static str] {
 pub struct ResolvedAsrConfig {
     /// 是否启用 ASR（语音会话「能识别」的前提），缺省 false
     pub enabled: bool,
-    /// 模型类型（决定引擎构造分支；默认 Zipformer，老配置按目录探测兜底）
+    /// 模型类型（决定 audiocpp 族表条目；默认 Qwen3Asr，老配置按目录探测兜底）
     pub model_type: AsrModelKind,
-    /// 引擎后端（sherpa 进程内 / audiocpp sidecar；默认 Sherpa）
+    /// 引擎后端（缺省 Audiocpp；`Sherpa` 为老配置入口，预检明确报错）
     pub backend: AsrBackendKind,
     /// audiocpp 引擎二进制覆盖路径（开发/调试用；None = locator 自动定位）
     pub engine_path: Option<PathBuf>,
@@ -238,11 +240,14 @@ pub struct ResolvedAsrConfig {
     pub blank_penalty: f32,
     /// 热词（空格分隔，中文直接写），提升专有名词识别。
     /// zipformer 走 context graph；Qwen3-ASR 在 build 层转逗号格式嵌入提示词；
-    /// paraformer 不支持（引擎层忽略）
+    /// paraformer 不支持（引擎层忽略）。
+    /// 兜底字段：audiocpp 后端不消费（上游无此选项），仅老配置可达。
     pub hotwords: Option<String>,
-    /// 是否对最终结果自动加标点
+    /// 是否对最终结果自动加标点。
+    /// 兜底字段：audiocpp qwen3_asr 原生输出标点，本字段不参与引擎构造，仅老配置可达。
     pub enable_punctuation: bool,
-    /// 标点模型 onnx 路径
+    /// 标点模型 onnx 路径。
+    /// 兜底字段：audiocpp 后端不消费，保留只为 GUI 徽标与老 settings 不破坏。
     pub punctuation_model: PathBuf,
     pub debug: bool,
 }
@@ -253,8 +258,8 @@ impl Default for ResolvedAsrConfig {
         let join = |name: &str| model_dir.join(name);
         Self {
             enabled: false,
-            model_type: AsrModelKind::Zipformer,
-            backend: AsrBackendKind::Sherpa,
+            model_type: AsrModelKind::default(),
+            backend: AsrBackendKind::Audiocpp,
             engine_path: None,
             model: None,
             language: None,
@@ -282,27 +287,47 @@ impl Default for ResolvedAsrConfig {
     }
 }
 
+/// `asr install-model` 缺省安装的模型库条目（audiocpp Qwen3-ASR 0.6B，单 GGUF）。
+///
+/// CLI（`src/cli.rs`）与 Tauri（`download_asr_model`）共用；目录基名取同一条目的
+/// registry `model.name`（见 [`default_registry_model_dir_name`]，与
+/// `install_managed_model` 的落位规则同源）。
+pub const DEFAULT_ASR_REGISTRY_ID: &str = "asr-qwen3-0.6b-audiocpp";
+
+/// 缺省模型条目的安装目录基名（registry `model.name`）。
+///
+/// 与 `install_managed_model` 的落位（`models/<model.name>`）取同一事实源，
+/// 保证「先 install-model 再 transcribe」的缺省路径能对上同一目录。
+fn default_registry_model_dir_name() -> String {
+    crate::model_library::registry::model_by_id(DEFAULT_ASR_REGISTRY_ID)
+        .unwrap_or_else(|| panic!("模型库缺少 audiocpp Qwen3-ASR 条目: {DEFAULT_ASR_REGISTRY_ID}"))
+        .name
+        .clone()
+}
+
 /// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
-    crate::model_library::asset::asr_user_model_dir()
+    crate::config::settings::get_models_dir().join(default_registry_model_dir_name())
 }
 
 /// 源码仓库中的模型目录（开发者 `./models/<模型名>`，仅作开发回退）。
 fn repo_models_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("models")
-        .join(&crate::model_library::asset::asr_asset().name)
+        .join(default_registry_model_dir_name())
 }
 
 /// 默认模型目录选择：用户已安装 > 旧默认根存量（data_dir 切换后）> 源码仓库已下载（开发便利）> 用户默认。
 ///
-/// 纯决策函数（不访问真实文件系统），便于测试注入路径。
+/// 探测文件是 audiocpp 族的主 GGUF（单文件即完整）；纯决策函数（不访问真实文件
+/// 系统），便于测试注入路径。
 fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> PathBuf {
-    if user.join(DEFAULT_TOKENS).is_file() {
+    let probe = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
+    if user.join(probe).is_file() {
         user.to_path_buf()
-    } else if legacy.is_some_and(|l| l.join(DEFAULT_TOKENS).is_file()) {
+    } else if legacy.is_some_and(|l| l.join(probe).is_file()) {
         legacy.unwrap().to_path_buf()
-    } else if repo.join(DEFAULT_TOKENS).is_file() {
+    } else if repo.join(probe).is_file() {
         repo.to_path_buf()
     } else {
         user.to_path_buf()
@@ -313,7 +338,7 @@ fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> 
 pub fn default_model_dir() -> PathBuf {
     // legacy 与 user 层次对等：旧根下对应模型的子目录（user 是 `models/<模型名>`）
     let legacy = crate::config::settings::legacy_models_dir()
-        .map(|l| l.join(&crate::model_library::asset::asr_asset().name));
+        .map(|l| l.join(default_registry_model_dir_name()));
     choose_default_model_dir(
         &user_default_model_dir(),
         legacy.as_deref(),
@@ -551,50 +576,40 @@ pub fn asr_files_present(model_dir: &Path) -> bool {
     asr_files_present_for_kind(model_dir, detect_kind_from_dir(model_dir))
 }
 
-/// ASR 就绪预检（backend 感知的单一权威入口，镜像 `tts::config::preflight`）。
+/// ASR 就绪预检（单一权威入口，镜像 `tts::config::preflight`）。
 ///
-/// - sherpa：按 `asr_files_present_for_kind` 探测式校验；
-/// - audiocpp：按 `audiocpp::asr_families` 描述表的 `required_files`（单 GGUF）
-///   逐文件校验，hint 用描述表的 `registry_hint`；sherpa-only kind 配 audiocpp
-///   后端的非法组合报错（resolve 已 fail-fast，此处双保险）。
+/// 按 `audiocpp::asr_families` 描述表的 `required_files`（单 GGUF）逐文件校验，
+/// hint 用描述表的 `registry_hint`。老配置的 `backend = "sherpa"` 在此明确报错
+/// 引导迁移（引擎已无进程内路径）；sherpa-only kind 配 audiocpp 后端的非法组合
+/// 报错（resolve 已 fail-fast，此处双保险）。
 pub fn preflight(cfg: &ResolvedAsrConfig) -> Result<(), String> {
-    if models_present(cfg) {
-        return Ok(());
+    if cfg.backend == AsrBackendKind::Sherpa {
+        return Err(
+            "ASR 后端 sherpa 已移除：请改用 audiocpp 后端（安装 Qwen3-ASR 模型）。".to_string(),
+        );
     }
-    let hint = match cfg.backend {
-        AsrBackendKind::Sherpa => "请运行 `zapmomo asr install-model` 下载模型".to_string(),
-        AsrBackendKind::Audiocpp => {
-            match crate::audiocpp::asr_families::asr_family_desc(cfg.model_type) {
-                Some(desc) => format!("请运行 `{hint}` 下载模型", hint = desc.registry_hint),
-                None => {
-                    return Err(format!(
-                        "模型类型 {} 不支持 audiocpp 后端（请检查 [asr].model_type 与 backend 组合）",
-                        cfg.model_type.as_str()
-                    ));
-                }
-            }
+    let desc = crate::audiocpp::asr_families::asr_family_desc(cfg.model_type).ok_or_else(|| {
+        format!(
+            "模型类型 {} 不支持 audiocpp 后端（请检查 [asr].model_type 与 backend 组合）",
+            cfg.model_type.as_str()
+        )
+    })?;
+    for name in desc.required_files {
+        let p = cfg.model_dir.join(name);
+        if !p.is_file() {
+            return Err(format!(
+                "缺少模型文件 {name}: {}\n请运行 `{}` 下载模型。",
+                p.display(),
+                desc.registry_hint
+            ));
         }
-    };
-    Err(format!(
-        "缺少模型文件（目录: {}）。{hint}",
-        cfg.model_dir.display()
-    ))
+    }
+    Ok(())
 }
 
-/// 模型文件是否齐备（backend 感知；供 `get_asr_config` 的 models_present 等展示路径）。
+/// 模型是否就绪（[`preflight`] 的布尔版，GUI `models_present` 徽标用）。
 pub fn models_present(cfg: &ResolvedAsrConfig) -> bool {
-    match cfg.backend {
-        AsrBackendKind::Sherpa => asr_files_present_for_kind(&cfg.model_dir, cfg.model_type),
-        AsrBackendKind::Audiocpp => {
-            match crate::audiocpp::asr_families::asr_family_desc(cfg.model_type) {
-                Some(desc) => desc
-                    .required_files
-                    .iter()
-                    .all(|f| cfg.model_dir.join(f).is_file()),
-                None => false,
-            }
-        }
-    }
+    preflight(cfg).is_ok()
 }
 
 /// 解析模型目录：CLI > settings > 默认。
@@ -646,23 +661,32 @@ pub fn resolve(
         resolve_file(value, &detected, &cfg.model_dir)
     };
 
-    // 引擎后端来源：settings 显式配置 > 缺省 Sherpa（老配置无字段 → 零行为变化）
+    // 引擎后端来源：settings 显式配置 > 缺省 audiocpp（唯一在册引擎）
     cfg.backend = match s.and_then(|s| s.backend.as_deref()) {
         Some(v) => AsrBackendKind::parse_str(v)
-            .ok_or_else(|| format!("未知 ASR 后端: {v}（支持 sherpa / audiocpp）"))?,
+            .ok_or_else(|| format!("未知 ASR 后端: {v}（支持 audiocpp）"))?,
         None => AsrBackendKind::default(),
     };
 
-    // 模型类型来源：settings 显式配置 >（audiocpp 后端时）GGUF 文件名探测 >
-    // 目录内容探测（老用户无字段 → Zipformer，零行为变化）。GGUF 探针仅在
-    // backend=audiocpp 时介入，不污染 sherpa 的 ONNX 探测语义。
+    // 模型类型来源：settings 显式配置 > 目录探测（audiocpp 下 GGUF 命中 → qwen3，
+    // 否则 ONNX 形状探测兜底老目录）。探测出 audiocpp 不支持的族（含空目录落到
+    // Zipformer 兜底）时回落缺省 Qwen3Asr——sherpa 引擎已移除、旧目录不可运行，
+    // 缺省路径应交给 preflight 报「缺 GGUF + install-model 提示」（对齐 TTS 的
+    // 缺省 0.6B 迁移语义）。settings 显式配置的非法组合仍 fail-fast（见下）。
     let kind = s.and_then(|s| s.model_type).unwrap_or_else(|| {
-        if cfg.backend == AsrBackendKind::Audiocpp
+        let detected = if cfg.backend == AsrBackendKind::Audiocpp
             && crate::audiocpp::asr_families::detect_gguf_in_dir(&cfg.model_dir).is_some()
         {
             AsrModelKind::Qwen3Asr
         } else {
             detect_kind_from_dir(&cfg.model_dir)
+        };
+        if cfg.backend == AsrBackendKind::Audiocpp
+            && crate::audiocpp::asr_families::asr_family_desc(detected).is_none()
+        {
+            AsrModelKind::default()
+        } else {
+            detected
         }
     });
     cfg.model_type = kind;
@@ -713,9 +737,30 @@ pub fn resolve(
         AsrModelKind::Qwen3Asr => {
             if cfg.backend == AsrBackendKind::Audiocpp {
                 // audiocpp 后端：GGUF 定位由 asr_families 表完成（model_dir + gguf_file），
-                // 不消费 ONNX 文件字段（对齐 tts resolve 的 audiocpp 族取舍：
-                // encoder/decoder/tokens 保留默认值但不参与引擎构造）
+                // 不消费 ONNX 文件字段（对齐 tts resolve 的 audiocpp 族取舍：字段不参与
+                // 引擎构造）。仍锚定到解析后的 model_dir，保证配置自洽（CLI --model-dir
+                // 覆盖时不会残留指向缺省目录的路径）。
                 cfg.model = None;
+                cfg.encoder = resolve_file(
+                    s.and_then(|s| s.encoder.as_deref()),
+                    DEFAULT_ENCODER,
+                    &cfg.model_dir,
+                )?;
+                cfg.decoder = resolve_file(
+                    s.and_then(|s| s.decoder.as_deref()),
+                    DEFAULT_DECODER,
+                    &cfg.model_dir,
+                )?;
+                cfg.joiner = resolve_file(
+                    s.and_then(|s| s.joiner.as_deref()),
+                    DEFAULT_JOINER,
+                    &cfg.model_dir,
+                )?;
+                cfg.tokens = resolve_file(
+                    s.and_then(|s| s.tokens.as_deref()),
+                    DEFAULT_TOKENS,
+                    &cfg.model_dir,
+                )?;
             } else {
                 // 裸名 int8 探测与 paraformer 同款；conv_frontend 固定名不提供覆盖
                 // （包内无 int8 变体，同 SenseVoice 主模型取舍）。tokens 字段承载
@@ -927,10 +972,11 @@ mod tests {
                 .join(".zapmomo")
                 .join("models")
                 .join(new_dir.file_name().unwrap());
+            let gguf = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
 
             for d in [&new_dir, &legacy_dir] {
                 std::fs::create_dir_all(d).unwrap();
-                std::fs::write(d.join(DEFAULT_TOKENS), b"t").unwrap();
+                std::fs::write(d.join(gguf), b"t").unwrap();
             }
             assert_eq!(default_model_dir(), new_dir);
 
@@ -976,8 +1022,13 @@ mod tests {
             cfg.model_dir
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string()),
-            Some(crate::model_library::asset::asr_asset().name.clone())
+            Some(super::default_registry_model_dir_name()),
+            "缺省目录 = 缺省 registry 条目的安装目录"
         );
+        // 缺省即 audiocpp Qwen3-ASR（唯一在册引擎/模型族）
+        assert_eq!(cfg.model_type, AsrModelKind::Qwen3Asr);
+        assert_eq!(cfg.backend, AsrBackendKind::Audiocpp);
+        // ONNX 文件字段为老配置兜底值，audiocpp 引擎不消费
         assert_eq!(cfg.encoder.file_name().unwrap(), DEFAULT_ENCODER);
         assert_eq!(cfg.decoder.file_name().unwrap(), DEFAULT_DECODER);
         assert_eq!(cfg.joiner.file_name().unwrap(), DEFAULT_JOINER);
@@ -995,13 +1046,14 @@ mod tests {
             assert_eq!(
                 dir,
                 home.join(".zapmomo/models")
-                    .join(crate::model_library::asset::asr_asset().name.as_str())
+                    .join(super::default_registry_model_dir_name())
             );
         });
     }
 
     #[test]
     fn test_choose_default_model_dir_priority() {
+        let probe = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
         let base = tempfile::tempdir().unwrap();
         let user = base.path().join("user-model");
         let repo = base.path().join("repo-model");
@@ -1009,17 +1061,17 @@ mod tests {
         assert_eq!(choose_default_model_dir(&user, None, &repo), user);
 
         std::fs::create_dir_all(&repo).unwrap();
-        std::fs::write(repo.join(DEFAULT_TOKENS), b"t").unwrap();
+        std::fs::write(repo.join(probe), b"t").unwrap();
         assert_eq!(choose_default_model_dir(&user, None, &repo), repo);
 
         std::fs::create_dir_all(&user).unwrap();
-        std::fs::write(user.join(DEFAULT_TOKENS), b"t").unwrap();
+        std::fs::write(user.join(probe), b"t").unwrap();
         assert_eq!(choose_default_model_dir(&user, None, &repo), user);
 
-        std::fs::remove_file(user.join(DEFAULT_TOKENS)).unwrap();
+        std::fs::remove_file(user.join(probe)).unwrap();
         let legacy = base.path().join("legacy-model");
         std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(legacy.join(DEFAULT_TOKENS), b"t").unwrap();
+        std::fs::write(legacy.join(probe), b"t").unwrap();
         assert_eq!(
             choose_default_model_dir(&user, Some(&legacy), &repo),
             legacy
@@ -1044,7 +1096,15 @@ mod tests {
         // 导致 `resolve` 与 `ResolvedAsrConfig::default` 两次读取到不同 HOME。
         run_with_temp_home(|_| {
             let cfg = resolve(None, None).unwrap();
-            assert_eq!(cfg, ResolvedAsrConfig::default());
+            // 缺省 provider 按 audiocpp 平台取默认（mac Metal / Windows CUDA / 其余 CPU），
+            // 与 `Default` 的中性 "cpu" 不同
+            assert_eq!(
+                cfg,
+                ResolvedAsrConfig {
+                    provider: crate::audiocpp::provider::current_default_provider().to_string(),
+                    ..ResolvedAsrConfig::default()
+                }
+            );
         });
     }
 
@@ -1381,6 +1441,9 @@ mod tests {
     }
 
     /// settings 只给 model_dir（切换模型的写法）+ 非默认命名目录 → resolve 命中探测名。
+    ///
+    /// ONNX 族探测仅在显式 `backend = "sherpa"` 的老配置下有意义（缺省 audiocpp
+    /// 会把探测不中的目录回落到缺省 Qwen3Asr，见 `test_resolve_legacy_dir_falls_back`）。
     #[test]
     fn test_resolve_detects_non_default_layout() {
         let dir = tempfile::tempdir().unwrap();
@@ -1394,6 +1457,7 @@ mod tests {
         }
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             ..AsrSettings::default()
         };
         let cfg = resolve(Some(&settings), None).unwrap();
@@ -1427,6 +1491,7 @@ mod tests {
         }
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             encoder: Some("custom-encoder.onnx".to_string()),
             ..AsrSettings::default()
         };
@@ -1482,6 +1547,8 @@ mod tests {
             assert_eq!(AsrModelKind::parse_str(s), Some(kind));
         }
         assert_eq!(AsrModelKind::parse_str("unknown"), None);
+        // 缺省 Qwen3Asr（唯一在册 audiocpp 族）
+        assert_eq!(AsrModelKind::default(), AsrModelKind::Qwen3Asr);
         assert!(AsrModelKind::Zipformer.is_streaming());
         assert!(!AsrModelKind::Zipformer.is_offline());
         assert!(AsrModelKind::Paraformer.is_streaming());
@@ -1601,6 +1668,7 @@ mod tests {
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::SenseVoice),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             language: Some("zh".to_string()),
             use_itn: Some(true),
             ..AsrSettings::default()
@@ -1627,6 +1695,7 @@ mod tests {
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::Whisper),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             ..AsrSettings::default()
         };
         let cfg = resolve(Some(&settings), None).unwrap();
@@ -1644,6 +1713,7 @@ mod tests {
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::Whisper),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             ..AsrSettings::default()
         };
         let cfg = resolve(Some(&settings), None).unwrap();
@@ -1668,6 +1738,7 @@ mod tests {
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::Paraformer),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             ..AsrSettings::default()
         };
         let cfg = resolve(Some(&settings), None).unwrap();
@@ -1682,6 +1753,7 @@ mod tests {
         let settings_fp32 = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::Paraformer),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             encoder: Some("encoder.onnx".to_string()),
             decoder: Some("decoder.onnx".to_string()),
             ..AsrSettings::default()
@@ -1796,6 +1868,7 @@ mod tests {
         let settings = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::Qwen3Asr),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             ..AsrSettings::default()
         };
         let cfg = resolve(Some(&settings), None).unwrap();
@@ -1814,6 +1887,7 @@ mod tests {
         let settings_fp32 = AsrSettings {
             model_dir: Some(dir.path().to_string_lossy().to_string()),
             model_type: Some(AsrModelKind::Qwen3Asr),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             encoder: Some("encoder.onnx".to_string()),
             decoder: Some("decoder.onnx".to_string()),
             ..AsrSettings::default()
@@ -1864,18 +1938,52 @@ mod tests {
         assert_eq!(zip.language.as_deref(), Some("zh"));
     }
 
+    /// 老配置（无 model_type/backend 字段）升级后落到缺省 audiocpp Qwen3-ASR；
+    /// 缺模型时 preflight 给出可执行的 install-model 提示（迁移路径）。
     #[test]
-    fn test_resolve_zipformer_unchanged_for_legacy() {
+    fn test_resolve_legacy_config_defaults_to_audiocpp_qwen3() {
         run_with_temp_home(|_| {
-            // 老配置（无 model_type 字段）→ Zipformer，行为与现状一致
             let cfg = resolve(None, None).unwrap();
-            assert_eq!(cfg.model_type, AsrModelKind::Zipformer);
+            assert_eq!(cfg.backend, AsrBackendKind::Audiocpp);
+            assert_eq!(cfg.model_type, AsrModelKind::Qwen3Asr);
+            assert_eq!(cfg.model, None, "audiocpp 不消费 ONNX 主模型字段");
+            // ONNX 文件字段保留老配置兜底值（audiocpp 不消费）
             assert_eq!(cfg.encoder.file_name().unwrap(), DEFAULT_ENCODER);
-            assert_eq!(cfg.decoder.file_name().unwrap(), DEFAULT_DECODER);
-            assert_eq!(cfg.joiner.file_name().unwrap(), DEFAULT_JOINER);
-            assert_eq!(cfg.tokens.file_name().unwrap(), DEFAULT_TOKENS);
-            assert_eq!(cfg.model, None);
+
+            // 未安装模型 → preflight 报缺 GGUF 并指向缺省 registry 条目
+            let err = preflight(&cfg).unwrap_err();
+            assert!(err.contains("缺少模型文件"), "err: {err}");
+            assert!(err.contains(DEFAULT_ASR_REGISTRY_ID), "err: {err}");
         });
+    }
+
+    /// 老 sherpa ONNX 目录（zipformer 四件套齐全）+ 未显式配置 backend/model_type：
+    /// 探测出的 zipformer 无 audiocpp 族 → 回落缺省 Qwen3Asr，preflight 引导装新模型
+    /// （sherpa 引擎已移除，旧目录不可运行）。
+    #[test]
+    fn test_resolve_legacy_sherpa_dir_falls_back_to_qwen3() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            DEFAULT_ENCODER,
+            DEFAULT_DECODER,
+            DEFAULT_JOINER,
+            DEFAULT_TOKENS,
+        ] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let settings = AsrSettings {
+            model_dir: Some(dir.path().to_string_lossy().to_string()),
+            ..AsrSettings::default()
+        };
+        let cfg = resolve(Some(&settings), None).unwrap();
+        assert_eq!(
+            cfg.model_type,
+            AsrModelKind::Qwen3Asr,
+            "旧目录不可运行，回落缺省"
+        );
+        assert_eq!(cfg.backend, AsrBackendKind::Audiocpp);
+        assert!(!models_present(&cfg));
+        assert!(preflight(&cfg).is_err());
     }
 
     #[test]
@@ -1914,7 +2022,8 @@ mod tests {
             assert_eq!(AsrBackendKind::parse_str(s), Some(kind));
         }
         assert_eq!(AsrBackendKind::parse_str("unknown"), None);
-        assert_eq!(AsrBackendKind::default(), AsrBackendKind::Sherpa);
+        // 缺省 audiocpp（唯一在册引擎）
+        assert_eq!(AsrBackendKind::default(), AsrBackendKind::Audiocpp);
         assert_eq!(
             serde_json::from_str::<AsrBackendKind>("\"audiocpp\"").unwrap(),
             AsrBackendKind::Audiocpp
@@ -1926,14 +2035,14 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_backend_default_sherpa_and_explicit() {
+    fn test_resolve_backend_default_audiocpp_and_explicit() {
         run_with_temp_home(|_| {
-            // 缺省 sherpa（老配置无字段 → 零行为变化）
+            // 缺省 audiocpp（唯一在册引擎）
             let cfg = resolve(None, None).unwrap();
-            assert_eq!(cfg.backend, AsrBackendKind::Sherpa);
+            assert_eq!(cfg.backend, AsrBackendKind::Audiocpp);
             assert_eq!(cfg.engine_path, None);
 
-            // 显式 audiocpp + qwen3
+            // 显式 audiocpp + qwen3（GGUF 探测命中）
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(
                 dir.path()
@@ -1973,18 +2082,44 @@ mod tests {
         });
     }
 
+    /// 老配置残留 `backend = "sherpa"`：解析不炸（保留迁移入口），preflight 明确报「已移除」。
+    #[test]
+    fn test_resolve_legacy_sherpa_backend_parses_and_preflight_rejects() {
+        let cfg = ResolvedAsrConfig {
+            backend: AsrBackendKind::Sherpa,
+            model_dir: PathBuf::from("/nonexistent/model"),
+            ..ResolvedAsrConfig::default()
+        };
+        assert_eq!(
+            resolve(
+                Some(&AsrSettings {
+                    backend: Some("sherpa".to_string()),
+                    ..AsrSettings::default()
+                }),
+                None
+            )
+            .unwrap()
+            .backend,
+            AsrBackendKind::Sherpa
+        );
+        let err = preflight(&cfg).unwrap_err();
+        assert!(err.contains("sherpa 已移除"), "err: {err}");
+        assert!(!models_present(&cfg), "已移除后端视为未就绪");
+    }
+
     #[test]
     fn test_resolve_backend_invalid_and_combo_error() {
         run_with_temp_home(|_| {
-            // 非法 backend 值
+            // 非法 backend 值（含支持列表）
             let settings = AsrSettings {
                 backend: Some("mystery".to_string()),
                 ..AsrSettings::default()
             };
             let err = resolve(Some(&settings), None).unwrap_err();
             assert!(err.contains("未知 ASR 后端"), "err: {err}");
+            assert!(err.contains("支持 audiocpp"), "err: {err}");
 
-            // audiocpp + sherpa-only kind 组合报错（fail-fast）
+            // 显式 audiocpp + sherpa-only kind 组合报错（fail-fast，不静默回落）
             let settings = AsrSettings {
                 backend: Some("audiocpp".to_string()),
                 model_type: Some(AsrModelKind::Zipformer),
@@ -1996,10 +2131,9 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_gguf_probe_only_under_audiocpp_backend() {
+    fn test_resolve_gguf_probe_under_default_backend() {
         run_with_temp_home(|_| {
-            // 只含 GGUF 的目录：backend 缺省（sherpa）→ 仍落 Zipformer 兜底
-            // （GGUF 探针不介入 sherpa 路径，行为零变化）
+            // 只含 GGUF 的目录：backend/model_type 均未配置 → GGUF 探针命中 Qwen3Asr
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(
                 dir.path()
@@ -2009,6 +2143,16 @@ mod tests {
             .unwrap();
             let settings = AsrSettings {
                 model_dir: Some(dir.path().to_string_lossy().to_string()),
+                ..AsrSettings::default()
+            };
+            let cfg = resolve(Some(&settings), None).unwrap();
+            assert_eq!(cfg.model_type, AsrModelKind::Qwen3Asr);
+            assert!(models_present(&cfg));
+
+            // 显式 sherpa 老配置：GGUF 探针不介入（ONNX 形状探测 → Zipformer 兜底）
+            let settings = AsrSettings {
+                model_dir: Some(dir.path().to_string_lossy().to_string()),
+                backend: Some("sherpa".to_string()),
                 ..AsrSettings::default()
             };
             let cfg = resolve(Some(&settings), None).unwrap();
@@ -2069,9 +2213,10 @@ mod tests {
             "audiocpp 后端 language 放行"
         );
 
-        // sherpa qwen3 回归：热词落盘、language 不落盘（既有行为不变）
+        // 老 sherpa qwen3 配置回归：热词落盘、language 不落盘（既有行为不变）
         let mut sherpa = AsrSettings {
             model_type: Some(AsrModelKind::Qwen3Asr),
+            backend: Some(AsrBackendKind::Sherpa.as_str().to_string()),
             ..AsrSettings::default()
         };
         patch.apply_to(&mut sherpa).unwrap();

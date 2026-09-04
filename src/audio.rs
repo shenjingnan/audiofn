@@ -50,7 +50,7 @@ pub fn start_capture(device_name: Option<&str>) -> Result<MicHandle, String> {
                     .map(|desc| desc.name().contains(name))
                     .unwrap_or(false)
             })
-            .ok_or_else(|| format!("未找到输入设备: {name}（可用 kws list-devices 查看）"))?,
+            .ok_or_else(|| format!("未找到输入设备: {name}（可用 asr devices 查看设备列表）"))?,
         None => host
             .default_input_device()
             .ok_or_else(mic_permission_hint)?,
@@ -343,7 +343,7 @@ pub fn read_wav_mono(path: &Path) -> Result<(Vec<f32>, u32), String> {
 }
 
 fn mic_permission_hint() -> String {
-    "未找到默认麦克风。\n  macOS 请在「系统设置 → 隐私与安全性 → 麦克风」中授权当前终端 App，然后重试。\n  可用 `kws list-devices` 查看设备，`kws run --device <名称>` 指定设备。"
+    "未找到默认麦克风。\n  macOS 请在「系统设置 → 隐私与安全性 → 麦克风」中授权当前终端 App，然后重试。\n  可用 `asr devices` 查看设备，`asr dictate --device <名称>` 指定设备。"
         .to_string()
 }
 

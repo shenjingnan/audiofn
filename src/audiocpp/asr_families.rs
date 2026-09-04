@@ -33,7 +33,7 @@ pub const QWEN3_ASR_06B: AudiocppAsrFamilyDesc = AudiocppAsrFamilyDesc {
     family: "qwen3_asr",
     gguf_file: "qwen3-asr-0.6b-q8_0.gguf",
     required_files: &["qwen3-asr-0.6b-q8_0.gguf"],
-    registry_hint: "zapmomo asr install-model --registry-id asr-qwen3-0.6b-audiocpp",
+    registry_hint: "audiofn asr install-model --registry-id asr-qwen3-0.6b-audiocpp",
 };
 
 /// 按模型类型查表；sherpa-only kind 返回 None（audiocpp 后端不支持该组合）。

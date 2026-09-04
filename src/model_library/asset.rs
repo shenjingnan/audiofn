@@ -1,9 +1,9 @@
 //! 模型资产下载基础设施（全项目共享，不隶属任何具体能力模块）。
 //!
 //! 模型元数据编译期嵌入（`include_str!`），运行时从用户目录
-//! `~/.zapmomo/models/<name>` 安装/查找，供 asr / tts / model_library 与
-//! CLI（`kws install-model`、`speaker install-model` 等）及 GUI（下载按钮）
-//! 复用。流程与 `scripts/download-kws-model.sh` 一致：
+//! `~/.zapmomo/models/<name>` 安装/查找，供 asr / tts / model_library、
+//! CLI（`asr/tts install-model`）及 GUI（下载按钮）复用。流程与
+//! `scripts/download-kws-model.sh` 一致：
 //! 下载 → sha256 校验 → 临时目录解压 → 原子落位，幂等可重跑。
 
 use std::io::{Read, Write};
@@ -106,11 +106,6 @@ pub fn user_models_dir() -> PathBuf {
 /// 默认 KWS 模型安装目录：`~/.zapmomo/models/<name>`
 pub fn user_model_dir() -> PathBuf {
     get_models_dir().join(&default_asset().name)
-}
-
-/// 默认 ASR 模型安装目录：`~/.zapmomo/models/<name>`
-pub fn asr_user_model_dir() -> PathBuf {
-    get_models_dir().join(&asr_asset().name)
 }
 
 /// 默认标点模型安装目录：`~/.zapmomo/models/<name>`

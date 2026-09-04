@@ -1,13 +1,6 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 /// 集成测试示例
 use zapmomo::cli::{self, Cli};
-
-#[test]
-fn test_cli_greet_output() {
-    // 验证 CLI 可以正确解析 greet 命令
-    let cli = Cli::try_parse_from(["test", "greet", "--name", "World"]).unwrap();
-    assert!(matches!(cli.command.unwrap(), cli::Commands::Greet { .. }));
-}
 
 #[test]
 fn test_cli_config_output() {
@@ -23,11 +16,12 @@ async fn test_run_config_returns_ok() {
     assert!(result.is_ok());
 }
 
-#[tokio::test]
-async fn test_run_greet_returns_ok() {
-    let cli = Cli::try_parse_from(["test", "greet", "--name", "Integration"]).unwrap();
-    let result = cli::run(cli).await;
-    assert!(result.is_ok());
+#[test]
+fn test_cli_help_has_no_legacy_brand_or_greet() {
+    // CLI 面验收：帮助文案不含旧品牌与已删除的 greet
+    let help = Cli::command().render_help().to_string();
+    assert!(!help.to_lowercase().contains("zapmomo"), "help: {help}");
+    assert!(!help.contains("greet"), "help: {help}");
 }
 
 #[test]

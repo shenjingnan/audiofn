@@ -8,9 +8,12 @@ const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
 
 #[derive(Parser)]
 #[command(
-    name = "zapmomo",
+    name = "audiofn",
+    // 帮助/用法/补全统一按目标产品名展示（bin 文件名仍是旧名，品牌改名见 Task 15）；
+    // 显式 bin_name 优先于运行时从 argv[0] 推导的名称
+    bin_name = "audiofn",
     version = VERSION,
-    about = "An open-source, real-time desktop AI companion with voice, memory, and a customizable virtual character",
+    about = "Audio toolkit：Qwen3-ASR 语音转写 + Qwen3-TTS 音色克隆（audiocpp 引擎）",
     subcommand_required = true,
     arg_required_else_help = true,
     disable_help_subcommand = true,
@@ -25,15 +28,6 @@ pub struct Cli {
 pub enum Commands {
     /// 显示配置信息
     Config,
-    /// 向用户问好（演示命令参数用法）
-    Greet {
-        /// 你的名字
-        #[arg(short, long)]
-        name: String,
-        /// 重复次数
-        #[arg(short, long, default_value = "1")]
-        count: u32,
-    },
     /// 生成 Shell 补全脚本
     #[command(hide = true)]
     Completion {
@@ -56,11 +50,12 @@ pub enum Commands {
 /// ASR 子命令
 #[derive(Subcommand)]
 pub enum AsrCmd {
-    /// 离线转写 wav 文件（不需要麦克风；audiocpp qwen3_asr）
-    Test {
-        /// wav 路径；默认 <model_dir>/test_wavs/0.wav
+    /// 离线转写 wav 文件（不需要麦克风；audiocpp qwen3_asr，自动识别语种）
+    Transcribe {
+        /// wav 路径；缺省用模型目录内 test_wavs/ 示例音频
         #[arg(long)]
         wav: Option<PathBuf>,
+        /// 模型目录（覆盖 settings.toml 的 asr.model_dir）
         #[arg(long)]
         model_dir: Option<PathBuf>,
         /// 转写语言（透传 audiocpp；缺省由模型自动识别），如 zh / en / ja
@@ -72,11 +67,11 @@ pub enum AsrCmd {
     },
     /// 列出可用的麦克风输入设备
     Devices,
-    /// 下载并安装 ASR 模型（默认安装到 ~/.zapmomo/models/<模型名>）
+    /// 从模型库下载并安装 ASR 模型（缺省 Qwen3-ASR 0.6B，单 GGUF）
     InstallModel {
-        /// 安装目标模型目录（默认 ~/.zapmomo/models/<模型名>）
+        /// 模型库 registry 条目 id（如 asr-qwen3-0.6b-audiocpp）
         #[arg(long)]
-        model_dir: Option<PathBuf>,
+        registry_id: Option<String>,
         /// 已安装也强制重新下载
         #[arg(long)]
         force: bool,
@@ -121,7 +116,7 @@ pub enum TtsCmd {
         /// 语速，缺省 1.0
         #[arg(long)]
         speed: Option<f32>,
-        /// 输出 wav 路径；缺省 ~/.zapmomo/tts/<时间戳>.wav
+        /// 输出 wav 路径；缺省为用户数据目录下 tts/<时间戳>.wav
         #[arg(long)]
         output: Option<PathBuf>,
         /// 音色 id（模型包内置参考音色 / 自定义音色库 id）
@@ -140,7 +135,7 @@ pub enum TtsCmd {
         #[arg(long)]
         model_dir: Option<PathBuf>,
     },
-    /// 从模型库下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，~/.zapmomo/models/<模型名>）
+    /// 从模型库下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，安装到用户模型目录）
     InstallModel {
         /// 模型库 registry 条目 id（如 tts-qwen3-17b-base-q8-audiocpp）
         #[arg(long)]
@@ -161,18 +156,10 @@ fn cmd_config() -> Result<String, String> {
     Ok(serde_json::to_string_pretty(&config).unwrap_or_default())
 }
 
-/// greet 命令
-fn cmd_greet(name: &str, count: u32) -> Result<(), String> {
-    for _ in 0..count {
-        println!("你好, {name}！欢迎使用 ZapMomo。");
-    }
-    Ok(())
-}
-
 /// completion 命令
 fn cmd_completion<W: std::io::Write>(shell: clap_complete::Shell, writer: &mut W) {
     let mut cmd = Cli::command();
-    clap_complete::generate(shell, &mut cmd, "zapmomo", writer);
+    clap_complete::generate(shell, &mut cmd, "audiofn", writer);
 }
 
 /// CLI 入口
@@ -183,7 +170,6 @@ pub async fn run(cli: Cli) -> Result<(), String> {
             println!("{output}");
             Ok(())
         }
-        Some(Commands::Greet { name, count }) => cmd_greet(&name, count),
         Some(Commands::Completion { shell }) => {
             cmd_completion(shell, &mut std::io::stdout());
             Ok(())
@@ -199,7 +185,7 @@ pub async fn run(cli: Cli) -> Result<(), String> {
 /// ASR 命令入口
 async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
     match cmd {
-        AsrCmd::Test {
+        AsrCmd::Transcribe {
             wav,
             model_dir,
             language,
@@ -240,11 +226,22 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
             }
             Ok(())
         }
-        AsrCmd::InstallModel { model_dir, force } => {
-            use crate::asr::{
-                DownloadProgress, DownloadStage, install_model_to, install_punctuation_model_to,
-                punctuation_user_model_dir, user_model_dir,
-            };
+        AsrCmd::InstallModel { registry_id, force } => {
+            use crate::asr::config::DEFAULT_ASR_REGISTRY_ID;
+            use crate::config::settings::get_models_dir;
+            use crate::model_library::asset::{DownloadProgress, DownloadStage};
+            use crate::model_library::{install_managed_model, registry};
+            let id = registry_id.unwrap_or_else(|| DEFAULT_ASR_REGISTRY_ID.to_string());
+            let model = registry::model_for_current_platform(&id)
+                .ok_or_else(|| format!("未知的模型库条目（或当前平台不可用）: {id}"))?;
+            if model.model_type != crate::model_library::registry::ModelType::Asr {
+                return Err(format!("{id} 不是 ASR 模型条目"));
+            }
+            let dest = get_models_dir().join(&model.name);
+            if !force && crate::asr::is_installed(&dest) {
+                println!("模型已安装: {}", dest.display());
+                return Ok(());
+            }
             let mut progress = |p: DownloadProgress| {
                 let stage = match p.stage {
                     DownloadStage::Downloading => "下载",
@@ -254,18 +251,9 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
                 };
                 println!("[{stage}] {}", p.message);
             };
-
-            // 默认：双语 + 标点
-            let dest = model_dir.unwrap_or_else(user_model_dir);
-            install_model_to(&dest, force, &mut progress).map_err(|e| e.to_string())?;
+            let dest =
+                install_managed_model(model, &mut progress, None).map_err(|e| e.to_string())?;
             println!("ASR 模型已就绪: {}", dest.display());
-
-            // 顺带安装标点模型（自动开启）；失败仅警告，不阻断 ASR。
-            let punct_dest = punctuation_user_model_dir();
-            match install_punctuation_model_to(&punct_dest, force, &mut progress) {
-                Ok(()) => println!("标点模型已就绪: {}", punct_dest.display()),
-                Err(e) => eprintln!("警告：标点模型安装失败（ASR 仍可用，仅无标点）: {e}"),
-            }
             Ok(())
         }
         AsrCmd::Dictate {
@@ -514,13 +502,6 @@ mod tests {
     }
 
     #[test]
-    fn test_greet_output() {
-        // greet 直接打印到 stdout，验证不 panic
-        cmd_greet("World", 1).expect("greet should succeed");
-        cmd_greet("World", 0).expect("greet with 0 count should succeed");
-    }
-
-    #[test]
     fn test_completion_bash() {
         let mut buf = Vec::new();
         cmd_completion(clap_complete::Shell::Bash, &mut buf);
@@ -529,13 +510,17 @@ mod tests {
             output.contains("complete -F"),
             "bash completion should contain complete -F"
         );
-        for sub in &["config", "greet", "completion"] {
+        for sub in &["config", "asr", "tts", "completion"] {
             assert!(
                 output.contains(sub),
                 "bash completion should contain subcommand {}",
                 sub
             );
         }
+        assert!(
+            !output.contains("greet"),
+            "bash completion should not mention removed greet"
+        );
     }
 
     #[test]
@@ -547,7 +532,7 @@ mod tests {
             output.contains("#compdef"),
             "zsh completion should start with #compdef"
         );
-        for sub in &["config", "greet", "completion"] {
+        for sub in &["config", "asr", "tts", "completion"] {
             assert!(
                 output.contains(sub),
                 "zsh completion should contain subcommand {}",
@@ -565,7 +550,7 @@ mod tests {
             output.contains("complete -c"),
             "fish completion should contain complete -c"
         );
-        for sub in &["config", "greet", "completion"] {
+        for sub in &["config", "asr", "tts", "completion"] {
             assert!(
                 output.contains(sub),
                 "fish completion should contain subcommand {}",
@@ -583,7 +568,7 @@ mod tests {
             output.contains("Register-ArgumentCompleter"),
             "powershell completion should register argument completer"
         );
-        for sub in &["config", "greet", "completion"] {
+        for sub in &["config", "asr", "tts", "completion"] {
             assert!(
                 output.contains(sub),
                 "powershell completion should contain subcommand {}",
@@ -604,7 +589,7 @@ mod tests {
             let mut buf = Vec::new();
             cmd_completion(shell, &mut buf);
             let output = String::from_utf8(buf).unwrap();
-            for sub in &["config", "greet", "completion"] {
+            for sub in &["config", "asr", "tts", "completion"] {
                 assert!(
                     output.contains(sub),
                     "{:?} completion should contain subcommand {}",
@@ -615,27 +600,44 @@ mod tests {
         }
     }
 
+    /// `--help` 可见文案不得残留旧品牌与已删除的 greet 命令（CLI 面验收）。
     #[test]
-    fn test_cli_parse_greet() {
-        let cli = Cli::try_parse_from(["test", "greet", "--name", "World"]).unwrap();
-        match cli.command.unwrap() {
-            Commands::Greet { name, count } => {
-                assert_eq!(name, "World");
-                assert_eq!(count, 1);
-            }
-            _ => panic!("Expected Greet command"),
+    fn test_help_text_has_no_legacy_brand_or_greet() {
+        // bin_name 必须显式固定为 audiofn：否则运行时会取 argv[0]（旧二进制文件名
+        // zapmomo-cli）写进用法行，--help 又会露出旧品牌
+        assert_eq!(
+            Cli::command().get_bin_name(),
+            Some("audiofn"),
+            "显式 bin_name 缺失，--help 用法行会回退到旧二进制名"
+        );
+        let help = Cli::command().render_help().to_string();
+        for banned in ["zapmomo", "ZapMomo", "greet"] {
+            assert!(
+                !help.to_lowercase().contains(&banned.to_lowercase()),
+                "--help 不应包含 {banned}\n{help}"
+            );
         }
-    }
+        for expected in &["config", "asr", "tts"] {
+            assert!(help.contains(expected), "--help 应包含 {expected}\n{help}");
+        }
 
-    #[test]
-    fn test_cli_parse_greet_with_count() {
-        let cli = Cli::try_parse_from(["test", "greet", "-n", "Test", "-c", "3"]).unwrap();
-        match cli.command.unwrap() {
-            Commands::Greet { name, count } => {
-                assert_eq!(name, "Test");
-                assert_eq!(count, 3);
-            }
-            _ => panic!("Expected Greet command"),
+        // 子命令级帮助：asr 面应含 transcribe（原 asr test 已改名）。
+        // `render_help` 需要 `&mut Command`，这里借 `--help` 的 DisplayHelp 错误取文案。
+        let asr_help = match Cli::try_parse_from(["audiofn", "asr", "--help"]) {
+            Err(e) => e.render().to_string(),
+            Ok(_) => panic!("--help 应以 DisplayHelp 错误结束"),
+        };
+        for banned in ["zapmomo", "ZapMomo", "greet"] {
+            assert!(
+                !asr_help.to_lowercase().contains(&banned.to_lowercase()),
+                "asr --help 不应包含 {banned}\n{asr_help}"
+            );
+        }
+        for expected in &["transcribe", "dictate", "install-model", "devices"] {
+            assert!(
+                asr_help.contains(expected),
+                "asr --help 应包含 {expected}\n{asr_help}"
+            );
         }
     }
 
@@ -646,12 +648,14 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_parse_asr_test() {
-        let cli = Cli::try_parse_from(["test", "asr", "test"]).unwrap();
+    fn test_cli_parse_asr_transcribe() {
+        let cli = Cli::try_parse_from(["test", "asr", "transcribe", "--wav", "a.wav"]).unwrap();
         match cli.command.unwrap() {
-            Commands::Asr { cmd } => assert!(matches!(cmd, AsrCmd::Test { .. })),
+            Commands::Asr { cmd } => assert!(matches!(cmd, AsrCmd::Transcribe { .. })),
             _ => panic!("Expected Asr command"),
         }
+        // 旧子命令名 `asr test` 已移除
+        assert!(Cli::try_parse_from(["test", "asr", "test"]).is_err());
     }
 
     #[test]
@@ -686,12 +690,12 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_parse_asr_test_flags() {
+    fn test_cli_parse_asr_transcribe_flags() {
         // 文件转写的语言透传与 ITN 开关（ITN 由 audiocpp 后端忽略）
         let cli = Cli::try_parse_from([
             "test",
             "asr",
-            "test",
+            "transcribe",
             "--language",
             "zh",
             "--use-itn",
@@ -701,7 +705,7 @@ mod tests {
         match cli.command.unwrap() {
             Commands::Asr { cmd } => assert!(matches!(
                 cmd,
-                AsrCmd::Test {
+                AsrCmd::Transcribe {
                     language: Some(l),
                     use_itn: Some(true),
                     ..
@@ -722,15 +726,32 @@ mod tests {
 
     #[test]
     fn test_cli_parse_asr_install_model() {
+        // 缺省 registry id = audiocpp Qwen3-ASR
         let cli = Cli::try_parse_from(["test", "asr", "install-model", "--force"]).unwrap();
         match cli.command.unwrap() {
-            Commands::Asr { cmd } => assert!(matches!(
-                cmd,
-                AsrCmd::InstallModel {
-                    force: true,
-                    model_dir: None,
-                }
-            )),
+            Commands::Asr {
+                cmd: AsrCmd::InstallModel { registry_id, force },
+            } => {
+                assert!(force);
+                assert_eq!(registry_id, None);
+            }
+            _ => panic!("Expected InstallModel command"),
+        }
+        // 显式 registry id 透传
+        let cli = Cli::try_parse_from([
+            "test",
+            "asr",
+            "install-model",
+            "--registry-id",
+            "asr-qwen3-0.6b-audiocpp",
+        ])
+        .unwrap();
+        match cli.command.unwrap() {
+            Commands::Asr {
+                cmd: AsrCmd::InstallModel { registry_id, .. },
+            } => {
+                assert_eq!(registry_id.as_deref(), Some("asr-qwen3-0.6b-audiocpp"));
+            }
             _ => panic!("Expected InstallModel command"),
         }
     }

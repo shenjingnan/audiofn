@@ -1,9 +1,12 @@
 /// 语音识别（ASR）。
 ///
 /// 一期后端收敛为 audiocpp sidecar 的 qwen3_asr（Qwen3-ASR-0.6B）：
-/// - [`offline`]：整段文件转写（CLI `asr test` / Tauri `transcribe_audio`）；
+/// - [`offline`]：整段文件转写（CLI `asr transcribe` / Tauri `transcribe_audio`）；
 /// - [`dictate`]：麦克风免提听写（整段录制，停止后一次转写）；
 /// - [`config`]：配置解析与模型 preflight。
+///
+/// 模型下载安装走模型库 registry（`crate::model_library::install_managed_model`，
+/// 缺省条目见 [`config::DEFAULT_ASR_REGISTRY_ID`]）。
 ///
 /// 识别结果经可插拔的 [`AsrReaction`] 回调（CLI 打印 / GUI 发事件给前端）。
 pub mod config;
@@ -12,8 +15,6 @@ pub mod offline;
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-
-pub use crate::model_library::asset::{DownloadProgress, DownloadStage, ModelError, ProgressFn};
 
 /// 一次识别结果（owned 结构，不把后端类型泄漏到公开 API）。
 ///
@@ -52,52 +53,13 @@ impl AsrReaction for ConsoleAsrReaction {
     }
 }
 
-/// ASR 模型安装目录：`~/.zapmomo/models/<name>`。
-pub fn user_model_dir() -> PathBuf {
-    crate::model_library::asset::asr_user_model_dir()
-}
-
-/// 目标目录是否已装好 ASR 模型（探测式：按目录内容探测，模型无关）。
+/// 目标目录是否已装好任一已收录 ASR 模型（audiocpp 族 GGUF 主文件名探测；
+/// 老 sherpa ONNX 目录在模型库 JSON 裁剪前仍算已安装）。
+///
+/// 模型库安装态（inventory 扫描 / legacy 本地模型）复用。
 pub fn is_installed(dir: &Path) -> bool {
-    config::asr_files_present(dir)
-}
-
-/// 安装 ASR 模型到 `dest_dir`（默认 `~/.zapmomo/models/<name>`）。
-///
-/// 幂等：已安装且 `force` 为假时直接返回。下载过程中回调进度。
-pub fn install_model_to(
-    dest_dir: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-) -> Result<(), ModelError> {
-    crate::model_library::asset::install_asset_to(
-        crate::model_library::asset::asr_asset(),
-        dest_dir,
-        force,
-        on_progress,
-        &config::REQUIRED_FILES,
-    )
-}
-
-/// 标点模型安装目录：`~/.zapmomo/models/<标点模型名>`。
-pub fn punctuation_user_model_dir() -> PathBuf {
-    crate::model_library::asset::punctuation_user_model_dir()
-}
-
-/// 安装标点模型到 `dest_dir`（默认 `~/.zapmomo/models/<标点模型名>`）。
-///
-/// 幂等：已安装且 `force` 为假时直接返回。下载过程中回调进度。
-pub fn install_punctuation_model_to(
-    dest_dir: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-) -> Result<(), ModelError> {
-    crate::model_library::asset::install_punctuation_model_to(
-        dest_dir,
-        force,
-        on_progress,
-        &config::PUNCT_REQUIRED_FILES,
-    )
+    crate::audiocpp::asr_families::detect_gguf_in_dir(dir).is_some()
+        || config::asr_files_present(dir)
 }
 
 /// 离线转写 wav 文件，返回转写文本（不依赖麦克风，走 audiocpp qwen3_asr）。
@@ -118,7 +80,7 @@ pub fn run_offline(cfg: &config::ResolvedAsrConfig, wav: &Path) -> Result<(), St
 
 /// 模型目录内默认测试音频：`test_wavs/0.wav` → `1.wav` → `zh.wav` → 字母序第一个 wav。
 ///
-/// 供 CLI `asr test` 与 GUI「测试识别」在未指定 wav 时自动挑一条示例音频。
+/// 供 CLI `asr transcribe` 与 GUI「测试识别」在未指定 wav 时自动挑一条示例音频。
 pub fn default_test_wav(model_dir: &Path) -> Option<PathBuf> {
     let test_dir = model_dir.join("test_wavs");
     let Ok(entries) = std::fs::read_dir(&test_dir) else {

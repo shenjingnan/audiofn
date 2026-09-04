@@ -1,6 +1,6 @@
 /// 离线（文件）语音识别：整段 wav 经 audiocpp sidecar 的 qwen3_asr 转写。
 ///
-/// 一期后端收敛：文件转写（CLI `asr test` / Tauri `transcribe_audio` /
+/// 一期后端收敛：文件转写（CLI `asr transcribe` / Tauri `transcribe_audio` /
 /// `transcribe_reference_audio`）与听写（[`crate::asr::dictate`]）统一走
 /// [`AudiocppAsr`]（`/v1/audio/transcriptions`，Qwen3-ASR-0.6B GGUF）。
 /// 语种自动识别、标点由模型侧负责，本层只做「解码 → 上传 → 取文本」。

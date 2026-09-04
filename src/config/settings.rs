@@ -347,7 +347,8 @@ pub struct AsrSettings {
     /// 调试输出，缺省 false
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<bool>,
-    /// ASR 引擎后端：sherpa（进程内，缺省）| audiocpp（audio.cpp sidecar 进程）
+    /// ASR 引擎后端：audiocpp（audio.cpp sidecar 进程，缺省）| sherpa（已移除，
+    /// 仅老配置可解析，预检报「已移除」引导迁移）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     /// audiocpp 引擎二进制覆盖路径（开发/调试用；缺省由 locator 自动定位）

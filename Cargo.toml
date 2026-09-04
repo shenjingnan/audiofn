@@ -34,9 +34,6 @@ clap_complete = "4"
 # 音频采集（麦克风）
 cpal = "0.18"
 
-# 关键词检测（KWS），默认 static 特性：构建时下载预编译库
-sherpa-onnx = "1.13"
-
 # wav 解码（audio.cpp sidecar 返回 wav bytes → f32 样本；纯 Rust 零传递依赖）
 hound = "3.5"
 

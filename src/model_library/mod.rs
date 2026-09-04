@@ -1582,15 +1582,22 @@ mod tests {
             );
             assert_eq!(asr.backend, None, "从 audiocpp 切回 sherpa 条目后端应归位");
 
-            // 端到端锚点：resolve 后按目录探测出 Zipformer 且 models_present=true
+            // 端到端锚点：settings 不残留旧族 kind（探测语义由 resolve 兜底）。
+            // sherpa 引擎已移除，zipformer 目录不可运行——resolve 回落缺省 Qwen3Asr，
+            // models_present=false + preflight 报缺 GGUF（引导安装 audiocpp 模型）。
             let resolved = crate::asr::config::resolve(cfg.asr.as_ref(), None).unwrap();
             assert_eq!(
                 resolved.model_type,
-                crate::asr::config::AsrModelKind::Zipformer
+                crate::asr::config::AsrModelKind::Qwen3Asr
             );
             assert!(
-                crate::asr::config::models_present(&resolved),
-                "四件套齐全的 zipformer 目录不应误报模型缺失"
+                !crate::asr::config::models_present(&resolved),
+                "zipformer 目录在 audiocpp 后端下不可用，应如实报未就绪"
+            );
+            let err = crate::asr::config::preflight(&resolved).unwrap_err();
+            assert!(
+                err.contains(crate::asr::config::DEFAULT_ASR_REGISTRY_ID),
+                "preflight 应给出可执行的安装提示: {err}"
             );
         });
     }

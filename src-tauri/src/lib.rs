@@ -405,7 +405,7 @@ fn is_asr_dictating(state: State<'_, AsrDictateState>) -> bool {
     state.is_dictating()
 }
 
-/// 下载并安装 ASR 模型（默认安装到 `~/.zapmomo/models/<模型名>`）。
+/// 下载并安装 ASR 模型（缺省 Qwen3-ASR 0.6B 单 GGUF，`~/.zapmomo/models/<模型名>`）。
 ///
 /// 防重入；下载在阻塞线程池执行，进度经 `asr-model-download-progress` 事件推给前端。
 #[tauri::command]
@@ -417,17 +417,24 @@ async fn download_asr_model(
     if flag.swap(true, Ordering::SeqCst) {
         return Err("模型下载已在进行中，请稍候".to_string());
     }
-    let dest = zapmomo::asr::user_model_dir();
-    let punct_dest = zapmomo::asr::punctuation_user_model_dir();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let mut progress = |p: zapmomo::asr::DownloadProgress| {
+        let model = zapmomo::model_library::registry::model_for_current_platform(
+            zapmomo::asr::config::DEFAULT_ASR_REGISTRY_ID,
+        )
+        .ok_or_else(|| {
+            format!(
+                "未知的模型库条目: {}",
+                zapmomo::asr::config::DEFAULT_ASR_REGISTRY_ID
+            )
+        })?;
+        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
-                zapmomo::asr::DownloadStage::Downloading => "downloading",
-                zapmomo::asr::DownloadStage::Verifying => "verifying",
-                zapmomo::asr::DownloadStage::Extracting => "extracting",
-                zapmomo::asr::DownloadStage::Done => "done",
+                zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
+                zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
+                zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
+                zapmomo::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
                 "asr-model-download-progress",
@@ -438,13 +445,8 @@ async fn download_asr_model(
                 },
             );
         };
-        zapmomo::asr::install_model_to(&dest, false, &mut progress).map_err(|e| e.to_string())?;
-        // 顺带安装标点模型（自动开启）；失败仅警告，不阻断 ASR 下载成功。
-        if let Err(e) =
-            zapmomo::asr::install_punctuation_model_to(&punct_dest, false, &mut progress)
-        {
-            tracing::warn!("标点模型安装失败（ASR 仍可用，仅无标点）: {e}");
-        }
+        zapmomo::model_library::install_managed_model(model, &mut progress, None)
+            .map_err(|e| e.to_string())?;
         Ok(())
     })
     .await

@@ -114,7 +114,7 @@ impl DictateRecorder {
 
 /// 整段转写：16k mono 样本 → 临时 wav → [`crate::asr::transcribe_wav`] → 删除临时文件。
 ///
-/// 与文件转写（`asr test` / GUI「测试识别」）共用同一条 audiocpp 路径；wav 仅为
+/// 与文件转写（`asr transcribe` / GUI「测试识别」）共用同一条 audiocpp 路径；wav 仅为
 /// 转写输入的中间产物，转写结束（含失败）即清理，不在用户目录留存录音。
 fn transcribe_recorded(cfg: &ResolvedAsrConfig, samples: &[f32]) -> Result<String, String> {
     let wav = temp_wav_path();
