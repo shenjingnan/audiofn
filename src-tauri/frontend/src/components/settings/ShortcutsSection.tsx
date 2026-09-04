@@ -8,9 +8,6 @@ import { acceleratorFromEvent, formatAccelerator } from "./accelerator";
 
 /** 可绑定操作清单（id 与 Rust `ShortcutAction::as_str` 一致）。 */
 const ACTIONS: { id: ShortcutActionId; label: string; hint: string }[] = [
-  { id: "toggle_companion", label: "显示/隐藏桌宠", hint: "演示、录屏时快速藏起或召回桌宠" },
-  { id: "toggle_voice_session", label: "语音会话 开/关", hint: "一键开启或关闭语音会话（麦克风）" },
-  { id: "interrupt_reply", label: "打断播报", hint: "停止当前回复的生成与朗读，回到待唤醒" },
   { id: "open_settings", label: "打开设置", hint: "随时打开设置窗口" },
 ];
 

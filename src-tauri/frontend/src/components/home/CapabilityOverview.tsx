@@ -2,7 +2,7 @@ import { type CapabilityStatus, OVERVIEW_STATUS_COLOR } from "@/components/home/
 import { cn } from "@/lib/utils";
 
 /**
- * 概览页「AI 能力」卡片：KWS / ASR / LLM / TTS / 语音会话（2×2 + 语音会话整行，随高度伸展）。
+ * 概览页「AI 能力」卡片：语音识别 / 语音合成（一行两卡，随高度伸展）。
  *
  * 纯状态展示（Icon + 名称 + 缩写 + 状态点），不做点击导航。
  */
@@ -27,12 +27,7 @@ export function CapabilityOverview({ statuses }: { statuses: CapabilityStatus[] 
 function CapabilityCard({ status }: { status: CapabilityStatus }) {
   const Icon = status.icon;
   return (
-    <div
-      className={cn(
-        "flex items-center gap-3 rounded-xl border border-panel-border px-3.5 py-3",
-        status.key === "voice" && "col-span-2",
-      )}
-    >
+    <div className="flex items-center gap-3 rounded-xl border border-panel-border px-3.5 py-3">
       <span
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",

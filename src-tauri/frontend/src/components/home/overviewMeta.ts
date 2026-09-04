@@ -1,18 +1,6 @@
-import {
-  AudioLines,
-  AudioWaveform,
-  Brain,
-  Fingerprint,
-  type LucideIcon,
-  Mic,
-  Volume2,
-} from "lucide-react";
-import { isLlmConfigured } from "@/components/llm/llmMeta";
+import { type LucideIcon, Mic, Volume2 } from "lucide-react";
 import { deriveListenerStatus, type ListenerKind } from "@/components/models/capabilityStatus";
-import { voiceSessionStatus } from "@/components/voice/voiceSessionStatus";
-import type { LlmState } from "@/hooks/useLlm";
 import type { TtsState } from "@/hooks/useTts";
-import type { VoiceSessionState } from "@/hooks/useVoiceSession";
 import type { RuntimeState } from "@/providers/RuntimeContext";
 
 /** 状态语义色（与模型页 ModelSummary / 各能力 meta 的语义完全一致）。 */
@@ -28,7 +16,7 @@ export const OVERVIEW_STATUS_COLOR: Record<OverviewTone, string> = {
 
 /** AI 能力小卡数据（纯展示：Icon + 名称 + 缩写 + 状态）。 */
 export interface CapabilityStatus {
-  key: "kws" | "asr" | "llm" | "tts" | "speaker" | "voice";
+  key: "asr" | "tts";
   name: string;
   code: string;
   icon: LucideIcon;
@@ -38,15 +26,11 @@ export interface CapabilityStatus {
 }
 
 export interface OverviewInput {
-  kws: RuntimeState["kws"];
   asr: RuntimeState["asr"];
-  llm: LlmState;
   tts: TtsState;
-  speaker: RuntimeState["speaker"];
-  voice: VoiceSessionState;
 }
 
-/** 监听型能力 kind → 概览页文案（listening 态按 KWS/ASR 区分）。 */
+/** 监听型能力 kind → 概览页文案（listening 态展示「识别中」）。 */
 function listenerLabel(kind: ListenerKind, active: "监听中" | "识别中"): string {
   switch (kind) {
     case "error":
@@ -64,22 +48,7 @@ function listenerLabel(kind: ListenerKind, active: "监听中" | "识别中"): s
   }
 }
 
-/**
- * KWS 状态：错误 > 监听中 > 已就绪/未启用 > 未配置。
- * `enabled=true` 但未在监听是合法状态（启动自动监听失败会静默降级，
- * 见 lib.rs setup），此时能力已配置并开启，展示「已就绪」而非「未启用」。
- */
-function kwsStatus(kws: RuntimeState["kws"]): { label: string; tone: OverviewTone } {
-  const st = deriveListenerStatus({
-    error: kws.listening.error,
-    isListening: kws.listening.isListening,
-    enabled: kws.config.config?.enabled,
-    modelsPresent: kws.config.config?.models_present,
-  });
-  return { label: listenerLabel(st.kind, "监听中"), tone: st.tone };
-}
-
-/** ASR 状态：错误 > 启动中 > 识别中 > 已就绪/未启用 > 未配置（与 KWS 一致：读取持久化 enabled）。 */
+/** ASR 状态：错误 > 启动中 > 识别中 > 已就绪/未启用 > 未配置（读取持久化 enabled）。 */
 function asrStatus(asr: RuntimeState["asr"]): { label: string; tone: OverviewTone } {
   const st = deriveListenerStatus({
     error: asr.listening.error,
@@ -89,16 +58,6 @@ function asrStatus(asr: RuntimeState["asr"]): { label: string; tone: OverviewTon
     modelsPresent: asr.config.config?.models_present,
   });
   return { label: listenerLabel(st.kind, "识别中"), tone: st.tone };
-}
-
-/** LLM 状态：错误 > 生成中 > 连接中 > 已连接 > 未连接 > 未配置（远程连接语义，词汇沿用 llmMeta）。 */
-function llmStatus(llm: LlmState): { label: string; tone: OverviewTone } {
-  if (llm.error) return { label: "异常", tone: "error" };
-  if (llm.generating) return { label: "生成中", tone: "loading" };
-  if (llm.loading) return { label: "连接中", tone: "loading" };
-  if (llm.ready) return { label: "已连接", tone: "good" };
-  if (isLlmConfigured(llm.config)) return { label: "未连接", tone: "idle" };
-  return { label: "未配置", tone: "idle" };
 }
 
 /** TTS 状态：配置错误 > 合成中 > 未配置 > 已关闭 > 已就绪（顺序沿用 ttsMeta：模型缺失优先于已关闭）。 */
@@ -112,40 +71,16 @@ function ttsStatus(tts: TtsState): { label: string; tone: OverviewTone } {
   return { label: "已就绪", tone: "good" };
 }
 
-/** 声纹识别状态：错误 > 未配置（模型缺失）> 未启用 > 已就绪（无运行态，开关即全部）。 */
-function speakerStatus(speaker: RuntimeState["speaker"]): { label: string; tone: OverviewTone } {
-  if (speaker.config.error) return { label: "异常", tone: "error" };
-  const cfg = speaker.config.config;
-  if (!cfg) return { label: "加载中", tone: "idle" };
-  if (!cfg.model_present) return { label: "未配置", tone: "idle" };
-  if (!cfg.enabled) return { label: "未启用", tone: "idle" };
-  return { label: "已就绪", tone: "good" };
-}
-
-/** 语音会话状态：文案/色调由 `voiceSessionStatus` 统一推导（含「大脑未就绪」warn 修饰）。 */
-
 /**
  * 概览页 AI 能力状态推导（纯函数）：基于真实 runtime 字段推导，
- * 不维护第二套状态源。顺序固定为 KWS / ASR / 声纹 / LLM / TTS（与模型摘要一致）。
+ * 不维护第二套状态源。顺序固定为 ASR / TTS（与模型摘要一致）。
  */
 export function deriveOverview(input: OverviewInput): CapabilityStatus[] {
-  const { kws, asr, llm, tts, speaker, voice } = input;
-  const kwsState = kwsStatus(kws);
+  const { asr, tts } = input;
   const asrState = asrStatus(asr);
-  const llmState = llmStatus(llm);
   const ttsState = ttsStatus(tts);
-  const speakerState = speakerStatus(speaker);
-  const voiceState = voiceSessionStatus(voice, llm);
 
   return [
-    {
-      key: "kws",
-      name: "唤醒词",
-      code: "KWS",
-      icon: AudioWaveform,
-      accent: "bg-violet-100 text-violet-600",
-      ...kwsState,
-    },
     {
       key: "asr",
       name: "语音识别",
@@ -155,36 +90,12 @@ export function deriveOverview(input: OverviewInput): CapabilityStatus[] {
       ...asrState,
     },
     {
-      key: "speaker",
-      name: "声纹识别",
-      code: "SPK",
-      icon: Fingerprint,
-      accent: "bg-teal-100 text-teal-600",
-      ...speakerState,
-    },
-    {
-      key: "llm",
-      name: "AI 大脑",
-      code: "LLM",
-      icon: Brain,
-      accent: "bg-emerald-100 text-emerald-600",
-      ...llmState,
-    },
-    {
       key: "tts",
       name: "语音合成",
       code: "TTS",
       icon: Volume2,
       accent: "bg-amber-100 text-amber-600",
       ...ttsState,
-    },
-    {
-      key: "voice",
-      name: "语音会话",
-      code: "VOICE",
-      icon: AudioLines,
-      accent: "bg-pink-100 text-pink-600",
-      ...voiceState,
     },
   ];
 }

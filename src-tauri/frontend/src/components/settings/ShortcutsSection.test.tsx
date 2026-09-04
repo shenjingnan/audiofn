@@ -31,31 +31,29 @@ beforeEach(() => {
 describe("ShortcutsSection", () => {
   it("挂载时读取已绑定快捷键并展示", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_shortcuts")
-        return Promise.resolve({ toggle_companion: "CmdOrCtrl+Shift+Z" });
+      if (cmd === "get_shortcuts") return Promise.resolve({ open_settings: "CmdOrCtrl+Shift+O" });
       return Promise.resolve();
     });
     renderSection();
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_shortcuts"));
-    // 已绑定显示 accelerator（含主键 Z），未绑定显示「未设置」
-    expect(screen.getByLabelText("设置 显示/隐藏桌宠 快捷键").textContent).toContain("Z");
-    expect(screen.getByLabelText("设置 语音会话 开/关 快捷键").textContent).toContain("未设置");
+    // 已绑定显示 accelerator（含主键 O）
+    expect(screen.getByLabelText("设置 打开设置 快捷键").textContent).toContain("O");
   });
 
   it("录制：点击后按键组合 → 调 set_shortcut 并更新展示", async () => {
     renderSection();
-    const btn = await screen.findByLabelText("设置 语音会话 开/关 快捷键");
+    const btn = await screen.findByLabelText("设置 打开设置 快捷键");
     fireEvent.click(btn);
     expect(btn.textContent).toContain("按下组合键");
-    keyDown("KeyV", { metaKey: true, shiftKey: true });
+    keyDown("KeyO", { metaKey: true, shiftKey: true });
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("set_shortcut", {
-        action: "toggle_voice_session",
-        accelerator: "CmdOrCtrl+Shift+V",
+        action: "open_settings",
+        accelerator: "CmdOrCtrl+Shift+O",
       }),
     );
     await waitFor(() =>
-      expect(screen.getByLabelText("设置 语音会话 开/关 快捷键").textContent).toContain("V"),
+      expect(screen.getByLabelText("设置 打开设置 快捷键").textContent).toContain("O"),
     );
   });
 
@@ -78,19 +76,6 @@ describe("ShortcutsSection", () => {
     expect(screen.getByLabelText("设置 打开设置 快捷键").textContent).toContain("按下组合键");
   });
 
-  it("应用内冲突：同键已绑定其他操作 → 本地拦截提示，不发请求", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_shortcuts") return Promise.resolve({ interrupt_reply: "CmdOrCtrl+Shift+V" });
-      return Promise.resolve();
-    });
-    renderSection();
-    await screen.findByLabelText("设置 打断播报 快捷键");
-    fireEvent.click(screen.getByLabelText("设置 语音会话 开/关 快捷键"));
-    keyDown("KeyV", { metaKey: true, shiftKey: true });
-    await waitFor(() => expect(screen.getByText(/已绑定到「打断播报」/)).toBeTruthy());
-    expect(invokeMock).not.toHaveBeenCalledWith("set_shortcut", expect.anything());
-  });
-
   it("后端注册失败：显示错误且原绑定不变", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "get_shortcuts") return Promise.resolve({ open_settings: "CmdOrCtrl+Shift+O" });
@@ -107,19 +92,18 @@ describe("ShortcutsSection", () => {
 
   it("清除：调 clear_shortcut 并回到未设置", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_shortcuts")
-        return Promise.resolve({ toggle_companion: "CmdOrCtrl+Shift+Z" });
+      if (cmd === "get_shortcuts") return Promise.resolve({ open_settings: "CmdOrCtrl+Shift+O" });
       return Promise.resolve();
     });
     renderSection();
-    fireEvent.click(await screen.findByLabelText("清除 显示/隐藏桌宠 快捷键"));
+    fireEvent.click(await screen.findByLabelText("清除 打开设置 快捷键"));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("clear_shortcut", {
-        action: "toggle_companion",
+        action: "open_settings",
       }),
     );
     await waitFor(() =>
-      expect(screen.getByLabelText("设置 显示/隐藏桌宠 快捷键").textContent).toContain("未设置"),
+      expect(screen.getByLabelText("设置 打开设置 快捷键").textContent).toContain("未设置"),
     );
   });
 });

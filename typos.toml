@@ -1,6 +1,3 @@
-[files]
-extend-exclude = ["src-tauri/frontend/public/live2dcubismcore.min.js"]
-
 [default.extend-words]
 sherpa = "sherpa"
 onnx = "onnx"

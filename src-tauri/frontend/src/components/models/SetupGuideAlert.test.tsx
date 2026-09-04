@@ -16,22 +16,6 @@ vi.mock("@/providers/RuntimeContext", () => ({
 
 // ---- runtime 切片工厂：只填 SetupGuideAlert 读取的字段 ----
 
-function makeKws(o?: {
-  modelsPresent?: boolean;
-  configError?: string | null;
-  listenError?: string | null;
-  configNull?: boolean;
-}) {
-  return {
-    config: {
-      config: o?.configNull ? null : { models_present: o?.modelsPresent ?? true },
-      refresh: vi.fn(),
-      error: o?.configError ?? null,
-    },
-    listening: { isListening: false, pending: false, error: o?.listenError ?? null },
-  };
-}
-
 function makeAsr(o?: {
   modelsPresent?: boolean;
   configError?: string | null;
@@ -45,27 +29,6 @@ function makeAsr(o?: {
       error: o?.configError ?? null,
     },
     listening: { isListening: false, pending: false, error: o?.listenError ?? null },
-  };
-}
-
-function makeLlm(o?: {
-  modelsPresent?: boolean;
-  configError?: string | null;
-  error?: string | null;
-  configNull?: boolean;
-}) {
-  return {
-    // 远程连接语义：modelsPresent 映射为「已填写 API 地址 + 模型名」
-    config: o?.configNull
-      ? null
-      : o?.modelsPresent === false
-        ? { base_url: null, model: null }
-        : { base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.7-flash" },
-    configError: o?.configError ?? null,
-    error: o?.error ?? null,
-    ready: false,
-    loading: false,
-    refreshConfig: vi.fn(),
   };
 }
 
@@ -87,34 +50,12 @@ function makeTts(o?: {
   };
 }
 
-function makeSpeaker(o?: { error?: string | null; modelPresent?: boolean; enabled?: boolean }) {
-  return {
-    config: {
-      config: {
-        enabled: o?.enabled ?? false,
-        model_present: o?.modelPresent ?? true,
-      },
-      error: o?.error ?? null,
-      refresh: vi.fn(),
-    },
-  };
-}
-
 function makeRuntime(
-  overrides?: Partial<{
-    kws: ReturnType<typeof makeKws>;
-    asr: ReturnType<typeof makeAsr>;
-    llm: ReturnType<typeof makeLlm>;
-    tts: ReturnType<typeof makeTts>;
-    speaker: ReturnType<typeof makeSpeaker>;
-  }>,
+  overrides?: Partial<{ asr: ReturnType<typeof makeAsr>; tts: ReturnType<typeof makeTts> }>,
 ): RuntimeState {
   return {
-    kws: overrides?.kws ?? makeKws(),
     asr: overrides?.asr ?? makeAsr(),
-    llm: overrides?.llm ?? makeLlm(),
     tts: overrides?.tts ?? makeTts(),
-    speaker: overrides?.speaker ?? makeSpeaker(),
   } as unknown as RuntimeState;
 }
 
@@ -137,28 +78,28 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
   });
 
   it("单项未配置：直达对应配置页", () => {
-    state.runtime = makeRuntime({ kws: makeKws({ modelsPresent: false }) });
+    state.runtime = makeRuntime({ asr: makeAsr({ modelsPresent: false }) });
     renderGuide();
     expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(screen.getByText("唤醒词（KWS）尚未配置模型")).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "去配置唤醒词（KWS）" });
-    expect(cta).toHaveAttribute("href", "/models/kws");
+    expect(screen.getByText("语音识别（ASR）尚未配置模型")).toBeInTheDocument();
+    const cta = screen.getByRole("link", { name: "去配置语音识别（ASR）" });
+    expect(cta).toHaveAttribute("href", "/models/asr");
   });
 
   it("多项未配置：每能力一个直达按钮", () => {
     state.runtime = makeRuntime({
-      kws: makeKws({ modelsPresent: false }),
-      llm: makeLlm({ modelsPresent: false }),
+      asr: makeAsr({ modelsPresent: false }),
+      tts: makeTts({ modelsPresent: false }),
     });
     renderGuide();
     expect(screen.getByText("2 项能力尚未配置模型")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "去配置唤醒词（KWS）" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "去配置语音识别（ASR）" })).toHaveAttribute(
       "href",
-      "/models/kws",
+      "/models/asr",
     );
-    expect(screen.getByRole("link", { name: "去配置AI 大脑（LLM）" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "去配置语音合成（TTS）" })).toHaveAttribute(
       "href",
-      "/models/llm",
+      "/models/tts",
     );
   });
 
@@ -173,9 +114,9 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
   });
 
   it("config 层错误也算错误（回归：概览页此前不展示 config 层错误）", () => {
-    state.runtime = makeRuntime({ kws: makeKws({ configError: "读取配置失败" }) });
+    state.runtime = makeRuntime({ asr: makeAsr({ configError: "读取配置失败" }) });
     renderGuide();
-    expect(screen.getByText("唤醒词（KWS）出现错误")).toBeInTheDocument();
+    expect(screen.getByText("语音识别（ASR）出现错误")).toBeInTheDocument();
   });
 
   it("多项错误：每能力一个直达按钮", () => {
@@ -197,8 +138,8 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
 
   it("错误与未配置并存：两张卡且错误在前", () => {
     state.runtime = makeRuntime({
-      kws: makeKws({ modelsPresent: false }),
-      llm: makeLlm({ error: "load failed" }),
+      asr: makeAsr({ modelsPresent: false }),
+      tts: makeTts({ error: "load failed" }),
     });
     const { container } = renderGuide();
     const alerts = screen.getAllByRole("alert");
@@ -210,9 +151,7 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
 
   it("config 未加载（null）时不误报未配置（首帧防闪烁）", () => {
     state.runtime = makeRuntime({
-      kws: makeKws({ configNull: true }),
       asr: makeAsr({ configNull: true }),
-      llm: makeLlm({ configNull: true }),
       tts: makeTts({ configNull: true }),
     });
     renderGuide();
@@ -225,19 +164,15 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("deriveSetupGuideIssues 排序：错误在前、未配置在后，组内 kws→asr→llm→tts", () => {
+  it("deriveSetupGuideIssues 排序：错误在前、未配置在后，组内 asr→tts", () => {
     const runtime = makeRuntime({
-      kws: makeKws({ modelsPresent: false }),
-      asr: makeAsr({ listenError: "boom" }),
-      llm: makeLlm({ error: "boom" }),
-      tts: makeTts({ modelsPresent: false }),
+      asr: makeAsr({ modelsPresent: false }),
+      tts: makeTts({ error: "boom" }),
     });
     const issues = deriveSetupGuideIssues(runtime);
     expect(issues.map((i) => `${i.capability}:${i.kind}`)).toEqual([
-      "asr:error",
-      "llm:error",
-      "kws:unconfigured",
-      "tts:unconfigured",
+      "tts:error",
+      "asr:unconfigured",
     ]);
   });
 });

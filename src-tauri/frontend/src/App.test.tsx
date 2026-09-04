@@ -28,38 +28,6 @@ vi.mock("@tauri-apps/api/window", () => ({
   })),
 }));
 
-const DEFAULT_CONFIG = {
-  enabled: false,
-  custom_keywords: "",
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
-  provider: "cpu",
-  num_threads: 4,
-  sample_rate: 16000,
-  chunk_size: 3200,
-  keywords_score: 1.0,
-  keywords_threshold: 0.25,
-  debug: false,
-  keywords: ["文森特卡索"],
-  models_present: false,
-  model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
-};
-
-/** 可变 KWS 配置：单个用例可翻转 models_present 等字段（贴近真实后端）。 */
-let kwsConfig: typeof DEFAULT_CONFIG;
-/** 模拟后端持久化的麦克风（get_microphone / set_microphone）。 */
-let mic = "";
-/** 模拟后端可枚举的输入设备（置空以测试 macOS 未授权场景）。 */
-let devices: string[];
-/** 模拟 KWS 监听运行状态（置 true 以验证监听中仍可切换设备）。 */
-let kwsListening = false;
-/** 可变 LLM 配置：单个用例可置 ready/base_url+model 以开启能力链路开关。 */
-let llmConfig: typeof LLM_CONFIG;
-/** 模拟后端拒绝卸载 LLM（如语音会话占用），null = 卸载成功。 */
-let llmUnloadReject: string | null = null;
-/** 模拟后端持久化的语音会话启用态（get/set_voice_enabled）。 */
-let voiceEnabled = true;
-
 const ASR_CONFIG = {
   model_dir: "/home/user/.zapmomo/models/sherpa-onnx-streaming-zipformer",
   provider: "cpu",
@@ -73,7 +41,7 @@ const ASR_CONFIG = {
 };
 
 const TTS_CONFIG = {
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-zipvoice",
+  model_dir: "/home/user/.zapmomo/models/qwen3-tts",
   provider: "cpu",
   num_threads: 4,
   enabled: true,
@@ -82,37 +50,16 @@ const TTS_CONFIG = {
   settings_path: "/home/user/.zapmomo/settings.toml",
 };
 
-/** 可变 ASR/TTS 配置（引导卡「全部正常不渲染」用例需置 models_present）。 */
+/** 可变 ASR/TTS 配置（引导卡「全部正常不渲染」等用例需置 models_present）。 */
 let asrConfig: typeof ASR_CONFIG;
 let ttsConfig: typeof TTS_CONFIG;
+/** 模拟后端持久化的麦克风（get_microphone / set_microphone）。 */
+let mic = "";
+/** 模拟后端可枚举的输入设备（置空以测试 macOS 未授权场景）。 */
+let devices: string[];
 
-const LLM_CONFIG = {
-  enabled: false,
-  provider: "openai-compatible",
-  ready: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
-  system_prompt: "你是 ZapMomo 的 AI 大脑。",
-  base_url: null as string | null,
-  api_key: null as string | null,
-  model: null as string | null,
-  params: {
-    max_tokens: 512,
-    temperature: 0.7,
-    top_p: 0.8,
-    top_k: 20,
-    min_p: 0.05,
-    repeat_penalty: 1.05,
-    seed: 0,
-  },
-};
-
-/** 把 LLM 配置标记为「已填写远程连接三要素」（等价旧 models_present=true）。 */
-function llmConfigured(cfg: typeof LLM_CONFIG): typeof LLM_CONFIG {
-  return { ...cfg, base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.7-flash" };
-}
-
-/** 渲染 App 并定位到指定路由（默认 KWS 详情页）。 */
-function renderApp(initialPath = "/models/kws") {
+/** 渲染 App 并定位到指定路由（默认模型概览页）。 */
+function renderApp(initialPath = "/models") {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <App />
@@ -123,27 +70,13 @@ function renderApp(initialPath = "/models/kws") {
 beforeEach(() => {
   invokeMock.mockReset();
   listeners.clear();
-  kwsConfig = { ...DEFAULT_CONFIG };
-  llmConfig = { ...LLM_CONFIG };
   asrConfig = { ...ASR_CONFIG };
   ttsConfig = { ...TTS_CONFIG };
-  llmUnloadReject = null;
   mic = "";
   devices = ["内置麦克风", "USB 麦克风"];
-  kwsListening = false;
-  voiceEnabled = true;
 
   invokeMock.mockImplementation(
-    (
-      cmd: string,
-      args?: {
-        enabled?: boolean;
-        mic?: string;
-        keywords?: string;
-        params?: Partial<typeof DEFAULT_CONFIG>;
-        id?: string;
-      },
-    ) => {
+    (cmd: string, args?: { enabled?: boolean; mic?: string; device?: string | null }) => {
       switch (cmd) {
         case "get_app_info":
           return Promise.resolve({ version: "0.1.4", product_name: "ZapMomo" });
@@ -151,104 +84,79 @@ beforeEach(() => {
           return Promise.resolve(devices);
         case "request_mic_permission":
           return Promise.resolve(true);
-        case "get_kws_config":
-          return Promise.resolve({ ...kwsConfig });
-        case "set_kws_enabled":
-          kwsConfig = { ...kwsConfig, enabled: args?.enabled ?? false };
-          return Promise.resolve(undefined);
-        case "set_kws_custom_keywords":
-          kwsConfig = { ...kwsConfig, custom_keywords: args?.keywords ?? "" };
-          return Promise.resolve(undefined);
-        case "set_kws_params":
-          kwsConfig = { ...kwsConfig, ...(args?.params ?? {}) };
-          return Promise.resolve(undefined);
         case "get_microphone":
           return Promise.resolve(mic);
         case "set_microphone":
           mic = args?.mic ?? "";
           return Promise.resolve(undefined);
-        case "is_listening":
-          return Promise.resolve(kwsListening);
         case "get_asr_config":
           return Promise.resolve({ ...asrConfig });
+        case "set_asr_enabled":
+          asrConfig = { ...asrConfig, enabled: args?.enabled ?? false };
+          return Promise.resolve(undefined);
+        case "start_asr_listen":
+        case "stop_asr_listen":
+        case "is_asr_listening":
+          return cmd === "is_asr_listening" ? Promise.resolve(false) : Promise.resolve(undefined);
         case "get_tts_config":
           return Promise.resolve({ ...ttsConfig });
+        case "set_tts_enabled":
+          ttsConfig = { ...ttsConfig, enabled: args?.enabled ?? false };
+          return Promise.resolve(undefined);
         case "list_tts_voices":
           return Promise.resolve([]);
-        case "get_llm_config":
-          return Promise.resolve(llmConfig);
-        case "unload_llm_model":
-          return llmUnloadReject ? Promise.reject(llmUnloadReject) : Promise.resolve(undefined);
-        case "is_asr_listening":
-          return Promise.resolve(false);
-        case "is_llm_ready":
-          return Promise.resolve(false);
         case "list_model_library":
           return Promise.resolve([]);
-        case "get_dsh_config":
-          return Promise.resolve({
-            enabled: false,
-            port: 0,
-            voice_enabled: true,
-            llm_enabled: true,
-            record_to_history: true,
-            running: false,
-            actual_port: null,
-            error: null,
-            discovery_path: "/tmp/dsh-bridge.json",
-          });
-        case "detect_dsh_integration":
-          return Promise.resolve({
-            status: {
-              dsh_home_detected: false,
-              profile_ready: false,
-              plugin_installed: false,
-              plugin_activated: false,
-            },
-            manual_command: "dsh plugin --profile web add @zapmomo-ai/dsh-plugin",
-          });
-        case "get_dsh_bridge_status":
-          return Promise.resolve({
-            running: false,
-            port: null,
-            error: null,
-            last_heartbeat_at: null,
-          });
-        case "start_listen":
-        case "stop_listen":
-        case "download_kws_model":
-          return Promise.resolve(undefined);
-        case "get_voice_enabled":
-          return Promise.resolve(voiceEnabled);
-        case "set_voice_enabled":
-          voiceEnabled = args?.enabled ?? false;
-          return Promise.resolve(undefined);
+        case "get_shortcuts":
+          return Promise.resolve({});
+        case "get_hide_dock_icon":
+          return Promise.resolve(false);
+        case "get_autostart":
+          return Promise.resolve(false);
+        case "get_storage_info":
+        case "get_storage_prompt":
+          return Promise.resolve(null);
+        case "get_system_resources":
+          return Promise.resolve(null);
         default:
+          // 已裁剪能力（KWS/LLM/声纹/语音会话/伴侣）的命令：后端不再注册，返回空。
           return Promise.resolve(undefined);
       }
     },
   );
 });
 
-describe("App（KWS 控制面板）", () => {
-  it("渲染 Sidebar 导航与模型概览页（模型摘要）", async () => {
+describe("App（路由收敛：概览 / 模型 / 设置）", () => {
+  it("渲染 Sidebar 导航（概览 / 模型 / 设置）与模型概览页", async () => {
     renderApp("/models");
     expect(screen.getByAltText("ZapMomo")).toBeInTheDocument();
     expect(screen.getByText("概览")).toBeInTheDocument();
-    expect(screen.getByText("插件集成")).toBeInTheDocument();
+    expect(screen.getByText("设置")).toBeInTheDocument();
     expect(screen.getByText("模型摘要")).toBeInTheDocument();
+    // 已裁剪页面不再出现在导航
+    expect(screen.queryByText("伙伴")).not.toBeInTheDocument();
+    expect(screen.queryByText("插件集成")).not.toBeInTheDocument();
+    expect(screen.queryByText("对话记录")).not.toBeInTheDocument();
   });
 
-  it("插件集成页：渲染 dsh 集成卡片（未检测到 dsh 引导）", async () => {
-    renderApp("/integrations");
-    // 「插件集成」同时出现在侧栏与页标题，这里用 heading role 消歧
-    expect(screen.getByRole("heading", { name: "插件集成" })).toBeInTheDocument();
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("detect_dsh_integration"));
-    expect(screen.getByText("deepseek-harness")).toBeInTheDocument();
-    expect(screen.getByTestId("dsh-integration-state").textContent).toContain("未检测到 dsh");
+  it("默认路由重定向到 /home（概览页）", async () => {
+    renderApp("/");
+    expect(await screen.findByText("AI 能力")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "概览" })).toBeInTheDocument();
+  });
+
+  it("概览页：AI 能力卡只有 ASR 与 TTS 两张（纯展示）", async () => {
+    renderApp("/home");
+
+    const capabilities = await screen.findByLabelText("AI 能力");
+    expect(await within(capabilities).findByText("语音识别")).toBeInTheDocument();
+    expect(within(capabilities).getByText("语音合成")).toBeInTheDocument();
+    expect(within(capabilities).queryByText("唤醒词")).not.toBeInTheDocument();
+    expect(within(capabilities).queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("概览页 ASR 开关调用 start_asr_listen", async () => {
+    asrConfig = { ...ASR_CONFIG, models_present: true };
     const user = userEvent.setup();
     renderApp("/models");
 
@@ -257,23 +165,6 @@ describe("App（KWS 控制面板）", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
     });
-  });
-
-  it("点击唤醒词开关直接调用 start_listen（不再联动 ASR）", async () => {
-    const user = userEvent.setup();
-    renderApp("/models");
-
-    const kwsSwitch = await screen.findByRole("switch", { name: "唤醒词（KWS）开关" });
-    expect(kwsSwitch).not.toBeDisabled();
-
-    await user.click(kwsSwitch);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_listen", { device: null, keywords: null });
-    });
-    // 不联动 ASR：不弹确认框、不启动 ASR
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(invokeMock).not.toHaveBeenCalledWith("start_asr_listen", expect.anything());
   });
 
   it("概览页语音合成开关调用 set_tts_enabled", async () => {
@@ -287,43 +178,11 @@ describe("App（KWS 控制面板）", () => {
     });
   });
 
-  it("设置页语音会话开关调用 set_voice_enabled（持久化启用态）", async () => {
-    // 开关前置：KWS/ASR 需已启用，否则语音会话开关置灰点不动
-    kwsConfig = { ...DEFAULT_CONFIG, enabled: true, models_present: true };
-    asrConfig = { ...ASR_CONFIG, enabled: true, models_present: true };
-    const user = userEvent.setup();
-    renderApp("/settings");
-
-    // 默认 voiceEnabled=true，点击即停用
-    await user.click(await screen.findByRole("switch", { name: "语音会话开关" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_voice_enabled", { enabled: false });
-    });
-  });
-
-  it("LLM 卸载失败：右上角通知展示真实原因（如语音会话占用）", async () => {
-    llmConfig = { ...llmConfigured(llmConfig), ready: true };
-    llmUnloadReject = "语音会话正在使用 LLM。请先在「模型与能力」页停止会话后再卸载。";
-    const user = userEvent.setup();
-    renderApp("/models");
-
-    // 开启的 LLM 开关（toggled 绑 ready），点击触发 unload
-    await user.click(await screen.findByRole("switch", { name: "AI 大脑（LLM）开关" }));
-
-    // 真实错误经右上角 Toast 透出（而非仅红色「错误」）
-    expect(
-      await screen.findByText("语音会话正在使用 LLM。请先在「模型与能力」页停止会话后再卸载。"),
-    ).toBeInTheDocument();
-  });
-
   it("概览页引导卡：默认全未配置 → 每项能力一个直达按钮", async () => {
     renderApp("/models");
-    expect(await screen.findByText("4 项能力尚未配置模型")).toBeInTheDocument();
+    expect(await screen.findByText("2 项能力尚未配置模型")).toBeInTheDocument();
     const cases: Array<[string, string]> = [
-      ["去配置唤醒词（KWS）", "/models/kws"],
       ["去配置语音识别（ASR）", "/models/asr"],
-      ["去配置AI 大脑（LLM）", "/models/llm"],
       ["去配置语音合成（TTS）", "/models/tts"],
     ];
     for (const [name, href] of cases) {
@@ -332,10 +191,8 @@ describe("App（KWS 控制面板）", () => {
   });
 
   it("概览页引导卡：全部配置正常时不渲染", async () => {
-    kwsConfig = { ...kwsConfig, models_present: true };
     asrConfig = { ...asrConfig, models_present: true };
     ttsConfig = { ...ttsConfig, models_present: true };
-    llmConfig = llmConfigured(llmConfig);
     renderApp("/models");
     // 等待配置加载完成（「未配置模型」span 消失）后再断言无引导卡。
     await waitFor(() => {
@@ -344,104 +201,32 @@ describe("App（KWS 控制面板）", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("LLM 已配置：摘要行展示远程模型名，状态为未连接", async () => {
-    llmConfig = llmConfigured(llmConfig);
-    renderApp("/models");
-
-    // LLM 行模型名区域回显远程模型名（等 llm config 异步加载完成）
-    expect(await screen.findByText("glm-4.7-flash")).toBeInTheDocument();
-    // 未连接时行内开关可用（点击即连接）
-    const llmRow = screen.getByRole("link", { name: "配置AI 大脑（LLM）" });
-    expect(within(llmRow).getByText("未连接", { selector: "span" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "AI 大脑（LLM）开关" })).toBeEnabled();
+  it("ASR 配置页可达：渲染标题与返回入口", async () => {
+    renderApp("/models/asr");
+    expect(await screen.findByRole("heading", { name: "语音识别（ASR）配置" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "模型与能力" })).toHaveAttribute("href", "/models");
   });
 
-  it("渲染 KWS 配置项", async () => {
-    const user = userEvent.setup();
-    renderApp();
-    // 基础配置显示当前模型 basename + 未下载 Badge
-    expect(
-      await screen.findByText("sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("未下载")).toBeInTheDocument();
-    // 模型信息默认折叠；展开后显示只读字段
-    await user.click(screen.getByRole("button", { name: /模型信息/ }));
-    expect(await screen.findByText("推理后端")).toBeInTheDocument();
-    expect(screen.getByText("cpu")).toBeInTheDocument();
-    expect(screen.getByText("16000")).toBeInTheDocument();
-    expect(screen.getByText("文森特卡索")).toBeInTheDocument();
+  it("TTS 配置页可达：渲染标题与返回入口", async () => {
+    renderApp("/models/tts");
+    expect(await screen.findByRole("heading", { name: "语音合成（TTS）配置" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "模型与能力" })).toHaveAttribute("href", "/models");
   });
 
-  it("模型缺失时显示警告与下载按钮", async () => {
-    renderApp();
-    expect(await screen.findByText("模型文件缺失")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /下载模型/ })).toBeInTheDocument();
-  });
-
-  it("点击顶部开关开启监听：持久化 enabled 并调用 start_listen，开关置 ON", async () => {
-    kwsConfig = { ...kwsConfig, models_present: true };
-    const user = userEvent.setup();
-    renderApp();
-
-    await user.click(await screen.findByRole("switch", { name: "唤醒词监听开关" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_kws_enabled", { enabled: true });
-    });
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_listen", {
-        device: null,
-        keywords: null,
-      });
-    });
-    // 开关绑持久化 enabled：set_kws_enabled 回读后置 ON
-    await waitFor(() => {
-      expect(screen.getByRole("switch", { name: "唤醒词监听开关" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-    });
-  });
-
-  it("点击顶部开关关闭监听：停止监听并持久化 enabled=false", async () => {
-    kwsConfig = { ...kwsConfig, models_present: true };
-    const user = userEvent.setup();
-    renderApp();
-
-    const sw = await screen.findByRole("switch", { name: "唤醒词监听开关" });
-    await user.click(sw);
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_listen", {
-        device: null,
-        keywords: null,
-      });
-    });
-
-    await user.click(screen.getByRole("switch", { name: "唤醒词监听开关" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_listen");
-    });
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_kws_enabled", { enabled: false });
-    });
-  });
-
-  it("点击下载模型调用 download_kws_model 并刷新配置", async () => {
-    const user = userEvent.setup();
-    renderApp();
-    const button = await screen.findByRole("button", { name: /下载模型/ });
-
-    await user.click(button);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("download_kws_model");
-    });
-    // 下载完成后会重新拉取配置（models_present 变 true 后按钮消失）
-    await waitFor(() => {
-      const calls = invokeMock.mock.calls.map((c) => c[0]);
-      expect(calls.filter((c) => c === "get_kws_config").length).toBeGreaterThanOrEqual(2);
-    });
+  it("已裁剪路由（kws/llm/speaker/integrations/chat/companion）不再渲染任何页面", () => {
+    for (const path of [
+      "/models/kws",
+      "/models/llm",
+      "/models/speaker",
+      "/integrations",
+      "/chat",
+      "/companion",
+    ]) {
+      const { unmount } = renderApp(path);
+      // 无匹配路由：主面板只有壳层（无页面标题），也不崩
+      expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it("设置页可切换是否隐藏 Dock / Cmd+Tab 图标", async () => {
@@ -510,23 +295,6 @@ describe("App（KWS 控制面板）", () => {
     } finally {
       if (uaDesc) Object.defineProperty(navigator, "userAgent", uaDesc);
     }
-  });
-
-  it("KWS 监听中仍可切换麦克风来源（后端自动重启监听）", async () => {
-    const user = userEvent.setup();
-    kwsListening = true;
-    renderApp("/settings");
-
-    // 监听运行中下拉不再被禁用（切换后由后端用新设备重启监听）
-    const combobox = await screen.findByRole("combobox", { name: "麦克风来源" });
-    expect(combobox).not.toBeDisabled();
-
-    await user.click(combobox);
-    await user.click(await screen.findByRole("option", { name: "USB 麦克风" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_microphone", { mic: "USB 麦克风" });
-    });
   });
 
   it("设置页点击「重启」按钮调用 restart_app", async () => {
