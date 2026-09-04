@@ -31,7 +31,7 @@ pub struct VerifiedEntry {
     /// 能力类型（llm/asr/tts/kws）。
     #[serde(default)]
     pub model_type: Option<String>,
-    /// architecture hint（如 llama-cpp-gguf / sherpa-asr-streaming-zipformer）。
+    /// architecture hint（如 audiocpp-qwen3-asr-gguf / audiocpp-qwen3-tts-gguf）。
     #[serde(default)]
     pub architecture: Option<String>,
     #[serde(default)]

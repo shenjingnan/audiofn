@@ -1289,9 +1289,9 @@ mod tests {
                 Some(crate::asr::config::AsrModelKind::Qwen3Asr)
             );
 
-            // streaming zipformer：asr_kind 缺省 None → 复位 model_type，
-            // 交回 resolve 按目录内容探测（残留 qwen3 的 Some 值会用旧探针
-            // 校验新目录，误报「模型文件缺失」）
+            // 已裁剪的 sherpa streaming zipformer 目录（registry 未收录）：
+            // 复位 model_type 交回 resolve 按目录内容探测（残留 qwen3 的 Some
+            // 值会用旧探针校验新目录，误报「模型文件缺失」）
             let zip =
                 home.join("models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20");
             set_selected_model(ModelType::Asr, &zip).unwrap();
@@ -1341,7 +1341,7 @@ mod tests {
                 "前置：qwen3 条目应持久化 model_type"
             );
 
-            // 切到真实布局的 streaming zipformer 目录（registry 无 asr_kind）
+            // 切到真实布局的 streaming zipformer 目录（registry 未收录）
             let zip =
                 home.join("models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20");
             std::fs::create_dir_all(&zip).unwrap();
@@ -1381,8 +1381,8 @@ mod tests {
     #[test]
     fn test_set_selected_asr_audiocpp_backend_and_hotwords() {
         run_with_temp_home(|home| {
-            // 先切默认 zipformer（sherpa 侧）并配上热词
-            // （sherpa Qwen3-ASR 已移除，zipformer 是仅存的 sherpa ASR 条目）
+            // 先切一个 registry 未收录的 sherpa zipformer 目录（老用户存量）
+            // 并配上热词
             let sherpa =
                 home.join("models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20");
             set_selected_model(ModelType::Asr, &sherpa).unwrap();
