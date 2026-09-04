@@ -1,14 +1,14 @@
 /**
  * 平台下载数据与 UA 检测逻辑（纯 TS，无 DOM，可被 Server/Client/测试三方引用）。
  *
- * 直链与根 README「下载桌面应用」一致：全部指向 GitHub Releases 的 latest
- * 下载目录，无需登录 GitHub、自动跟随最新版本。
+ * 直链与根 README「应用下载」一致：全部指向 GitHub Releases 的 latest
+ * 下载目录，无需登录 GitHub、自动跟随最新版本。资产文件名须与
+ * release.yml 的「Rename installers」步骤严格同步。
  *
  * 注意：Linux deb 是 `amd64`、rpm 是 `x86_64`，命名不一致，勿统一替换。
  */
 
 export type PlatformKey =
-  | 'windows-x64'
   | 'macos-arm64'
   | 'macos-x64'
   | 'linux-x64'
@@ -31,30 +31,13 @@ export interface Platform {
 }
 
 export const RELEASE_BASE =
-  'https://github.com/shenjingnan/zapmomo/releases/latest/download/';
+  'https://github.com/shenjingnan/audiofn/releases/latest/download/';
 
 /** Releases 页面兜底入口（UA 识别失败 / 移动端时使用）。 */
-export const RELEASES_PAGE = 'https://github.com/shenjingnan/zapmomo/releases';
+export const RELEASES_PAGE = 'https://github.com/shenjingnan/audiofn/releases';
 
 /** 全部可下载平台（files[0] 为该平台默认下载）。 */
 export const PLATFORMS: Platform[] = [
-  {
-    key: 'windows-x64',
-    os: 'Windows',
-    arch: 'x64',
-    files: [
-      {
-        label: 'EXE',
-        fileName: 'ZapMomo_Windows_x64.exe',
-        url: `${RELEASE_BASE}ZapMomo_Windows_x64.exe`,
-      },
-      {
-        label: 'MSI',
-        fileName: 'ZapMomo_Windows_x64.msi',
-        url: `${RELEASE_BASE}ZapMomo_Windows_x64.msi`,
-      },
-    ],
-  },
   {
     key: 'macos-arm64',
     os: 'macOS',
@@ -62,8 +45,8 @@ export const PLATFORMS: Platform[] = [
     files: [
       {
         label: 'DMG',
-        fileName: 'ZapMomo_macOS_arm64.dmg',
-        url: `${RELEASE_BASE}ZapMomo_macOS_arm64.dmg`,
+        fileName: 'AudioFn_macOS_arm64.dmg',
+        url: `${RELEASE_BASE}AudioFn_macOS_arm64.dmg`,
       },
     ],
     note: '未签名：首次打开提示「已损坏」？双击 dmg 内「首次打开修复.command」自动安装并修复',
@@ -75,8 +58,8 @@ export const PLATFORMS: Platform[] = [
     files: [
       {
         label: 'DMG',
-        fileName: 'ZapMomo_macOS_x64.dmg',
-        url: `${RELEASE_BASE}ZapMomo_macOS_x64.dmg`,
+        fileName: 'AudioFn_macOS_x64.dmg',
+        url: `${RELEASE_BASE}AudioFn_macOS_x64.dmg`,
       },
     ],
     note: '未签名：首次打开提示「已损坏」？双击 dmg 内「首次打开修复.command」自动安装并修复',
@@ -88,20 +71,20 @@ export const PLATFORMS: Platform[] = [
     files: [
       {
         label: 'DEB',
-        fileName: 'ZapMomo_Linux_amd64.deb',
-        url: `${RELEASE_BASE}ZapMomo_Linux_amd64.deb`,
+        fileName: 'AudioFn_Linux_amd64.deb',
+        url: `${RELEASE_BASE}AudioFn_Linux_amd64.deb`,
         systems: 'Debian / Ubuntu 等',
       },
       {
         label: 'RPM',
-        fileName: 'ZapMomo_Linux_x86_64.rpm',
-        url: `${RELEASE_BASE}ZapMomo_Linux_x86_64.rpm`,
+        fileName: 'AudioFn_Linux_x86_64.rpm',
+        url: `${RELEASE_BASE}AudioFn_Linux_x86_64.rpm`,
         systems: 'Fedora / RHEL / openSUSE 等',
       },
       {
         label: 'AppImage',
-        fileName: 'ZapMomo_Linux_amd64.AppImage',
-        url: `${RELEASE_BASE}ZapMomo_Linux_amd64.AppImage`,
+        fileName: 'AudioFn_Linux_amd64.AppImage',
+        url: `${RELEASE_BASE}AudioFn_Linux_amd64.AppImage`,
         systems: '所有发行版通用（免安装）',
       },
     ],
@@ -124,6 +107,9 @@ export interface DetectInput {
 /**
  * 根据浏览器 UA 信息判定下载平台。纯函数、无副作用，可单测。
  *
+ * Windows 无安装包（构建白名单只有 macOS / Linux，见 release.yml 矩阵），
+ * 识别为 Windows 一律返回 `unknown`，让 UI 走 Releases 页兜底而非直链。
+ *
  * macOS 的 Apple Silicon / Intel 区分依赖 `userAgentData.architecture`
  * （Chromium 系低熵属性）；UA 字符串里的 `Intel Mac OS X` 不可靠（Apple
  * Silicon 上的浏览器为兼容也上报该值），因此禁止据此判 Intel。arch 缺失
@@ -139,12 +125,12 @@ export function detectPlatform(input: DetectInput): PlatformKey {
   if (/android|iphone|ipad|ipod/.test(ua)) return 'unknown';
 
   // userAgentData.platform 优先（低熵、最准确）
-  if (platform === 'windows') return 'windows-x64';
+  if (platform === 'windows') return 'unknown';
   if (platform === 'linux') return 'linux-x64';
   if (platform === 'macos' || platform === 'macintel') return resolveMacArch(arch);
 
   // 无 userAgentData 时的 UA 字符串回退
-  if (/windows/.test(ua)) return 'windows-x64';
+  if (/windows/.test(ua)) return 'unknown';
   if (/linux/.test(ua)) return 'linux-x64';
   if (/mac os x|macintosh/.test(ua)) return resolveMacArch(arch);
 

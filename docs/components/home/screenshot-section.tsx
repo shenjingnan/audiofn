@@ -8,7 +8,7 @@ export function ScreenshotSection() {
       <div className="relative overflow-hidden rounded-2xl bg-fd-card shadow-2xl ring-1 ring-fd-border">
         <img
           src="/screenshots/home.png"
-          alt="ZapMomo 桌面应用概览页"
+          alt="AudioFn 桌面应用概览页"
           width={1600}
           height={1030}
           loading="lazy"

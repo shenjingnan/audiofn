@@ -9,26 +9,6 @@ interface IconProps {
  * 不引入 lucide-react：docs 包拿不到 fumadocs-ui 的传递依赖，且平台
  * 品牌图标 lucide 本来也不提供。
  */
-export function WindowsIcon({ className }: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={className}
-    >
-      <path d="M3 5.5 10.5 4v6.5H3Z" />
-      <path d="M14.5 3.5 21 4.5V11h-6.5Z" />
-      <path d="M3 13h7.5V20L3 18.5Z" />
-      <path d="M14.5 13H21v7l-6.5-1.5Z" />
-    </svg>
-  );
-}
-
 export function AppleIcon({ className }: IconProps) {
   return (
     <svg
@@ -109,8 +89,6 @@ export function PlatformIcon({
   className?: string;
 }) {
   switch (platform) {
-    case 'windows-x64':
-      return <WindowsIcon className={className} />;
     case 'macos-arm64':
     case 'macos-x64':
       return <AppleIcon className={className} />;

@@ -2,9 +2,9 @@ name: Upload to Baidu Netdisk
 
 # Release 正式发布（release.yml 以 draft: false 发布）后触发，
 # 用 BaiduPCS-Go 将该版本全部安装包与两份纯文本说明上传到百度网盘的版本目录：
-#   /apps/zapmomo/releases/<tag>/*.dmg|.msi|.exe|.deb|.rpm|.AppImage ...
-#   /apps/zapmomo/releases/<tag>/更新说明.txt  （Release body 的自动变更日志）
-#   /apps/zapmomo/releases/<tag>/安装说明.txt  （README 安装章节纯文本化，单源不另维护）
+#   /apps/audiofn/releases/<tag>/*.dmg|.deb|.rpm|.AppImage ...
+#   /apps/audiofn/releases/<tag>/更新说明.txt  （Release body 的自动变更日志）
+#   /apps/audiofn/releases/<tag>/安装说明.txt  （README 安装章节纯文本化，单源不另维护）
 # 也支持手动 dispatch 补传/重跑（upload --policy overwrite 幂等覆盖）。
 #
 # 前置配置（仓库 Settings → Secrets and variables → Actions）：
@@ -31,7 +31,7 @@ env:
   # 表达式（GitHub Actions 注入防护），run 中只引用 $TAG。
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
   # 版本目录收在 releases/ 层级下，与网盘中其他杂物隔离
-  NETDISK_DIR: /apps/zapmomo/releases
+  NETDISK_DIR: /apps/audiofn/releases
   PCS_VERSION: v4.0.1
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
       - name: Normalize tag
         # 手动 dispatch 容易漏写 v 前缀（tag 实为 vX.Y.Z），漏写时
         # gh release download 报 release not found。归一化补齐前缀，同时保证
-        # 网盘目录名（/apps/zapmomo/<tag>）与 release 事件触发时的口径一致。
+        # 网盘目录名（/apps/audiofn/<tag>）与 release 事件触发时的口径一致。
         run: echo "TAG=v${TAG#v}" >> "$GITHUB_ENV"
 
       - name: Check credentials
@@ -114,7 +114,7 @@ jobs:
           fi
 
           {
-            echo "ZapMomo ${TAG} 更新说明"
+            echo "AudioFn ${TAG} 更新说明"
             echo "发布日期：${PUBLISHED}"
             echo "完整信息（含安装包下载）：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
             echo "============================================================"
@@ -135,7 +135,7 @@ jobs:
           fi
 
           {
-            echo "ZapMomo 安装说明"
+            echo "AudioFn 安装说明"
             echo "本说明由项目 README 自动生成，最新内容见：https://github.com/${GITHUB_REPOSITORY}#应用下载"
             echo "============================================================"
             echo

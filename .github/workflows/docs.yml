@@ -1,7 +1,7 @@
 name: Docs
 
 # 构建验证 Fumadocs 文档站（静态导出）。
-# 实际部署由 Cloudflare Pages Git 集成完成（仓库关联 zapmomo-docs 项目），
+# 实际部署由 Cloudflare Pages Git 集成完成（仓库关联 audiofn-docs 项目），
 # 此处保留 PR 构建校验作为 GitHub 侧快速反馈。
 on:
   pull_request:
@@ -37,7 +37,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test docs (platform detection)
-        run: pnpm --filter zapmomo-docs test
+        run: pnpm --filter audiofn-docs test
 
       - name: Build docs (static export)
-        run: pnpm --filter zapmomo-docs build
+        run: pnpm --filter audiofn-docs build

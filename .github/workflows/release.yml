@@ -92,8 +92,8 @@ jobs:
 
       - name: Install frontend deps
         # 安装除 docs（Next.js）外的所有 workspace：根包（@tauri-apps/cli）+ frontend（React）
-        # 注意：--filter 按包名匹配，docs workspace 的包名为 zapmomo-docs
-        run: pnpm install --filter '!zapmomo-docs' --frozen-lockfile
+        # 注意：--filter 按包名匹配，docs workspace 的包名为 audiofn-docs
+        run: pnpm install --filter '!audiofn-docs' --frozen-lockfile
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.1
@@ -266,11 +266,11 @@ jobs:
           shopt -s nullglob
           for f in *; do
             case "$f" in
-              *aarch64.dmg)    mv "$f" "ZapMomo_macOS_arm64.dmg" ;;
-              *x64.dmg)        mv "$f" "ZapMomo_macOS_x64.dmg" ;;
-              *amd64.deb)      mv "$f" "ZapMomo_Linux_amd64.deb" ;;
-              *x86_64.rpm)     mv "$f" "ZapMomo_Linux_x86_64.rpm" ;;
-              *amd64.AppImage) mv "$f" "ZapMomo_Linux_amd64.AppImage" ;;
+              *aarch64.dmg)    mv "$f" "AudioFn_macOS_arm64.dmg" ;;
+              *x64.dmg)        mv "$f" "AudioFn_macOS_x64.dmg" ;;
+              *amd64.deb)      mv "$f" "AudioFn_Linux_amd64.deb" ;;
+              *x86_64.rpm)     mv "$f" "AudioFn_Linux_x86_64.rpm" ;;
+              *amd64.AppImage) mv "$f" "AudioFn_Linux_amd64.AppImage" ;;
             esac
           done
           ls -1
@@ -288,14 +288,14 @@ jobs:
 
           | 系统 | 芯片 / 架构 | 下载 | 说明 |
           | --- | --- | --- | --- |
-          | **macOS 13+** | Apple Silicon（M1/M2/M3/M4） | [![macOS](https://img.shields.io/badge/download-arm64.dmg-8E8E93?logo=apple)](${BASE}/ZapMomo_macOS_arm64.dmg) | 不确定芯片？见下方说明 |
-          | **macOS 13+** | Intel | [![macOS](https://img.shields.io/badge/download-x64.dmg-8E8E93?logo=apple)](${BASE}/ZapMomo_macOS_x64.dmg) | — |
-          | **Ubuntu / Debian** | amd64 | [![deb](https://img.shields.io/badge/download-amd64.deb-A80030?logo=debian&logoColor=white)](${BASE}/ZapMomo_Linux_amd64.deb) | 或 [AppImage](${BASE}/ZapMomo_Linux_amd64.AppImage) 免安装运行 |
-          | **Fedora / RHEL** | x86_64 | [![rpm](https://img.shields.io/badge/download-x86_64.rpm-294172?logo=fedora&logoColor=white)](${BASE}/ZapMomo_Linux_x86_64.rpm) | 或 [AppImage](${BASE}/ZapMomo_Linux_amd64.AppImage) 免安装运行 |
+          | **macOS 13+** | Apple Silicon（M1/M2/M3/M4） | [![macOS](https://img.shields.io/badge/download-arm64.dmg-8E8E93?logo=apple)](${BASE}/AudioFn_macOS_arm64.dmg) | 不确定芯片？见下方说明 |
+          | **macOS 13+** | Intel | [![macOS](https://img.shields.io/badge/download-x64.dmg-8E8E93?logo=apple)](${BASE}/AudioFn_macOS_x64.dmg) | — |
+          | **Ubuntu / Debian** | amd64 | [![deb](https://img.shields.io/badge/download-amd64.deb-A80030?logo=debian&logoColor=white)](${BASE}/AudioFn_Linux_amd64.deb) | 或 [AppImage](${BASE}/AudioFn_Linux_amd64.AppImage) 免安装运行 |
+          | **Fedora / RHEL** | x86_64 | [![rpm](https://img.shields.io/badge/download-x86_64.rpm-294172?logo=fedora&logoColor=white)](${BASE}/AudioFn_Linux_x86_64.rpm) | 或 [AppImage](${BASE}/AudioFn_Linux_amd64.AppImage) 免安装运行 |
 
           > 🍎 **Mac 用户看这里：**
           > 1. 不确定选哪个？点按左上角  菜单 →「关于本机」：显示「芯片：Apple M…」下载 **arm64** 版；显示「处理器：Intel Core…」下载 **x64** 版。
-          > 2. 首次打开若提示「"ZapMomo" 已损坏，无法打开」，并非真的损坏（应用未做 Apple 签名公证，被 Gatekeeper 拦截）：**双击 dmg 窗口里的「首次打开修复.command」**，自动安装到「应用程序」、清除隔离属性并启动；也可手动执行终端命令 \`xattr -cr /Applications/ZapMomo.app\`。详见 README「macOS 首次打开」一节。
+          > 2. 首次打开若提示「"AudioFn" 已损坏，无法打开」，并非真的损坏（应用未做 Apple 签名公证，被 Gatekeeper 拦截）：**双击 dmg 窗口里的「首次打开修复.command」**，自动安装到「应用程序」、清除隔离属性并启动；也可手动执行终端命令 \`xattr -cr /Applications/AudioFn.app\`。详见 README「macOS 首次打开」一节。
           EOF
           cat release_body.md
 

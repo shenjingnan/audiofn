@@ -3,13 +3,13 @@ import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: 'ZapMomo 文档',
+      title: 'AudioFn 文档',
     },
-    githubUrl: 'https://github.com/shenjingnan/zapmomo',
+    githubUrl: 'https://github.com/shenjingnan/audiofn',
     links: [
       {
         text: 'GitHub',
-        url: 'https://github.com/shenjingnan/zapmomo',
+        url: 'https://github.com/shenjingnan/audiofn',
       },
     ],
   };

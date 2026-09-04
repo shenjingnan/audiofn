@@ -30,26 +30,8 @@ jobs:
         uses: dtolnay/rust-toolchain@1.97.1
 
       - name: Cache cargo build artifacts
-        # cargo publish 的编译验证较重（llama-cpp-2 / sherpa-onnx 等），缓存加速
+        # cargo publish 的编译验证较重（tokio / reqwest 全特性等），缓存加速
         uses: Swatinem/rust-cache@v2
-
-      - name: Cache sherpa-onnx prebuilt libs
-        # 同 ci.yml check job：rust-cache 保存前会清空 target/ 下非 cargo 构建
-        # 目录里的文件，恢复出的 sherpa-onnx-prebuilt 只剩空目录，而 build.rs
-        # 只判断目录存在就跳过下载，链接时才报缺库；需单独缓存并校验。
-        uses: actions/cache@v6
-        with:
-          path: target/sherpa-onnx-prebuilt
-          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-
-      - name: Rehydrate sherpa-onnx prebuilt libs
-        shell: bash
-        run: |
-          if [ -d target/sherpa-onnx-prebuilt ] \
-            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
-            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
-            rm -rf target/sherpa-onnx-prebuilt
-          fi
 
       - name: Run release-plz (create tag + publish to crates.io)
         id: release

@@ -10,3 +10,5 @@ arpabet = "arpabet"
 onnxruntime = "onnxruntime"
 # deflate-flate2（zip crate 特性名）/ flate2 crate 的词干
 flate = "flate"
+# 有理数重采样坐标的分子（与分母 denom 成对使用的数学缩写，非 number 拼写错误）
+numer = "numer"

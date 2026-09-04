@@ -97,7 +97,7 @@ jobs:
           fail_ci_if_error: false
 
   app-check:
-    # zapmomo-app 只有本 job 用 -p 显式选中才会编译（workspace default-members
+    # audiofn-app 只有本 job 用 -p 显式选中才会编译（workspace default-members
     # 只含根 CLI crate，test job 碰不到 src-tauri）；macOS 由开发者本机日常
     # 编译覆盖，不另开腿。
     name: Tauri App Check
@@ -132,10 +132,10 @@ jobs:
           ls -la src-tauri/binaries/
 
       - name: Lint (app crate)
-        run: cargo clippy -p zapmomo-app -- -D warnings
+        run: cargo clippy -p audiofn-app -- -D warnings
 
       - name: Check (app crate)
-        run: cargo check -p zapmomo-app
+        run: cargo check -p audiofn-app
 
   test:
     name: Test (${{ matrix.os }})
@@ -181,7 +181,7 @@ jobs:
           cache: pnpm
 
       - name: Install frontend deps
-        run: pnpm install --filter '!zapmomo-docs' --frozen-lockfile
+        run: pnpm install --filter '!audiofn-docs' --frozen-lockfile
 
       - name: Type check (tsc -b)
         # 与 release.yml tauri beforeBuildCommand 的第一步完全相同。此前前端

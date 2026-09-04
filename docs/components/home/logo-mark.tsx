@@ -7,12 +7,12 @@ export function LogoMark() {
     <span className="inline-flex items-center gap-2">
       <img
         src="/favicon.svg"
-        alt="ZapMomo"
+        alt="AudioFn"
         width={32}
         height={32}
         className="h-6 w-auto"
       />
-      <span className="text-sm font-semibold">ZapMomo</span>
+      <span className="text-sm font-semibold">AudioFn</span>
     </span>
   );
 }

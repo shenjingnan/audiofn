@@ -8,13 +8,13 @@ import {
 } from './downloads';
 
 describe('detectPlatform', () => {
-  it('windows 经 userAgentData.platform 识别为 windows-x64', () => {
+  it('windows 识别为 unknown（无 Windows 安装包，走 Releases 页兜底）', () => {
     expect(
       detectPlatform({
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         platform: 'windows',
       }),
-    ).toBe('windows-x64');
+    ).toBe('unknown');
   });
 
   it('linux 经 userAgentData.platform 识别为 linux-x64', () => {
@@ -74,12 +74,12 @@ describe('detectPlatform', () => {
     ).toBe('macos-arm64');
   });
 
-  it('无 userAgentData：UA 回退 Windows → windows-x64', () => {
+  it('无 userAgentData：UA 回退 Windows → unknown（无 Windows 安装包）', () => {
     expect(
       detectPlatform({
         ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       }),
-    ).toBe('windows-x64');
+    ).toBe('unknown');
   });
 
   it('无 userAgentData：UA 回退 Linux → linux-x64', () => {
@@ -134,22 +134,21 @@ describe('PLATFORMS 数据完整性', () => {
     }
   });
 
-  it('文件名集合为页面展示的下载文件', () => {
+  it('文件名集合为页面展示的下载文件（与 release.yml 的 Rename 步骤严格同步）', () => {
     const names = PLATFORMS.flatMap((p) => p.files.map((f) => f.fileName)).sort();
     expect(names).toEqual([
-      'ZapMomo_Linux_amd64.AppImage',
-      'ZapMomo_Linux_amd64.deb',
-      'ZapMomo_Linux_x86_64.rpm',
-      'ZapMomo_Windows_x64.exe',
-      'ZapMomo_Windows_x64.msi',
-      'ZapMomo_macOS_arm64.dmg',
-      'ZapMomo_macOS_x64.dmg',
+      'AudioFn_Linux_amd64.AppImage',
+      'AudioFn_Linux_amd64.deb',
+      'AudioFn_Linux_x86_64.rpm',
+      'AudioFn_macOS_arm64.dmg',
+      'AudioFn_macOS_x64.dmg',
     ]);
   });
 
-  it('Windows 提供 EXE 与 MSI', () => {
-    const win = platformByKey('windows-x64');
-    expect(win?.files.map((f) => f.label)).toEqual(['EXE', 'MSI']);
+  it('不提供 Windows 安装包（构建白名单仅 macOS / Linux）', () => {
+    expect(PLATFORMS.map((p) => p.os)).not.toContain('Windows');
+    const names = PLATFORMS.flatMap((p) => p.files.map((f) => f.fileName));
+    expect(names.some((n) => n.endsWith('.exe') || n.endsWith('.msi'))).toBe(false);
   });
 
   it('Linux 每个格式都有适用系统说明', () => {
@@ -173,7 +172,7 @@ describe('PLATFORMS 数据完整性', () => {
 describe('platformByKey', () => {
   it('返回对应平台', () => {
     expect(platformByKey('macos-arm64')?.os).toBe('macOS');
-    expect(platformByKey('windows-x64')?.arch).toBe('x64');
+    expect(platformByKey('linux-x64')?.arch).toBe('x86_64');
   });
 
   it('unknown 不命中任何平台', () => {
