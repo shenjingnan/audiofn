@@ -111,17 +111,17 @@ type LibraryStub = {
   ownership: string;
 };
 
-/** 默认模型库桩：zipvoice 已装为当前（弹窗展示「当前模型」徽标依赖此条目）。 */
+/** 默认模型库桩：qwen3 0.6B 已装为当前（一期 registry 唯一默认 TTS 条目）。 */
 function defaultTtsModelLibrary(): LibraryStub[] {
   return [
     {
-      id: "tts-zipvoice-distill-int8",
-      displayName: "ZipVoice TTS zh-en",
+      id: "tts-qwen3-06b-base-q8-audiocpp",
+      displayName: "Qwen3-TTS 0.6B 克隆",
       modelType: "tts",
       installState: "installed",
       current: true,
-      localPath: "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
-      installId: "tts-zipvoice-distill-int8",
+      localPath: "/home/user/.audiofn/models/qwen3-tts-06b-base-audiocpp",
+      installId: "tts-qwen3-06b-base-q8-audiocpp",
       repoId: null,
       ownership: "managed",
     },
@@ -280,8 +280,12 @@ describe("TtsPage（语音合成 TTS）", () => {
 
     await user.click(screen.getByRole("button", { name: "选择模型" }));
     expect(await screen.findByText("选择合成模型")).toBeInTheDocument();
-    // 弹窗内展示内置预设：zipvoice 已装为当前 → 「当前模型」徽标
-    expect(screen.getByText("ZipVoice TTS zh-en")).toBeInTheDocument();
+    // 弹窗内展示内置预设：qwen3 0.6B 已装为当前 → 「当前模型」徽标；
+    // 已随 sherpa 收敛移除的 zipvoice/omnivoice/voxcpm2 预设不再出现
+    expect(screen.getByText("Qwen3-TTS 0.6B 克隆")).toBeInTheDocument();
+    expect(screen.queryByText("ZipVoice TTS zh-en")).not.toBeInTheDocument();
+    expect(screen.queryByText("OmniVoice 多语种克隆")).not.toBeInTheDocument();
+    expect(screen.queryByText("VoxCPM2 高保真克隆")).not.toBeInTheDocument();
     const currentBadges = await screen.findAllByText("当前模型");
     expect(currentBadges.length).toBeGreaterThanOrEqual(1);
   });

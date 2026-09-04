@@ -54,7 +54,7 @@ export function HomeHero() {
         </h1>
 
         <p className="mt-6 text-pretty text-lg/8 text-fd-muted-foreground">
-          Qwen3-ASR 离线转写，30 语言自动识别；Qwen3-TTS 用 5–30
+          Qwen3-ASR 离线转写，30 语言自动识别；Qwen3-TTS 用 3–10
           秒参考音频克隆你的音色。桌面与 CLI 双形态，全部在本地运行，数据不出设备；macOS
           / Linux 可用。
         </p>

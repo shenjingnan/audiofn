@@ -87,9 +87,9 @@ pub struct RegistryModel {
     #[serde(default)]
     pub optional_assets: Vec<String>,
     /// 可用平台约束（`None` = 全平台；取值对齐 target triple 简写，如
-    /// "darwin-aarch64"）。平台不符的条目在模型库中隐藏——如 audiocpp qwen3
-    /// 依赖 GPU 加速，仅 macOS arm64 Metal 的 sidecar 构建可用，
-    /// 其余平台纯 CPU 实测不可用（技术方案 R1 预案）。
+    /// "darwin-aarch64"）。平台不符的条目在模型库中隐藏——audiocpp qwen3
+    /// 家族的 GGUF 与平台无关，解锁 macOS arm64（Metal 加速）与 Linux x86_64
+    /// （引擎无 GPU 后端，CPU 推理、速度较慢）；ASR 条目无约束，全平台可用。
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
     /// `None` = 无内置下载源（需导入本地文件；在册 qwen3 三条目均有 manifest 下载源）
@@ -351,12 +351,13 @@ mod tests {
         assert_eq!(registry_tts_kind("不存在"), None);
     }
 
-    /// 平台过滤：audiocpp qwen3 家族 = darwin-aarch64（Windows 构建随一期裁剪移除，
-    /// 不再在册）；无 platforms 的条目全平台可见。本机命中解锁平台时条目在列；
-    /// 其它平台的 CI 通过「显式三元组判定函数」覆盖，不依赖宿主平台。
+    /// 平台过滤：audiocpp qwen3 家族 = darwin-aarch64 + linux-x86_64（GGUF 平台
+    /// 无关；Windows 构建随一期裁剪移除，不再在册）；无 platforms 的条目全平台
+    /// 可见。本机命中解锁平台时条目在列；其它平台的 CI 通过「显式三元组判定
+    /// 函数」覆盖，不依赖宿主平台。
     #[test]
     fn test_platforms_filter() {
-        let expected = ["darwin-aarch64"];
+        let expected = ["darwin-aarch64", "linux-x86_64"];
         for id in [
             "tts-qwen3-06b-base-q8-audiocpp",
             "tts-qwen3-17b-base-q8-audiocpp",
@@ -368,13 +369,13 @@ mod tests {
                 "{id} 平台清单"
             );
         }
-        // 显式判定（不依赖宿主平台）：解锁 darwin-aarch64；darwin-x86_64（引擎无
-        // Metal）/ linux（CPU-only 引擎）/ windows（已移除）保持隐藏
+        // 显式判定（不依赖宿主平台）：解锁 darwin-aarch64 / linux-x86_64（CPU 推理）；
+        // darwin-x86_64（引擎无 Metal）/ windows（已移除）保持隐藏
         let q06 = model_by_id("tts-qwen3-06b-base-q8-audiocpp").unwrap();
         assert!(platform_allows(q06, "darwin-aarch64"));
         assert!(!platform_allows(q06, "windows-x86_64"));
         assert!(!platform_allows(q06, "darwin-x86_64"));
-        assert!(!platform_allows(q06, "linux-x86_64"));
+        assert!(platform_allows(q06, "linux-x86_64"));
         // ASR 条目无平台约束（CPU 可跑，GPU 只是加速）
         let asr = model_by_id("asr-qwen3-0.6b-audiocpp").unwrap();
         assert!(asr.platforms.is_none());
@@ -388,7 +389,7 @@ mod tests {
     #[test]
     fn test_model_for_current_platform() {
         let triple = current_platform_triple();
-        let unlocked = triple == "darwin-aarch64";
+        let unlocked = matches!(triple, "darwin-aarch64" | "linux-x86_64");
         let q06 = model_for_current_platform("tts-qwen3-06b-base-q8-audiocpp");
         assert_eq!(q06.is_some(), unlocked, "{triple} 上 Qwen3-TTS 可见性");
         // 无平台约束的 ASR 全平台可见

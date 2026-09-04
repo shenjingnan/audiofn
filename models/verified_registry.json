@@ -7,7 +7,7 @@
       "repo_id": null,
       "model_type": "asr",
       "architecture": "audiocpp-qwen3-asr-gguf",
-      "compatibility_notes": "内置离线转写模型，audio.cpp qwen3_asr 验证可用（29 语言，实测 RTF≈0.05）。"
+      "compatibility_notes": "内置离线转写模型，audio.cpp qwen3_asr 验证可用（30 语言，实测 RTF≈0.05）。"
     },
     {
       "model_id": "tts-qwen3-06b-base-q8-audiocpp",

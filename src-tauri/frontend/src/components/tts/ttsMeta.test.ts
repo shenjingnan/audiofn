@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TTS_PRESETS } from "@/hooks/useTtsModelSwitch";
-import { type PresetWithPlatforms, visiblePresets } from "@/lib/modelPlatforms";
+import { visiblePresets } from "@/lib/modelPlatforms";
 import { isCloneRequiredTtsKind, isCloneTtsKind, ttsModelKindLabel } from "./ttsMeta";
 
 describe("ttsModelKindLabel", () => {
@@ -41,21 +41,12 @@ describe("isCloneTtsKind / isCloneRequiredTtsKind", () => {
 });
 
 describe("TTS_PRESETS", () => {
-  it("含 omnivoice 条目且 id 与后端 registry 一致", () => {
-    const omni = TTS_PRESETS.find((p) => p.id === "tts-omnivoice-q8-audiocpp");
-    expect(omni).toBeDefined();
-    expect(omni?.kind).toBe("omnivoice");
-  });
-
-  it("含 voxcpm2 条目且 id 与后端 registry 一致", () => {
-    const vox = TTS_PRESETS.find((p) => p.id === "tts-voxcpm2-q8-audiocpp");
-    expect(vox).toBeDefined();
-    expect(vox?.kind).toBe("voxcpm2");
-  });
-
-  it("含 qwen3-tts 两尺寸条目且 id 与后端 registry 一致", () => {
+  it("只含 qwen3-tts 两尺寸条目且 id 与后端 registry 一致", () => {
+    expect(TTS_PRESETS.map((p) => p.id)).toEqual([
+      "tts-qwen3-06b-base-q8-audiocpp",
+      "tts-qwen3-17b-base-q8-audiocpp",
+    ]);
     const q06 = TTS_PRESETS.find((p) => p.id === "tts-qwen3-06b-base-q8-audiocpp");
-    expect(q06).toBeDefined();
     expect(q06?.kind).toBe("qwen3_tts_06");
 
     const q17 = TTS_PRESETS.find((p) => p.id === "tts-qwen3-17b-base-q8-audiocpp");
@@ -70,6 +61,9 @@ describe("TTS_PRESETS", () => {
       "tts-kokoro-int8-multi-lang-v1-1",
       "tts-kokoro-multi-lang-v1-1",
       "tts-pocket-english-audiocpp",
+      "tts-zipvoice-distill-int8",
+      "tts-omnivoice-q8-audiocpp",
+      "tts-voxcpm2-q8-audiocpp",
     ];
     for (const id of removed) {
       expect(
@@ -84,25 +78,10 @@ describe("TTS_PRESETS", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("audiocpp 预设 platforms 与 registry 解锁范围一致（darwin-aarch64）", () => {
-    const audiocppIds = [
-      "tts-omnivoice-q8-audiocpp",
-      "tts-voxcpm2-q8-audiocpp",
-      "tts-qwen3-06b-base-q8-audiocpp",
-      "tts-qwen3-17b-base-q8-audiocpp",
-    ];
-    for (const id of audiocppIds) {
-      // 标注为 PresetWithPlatforms：联合类型里 zipvoice 成员无 platforms 字段，
-      // 直接访问 p?.platforms 会因属性不全而编译失败
-      const p: PresetWithPlatforms | undefined = TTS_PRESETS.find((x) => x.id === id);
-      expect(p, id).toBeDefined();
-      expect(p?.platforms, id).toEqual(["darwin-aarch64"]);
+  it("预设 platforms 与 registry 解锁范围一致（darwin-aarch64 + linux-x86_64）", () => {
+    for (const p of TTS_PRESETS) {
+      expect(p.platforms, p.id).toEqual(["darwin-aarch64", "linux-x86_64"]);
     }
-    // sherpa 族无平台约束
-    const zipvoice: PresetWithPlatforms | undefined = TTS_PRESETS.find(
-      (p) => p.id === "tts-zipvoice-distill-int8",
-    );
-    expect(zipvoice?.platforms).toBeUndefined();
   });
 });
 

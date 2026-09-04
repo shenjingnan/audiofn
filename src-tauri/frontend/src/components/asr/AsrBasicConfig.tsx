@@ -12,9 +12,8 @@ import { DeviceSelect } from "@/components/DeviceSelect";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { useRuntime } from "@/providers/RuntimeContext";
-import { isDefaultAsrModelDir, modelNameFromDir } from "./asrMeta";
+import { modelNameFromDir } from "./asrMeta";
 
 interface AsrBasicConfigProps {
   onTestOpen: () => void;
@@ -27,7 +26,11 @@ interface AsrBasicConfigProps {
 /**
  * 基础配置（macOS 设置行）：
  * 当前模型（名称 + 就绪/未下载 Badge + 切换模型 + 可展开完整路径）/ 麦克风来源（复用全局 DeviceSelect）+
- * 底部「下载模型 / 选择模型 / 测试识别」操作按钮。
+ * 底部「选择模型 / 测试识别 / 转写文件」操作按钮。
+ *
+ * 模型缺失统一走「选择模型」弹窗（下载/切换同一入口）；不再保留 legacy
+ * 一键「下载模型」——旧 sherpa 双语目录与 registry 默认模型不同目录，
+ * 一键下载装的是 Qwen3-ASR，装完当前模型仍是缺失态。
  */
 export function AsrBasicConfig({
   onTestOpen,
@@ -40,19 +43,11 @@ export function AsrBasicConfig({
   } = useRuntime();
   const { config, error } = asr.config;
   const { error: dictateError } = asr.dictate;
-  const { downloading, progress, error: downloadError, download } = asr.download;
   const [showPath, setShowPath] = useState(false);
 
   const modelsPresent = config?.models_present ?? false;
   const modelPath = config?.model_dir ?? "";
   const modelName = modelNameFromDir(modelPath);
-  // 当前模型是否为默认双语：只有它才允许用 legacy「下载模型」一键下载
-  // （download_asr_model 固定装双语 + 标点；其他模型缺失时走「选择模型」弹窗）
-  const isDefaultModel = isDefaultAsrModelDir(modelPath);
-
-  const percent =
-    progress?.stage === "downloading" ? Math.max(0, Math.min(100, progress.percent)) : 100;
-  const busy = downloading || (config?.model_downloading ?? false);
 
   return (
     <section className="overflow-hidden rounded-[16px] border border-panel-border bg-panel-background">
@@ -92,9 +87,7 @@ export function AsrBasicConfig({
             <CircleAlert className="h-4 w-4" />
             <AlertTitle>模型文件缺失</AlertTitle>
             <AlertDescription className="whitespace-pre-wrap">
-              {isDefaultModel
-                ? `模型文件缺失（${config.model_dir}）。点击下方「下载模型」按钮下载后即可开始识别。`
-                : `当前模型文件缺失（${config.model_dir}）。点击下方「选择模型」换回已安装模型，或在弹窗中重新下载。`}
+              {`当前模型文件缺失（${config.model_dir}）。点击下方「选择模型」下载 Qwen3-ASR，或换用已安装模型。`}
             </AlertDescription>
           </Alert>
         </div>
@@ -179,18 +172,12 @@ export function AsrBasicConfig({
       )}
 
       <div className="flex flex-wrap gap-2 border-t border-divider px-3.5 py-2.5">
-        {!modelsPresent &&
-          (isDefaultModel ? (
-            <Button onClick={download} disabled={busy}>
-              <Download className="h-4 w-4" />
-              {busy ? "下载中…" : "下载模型"}
-            </Button>
-          ) : (
-            <Button onClick={onSwitchOpen}>
-              <Download className="h-4 w-4" />
-              选择模型
-            </Button>
-          ))}
+        {!modelsPresent && (
+          <Button onClick={onSwitchOpen}>
+            <Download className="h-4 w-4" />
+            选择模型
+          </Button>
+        )}
         <Button
           variant="secondary"
           className="shadow-none"
@@ -210,22 +197,6 @@ export function AsrBasicConfig({
           转写文件
         </Button>
       </div>
-
-      {progress && (
-        <div className="space-y-1 px-3.5 pb-3">
-          <Progress value={percent} />
-          <p className="text-xs text-text-muted">{progress.message}</p>
-        </div>
-      )}
-
-      {downloadError && (
-        <div className="px-3.5 pb-3">
-          <Alert variant="destructive">
-            <CircleAlert className="h-4 w-4" />
-            <AlertDescription className="whitespace-pre-wrap">{downloadError}</AlertDescription>
-          </Alert>
-        </div>
-      )}
     </section>
   );
 }

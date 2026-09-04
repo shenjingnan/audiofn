@@ -9,47 +9,21 @@ import type { LibraryModel, ModelLibraryProgress, SetCurrentResult } from "@/typ
 /**
  * TTS 切换弹窗的内置预设（id = models/model_registry.json 的 registry id）。
  *
- * `platforms` 与 registry 的 platforms 字段同步维护（audiocpp 家族 =
- * darwin-aarch64）；弹窗渲染经 `visiblePresets` 以后端列表二次过滤——
- * 后端不可见时预设不展示（防「能下载不能切换」）。
+ * 一期模型库只收录 Qwen3-TTS 两尺寸（zipvoice/omnivoice/voxcpm2 已随 sherpa
+ * 收敛移除，不再作为预设）。`platforms` 与 registry 的 platforms 字段同步维护
+ * （audiocpp 家族 = darwin-aarch64 + linux-x86_64，Linux 为 CPU 推理）；弹窗渲染
+ * 经 `visiblePresets` 以后端列表二次过滤——后端不可见时预设不展示
+ * （防「能下载不能切换」）。
  */
 export const TTS_PRESETS = [
-  {
-    id: "tts-zipvoice-distill-int8",
-    name: "ZipVoice TTS zh-en",
-    kind: "zipvoice",
-    languages: "中英",
-    tagline: "零样本声音克隆 · 中英双语 · 含声码器",
-    sizeBytes: 163_320_194,
-  },
-  {
-    id: "tts-omnivoice-q8-audiocpp",
-    name: "OmniVoice 多语种克隆",
-    kind: "omnivoice",
-    languages: "多语种",
-    platforms: ["darwin-aarch64"] as const satisfies readonly PlatformId[],
-    tagline:
-      "audio.cpp 引擎 · 声音克隆 · 600+ 语种 · 24kHz · GPU 加速（macOS Metal / Windows CUDA）· 无 GPU 自动回退 CPU",
-    sizeBytes: 1_350_288_416,
-  },
-  {
-    id: "tts-voxcpm2-q8-audiocpp",
-    name: "VoxCPM2 高保真克隆",
-    kind: "voxcpm2",
-    languages: "多语种",
-    platforms: ["darwin-aarch64"] as const satisfies readonly PlatformId[],
-    tagline:
-      "audio.cpp 引擎 · 帧级流式 · 48kHz 录音室级 · 30 语种 · GPU 加速（macOS Metal / Windows CUDA）· 无 GPU 自动回退 CPU · 建议 16GB+ 内存",
-    sizeBytes: 2_955_000_480,
-  },
   {
     id: "tts-qwen3-06b-base-q8-audiocpp",
     name: "Qwen3-TTS 0.6B 克隆",
     kind: "qwen3_tts_06",
     languages: "多语种",
-    platforms: ["darwin-aarch64"] as const satisfies readonly PlatformId[],
+    platforms: ["darwin-aarch64", "linux-x86_64"] as const satisfies readonly PlatformId[],
     tagline:
-      "audio.cpp 引擎 · 声音克隆 · 10 语种 · 24kHz · GPU 加速（macOS Metal / Windows CUDA）· 需选择克隆音色",
+      "audio.cpp 引擎 · 声音克隆 · 10 语种 · 24kHz · GPU 加速（macOS Metal / Linux CPU）· 需选择克隆音色",
     sizeBytes: 1_991_211_136,
   },
   {
@@ -57,9 +31,9 @@ export const TTS_PRESETS = [
     name: "Qwen3-TTS 1.7B 克隆",
     kind: "qwen3_tts_17",
     languages: "多语种",
-    platforms: ["darwin-aarch64"] as const satisfies readonly PlatformId[],
+    platforms: ["darwin-aarch64", "linux-x86_64"] as const satisfies readonly PlatformId[],
     tagline:
-      "audio.cpp 引擎 · 声音克隆 · 10 语种 · 质量优先 · 24kHz · GPU 加速（macOS Metal / Windows CUDA）· 建议 16GB+ 内存 · 需选择克隆音色",
+      "audio.cpp 引擎 · 声音克隆 · 10 语种 · 质量优先 · 24kHz · GPU 加速（macOS Metal / Linux CPU）· 建议 16GB+ 内存 · 需选择克隆音色",
     sizeBytes: 2_695_175_104,
   },
 ] as const;

@@ -48,15 +48,3 @@ export function modelNameFromDir(dir: string | null | undefined): string | null 
   if (!dir) return null;
   return dir.split(/[\\/]/).pop() ?? dir;
 }
-
-/** 旧版（sherpa 时代）默认双语 ASR 模型目录名前缀（安装布局的日期后缀可能不同）。 */
-const LEGACY_ASR_DIR_PREFIX = "sherpa-onnx-streaming-zipformer-bilingual-zh-en";
-
-/**
- * 当前模型目录是否为旧版默认模型：命中时模型缺失展示 legacy「下载模型」一键下载
- * （固定装 registry 默认模型）；否则走「选择模型」弹窗（可下载/切换其他 ASR 模型）。
- */
-export function isDefaultAsrModelDir(dir: string | null | undefined): boolean {
-  const name = modelNameFromDir(dir);
-  return !!name && name.startsWith(LEGACY_ASR_DIR_PREFIX);
-}

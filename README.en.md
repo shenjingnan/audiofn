@@ -28,7 +28,7 @@ Offline speech recognition and voice cloning that run entirely on your device. N
 ## ✨ Features
 
 - **Speech recognition (ASR)** — Offline transcription with Qwen3-ASR-0.6B, automatic language detection across 30 languages; available from the `audiofn asr` CLI and the desktop transcription page (file transcription / dictation)
-- **Text-to-speech (TTS)** — Zero-shot voice cloning with Qwen3-TTS-0.6B / 1.7B: record 5–30 seconds of reference audio plus its transcript, then synthesize any text in that voice (10 languages including Chinese, English, Japanese and Korean)
+- **Text-to-speech (TTS)** — Zero-shot voice cloning with Qwen3-TTS-0.6B / 1.7B: record 3–10 seconds (5–10 recommended) of reference audio plus its transcript, then synthesize any text in that voice (10 languages including Chinese, English, Japanese and Korean)
 - **Desktop + CLI** — A Tauri 2 desktop panel (Overview / Model library / Transcribe / Synthesize / Voice library / Settings) alongside the `audiofn asr` / `audiofn tts` command line
 - **Local-first** — Powered by the audio.cpp sidecar engine (ggml; Metal on macOS, CPU on Linux). Models are one click away, and nothing is uploaded
 - **Model library** — One-click download, sha256 verification and model switching from the desktop "Models" page; model binaries are never committed, only their manifest (source / checksum / license) is versioned
@@ -84,7 +84,7 @@ cargo run -- config                                # Show config
 cargo run -- completion bash                       # Shell completions (zsh / fish / powershell / elvish likewise)
 ```
 
-Voice cloning in three steps: record 5–30 seconds of clean reference audio → write down exactly what it says → pass both as `--reference-wav` + `--reference-text` to `tts run`. You can also record voices in the desktop "Voice library" and reuse them later with `--voice <voice-id>`.
+Voice cloning in three steps: record 3–10 seconds (5–10 recommended) of clean reference audio → write down exactly what it says → pass both as `--reference-wav` + `--reference-text` to `tts run`. You can also record voices in the desktop "Voice library" and reuse them later with `--voice <voice-id>`.
 
 ## Development
 

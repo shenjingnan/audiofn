@@ -2,7 +2,6 @@ import { createContext, useContext } from "react";
 import type { AsrConfigState } from "@/hooks/useAsrConfig";
 import type { AsrDictateState } from "@/hooks/useAsrDictate";
 import type { AsrDictateResultsState } from "@/hooks/useAsrDictateResults";
-import type { AsrModelDownloadState } from "@/hooks/useAsrModelDownload";
 import type { DevicesState } from "@/hooks/useDevices";
 import type { TtsState } from "@/hooks/useTts";
 import type { AppInfo } from "@/types/tauri";
@@ -13,7 +12,6 @@ export interface RuntimeState {
   devices: DevicesState;
   asr: {
     config: AsrConfigState;
-    download: AsrModelDownloadState;
     /** 免提连续听写（离线模型，麦克风实时转写）运行状态 */
     dictate: AsrDictateState;
     /** 听写结果段 */

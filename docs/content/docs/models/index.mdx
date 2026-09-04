@@ -13,10 +13,10 @@ CLI `install-model` 共用同一套清单与校验逻辑。
 | 条目 id | 模型 | 用途 | 体积 | 适用平台 |
 | ------- | ---- | ---- | ---- | -------- |
 | `asr-qwen3-0.6b-audiocpp` | Qwen3-ASR 0.6B（q8_0，GGUF） | 语音转写，30 语言自动识别 | 约 1.1 GB | macOS / Linux |
-| `tts-qwen3-06b-base-q8-audiocpp` | Qwen3-TTS 0.6B Base（q8_0） | 音色克隆（默认） | 约 1.9 GB | macOS (Apple Silicon) |
-| `tts-qwen3-17b-base-q8-audiocpp` | Qwen3-TTS 1.7B Base（q8_0） | 音色克隆（质量优先） | 约 2.5 GB | macOS (Apple Silicon) |
+| `tts-qwen3-06b-base-q8-audiocpp` | Qwen3-TTS 0.6B Base（q8_0） | 音色克隆（默认） | 约 1.9 GB | macOS (Apple Silicon) / Linux (CPU) |
+| `tts-qwen3-17b-base-q8-audiocpp` | Qwen3-TTS 1.7B Base（q8_0） | 音色克隆（质量优先） | 约 2.5 GB | macOS (Apple Silicon) / Linux (CPU) |
 
-TTS 0.6B / 1.7B 建议内存：8GB / 16GB 以上。
+TTS 0.6B / 1.7B 建议内存：8GB / 16GB 以上；macOS 走 Metal 加速，Linux 为 CPU 推理（速度较慢）。
 
 ## 安装
 

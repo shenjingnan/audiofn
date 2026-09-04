@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/toast";
-import type { PlatformId } from "@/lib/modelPlatforms";
 import { api, onModelLibraryDownloadProgress } from "@/lib/tauri";
 import { useRuntime } from "@/providers/RuntimeContext";
 import { useStorageGate } from "@/providers/StorageGateProvider";
@@ -8,23 +7,16 @@ import type { LibraryModel, ModelLibraryProgress, SetCurrentResult } from "@/typ
 
 /**
  * ASR 切换弹窗的内置预设（id = models/model_registry.json 的 registry id）。
- * `platforms` 与 registry 同步维护（见 useTtsModelSwitch.ts 的 TTS_PRESETS 注释）。
+ * 一期模型库只收录 Qwen3-ASR 一条（zipformer 流式族已随 sherpa 后端移除，
+ * 不再作为预设）；registry 该条目无 `platforms` 约束 = 全平台可见。
  */
 export const ASR_PRESETS = [
   {
-    id: "asr-streaming-bilingual-zh-en",
-    name: "Streaming Zipformer ASR zh-en",
-    tagline: "中英双语 · 流式转写（默认）",
-    sizeBytes: 511_274_346,
-    kind: "zipformer",
-  },
-  {
     id: "asr-qwen3-0.6b-audiocpp",
     name: "Qwen3-ASR 0.6B (audio.cpp)",
-    tagline: "29 语言自动识别 · GPU 加速（macOS Metal / Windows CUDA）· 不支持热词 · 包体约 1.1GB",
+    tagline: "30 语言自动识别 · GPU 加速（macOS Metal / Linux CPU）· 不支持热词 · 包体约 1.1GB",
     sizeBytes: 1_151_272_416,
     kind: "qwen3_asr",
-    platforms: ["darwin-aarch64"] as const satisfies readonly PlatformId[],
   },
 ] as const;
 

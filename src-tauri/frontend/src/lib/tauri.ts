@@ -14,7 +14,6 @@ import type {
   AsrConfigInfo,
   AsrParamsPatch,
   AsrResult,
-  DownloadProgress,
   ListenStopped,
   SaveTtsVoiceRequest,
   ShortcutActionId,
@@ -39,7 +38,6 @@ export const api = {
   startAsrDictate: (args: { device: string | null }) => invoke<void>("start_asr_dictate", args),
   stopAsrDictate: () => invoke<void>("stop_asr_dictate"),
   isAsrDictating: () => invoke<boolean>("is_asr_dictating"),
-  downloadAsrModel: () => invoke<void>("download_asr_model"),
   transcribeAudio: (args: { wavPath: string | null }) =>
     invoke<TranscribeResult>("transcribe_audio", args),
   getTtsConfig: () => invoke<TtsConfigInfo>("get_tts_config"),
@@ -91,13 +89,6 @@ export const api = {
 };
 
 /** 类型安全的事件订阅（返回的 Promise resolve 后得到取消订阅函数）。 */
-
-/** ASR 模型下载进度（`asr-model-download-progress`）。 */
-export function onAsrDownloadProgress(
-  handler: (payload: DownloadProgress) => void,
-): Promise<UnlistenFn> {
-  return listen<DownloadProgress>("asr-model-download-progress", (e) => handler(e.payload));
-}
 
 export function onAsrDictateResult(handler: (result: AsrResult) => void): Promise<UnlistenFn> {
   return listen<AsrResult>("asr-dictate-result", (e) => handler(e.payload));

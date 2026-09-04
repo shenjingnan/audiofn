@@ -29,7 +29,7 @@
 
 ## qwen3-asr-0.6b-q8_0.gguf（audio.cpp ASR）
 
-- **用途**: 离线语音转写（ASR，Qwen3-ASR 0.6B，q8_0 量化，29 语言自动识别，
+- **用途**: 离线语音转写（ASR，Qwen3-ASR 0.6B，q8_0 量化，30 语言自动识别，
   不支持热词），由内置的 audio.cpp 引擎（sidecar 进程，Metal 后端）加载
 - **来源**: https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-ASR-0.6B-GGUF/qwen3-asr-0.6b-q8_0.gguf
 - **打包仓库**: https://huggingface.co/audio-cpp/audio.cpp-gguf（Qwen3-ASR-0.6B-GGUF）

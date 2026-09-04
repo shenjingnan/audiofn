@@ -4,7 +4,6 @@ import { useAppInfo } from "@/hooks/useAppInfo";
 import { useAsrConfig } from "@/hooks/useAsrConfig";
 import { useAsrDictate } from "@/hooks/useAsrDictate";
 import { useAsrDictateResults } from "@/hooks/useAsrDictateResults";
-import { useAsrModelDownload } from "@/hooks/useAsrModelDownload";
 import { useDevices } from "@/hooks/useDevices";
 import { useTts } from "@/hooks/useTts";
 import { api } from "@/lib/tauri";
@@ -20,7 +19,6 @@ export function AppRuntimeProvider({ children }: { children: ReactNode }) {
   const appInfo = useAppInfo();
   const devices = useDevices();
   const asrConfig = useAsrConfig();
-  const asrDownload = useAsrModelDownload(asrConfig.refresh);
   const asrDictate = useAsrDictate();
   const asrDictateResults = useAsrDictateResults();
   const tts = useTts();
@@ -77,7 +75,6 @@ export function AppRuntimeProvider({ children }: { children: ReactNode }) {
     devices,
     asr: {
       config: asrConfig,
-      download: asrDownload,
       dictate: asrDictate,
       dictateResults: asrDictateResults,
     },

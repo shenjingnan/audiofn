@@ -22,7 +22,7 @@ pub struct AudiocppAsrFamilyDesc {
     pub registry_hint: &'static str,
 }
 
-/// Qwen3-ASR 0.6B q8_0（29 语言自动识别，LLM 自回归解码；GPU 加速是接入
+/// Qwen3-ASR 0.6B q8_0（30 语言 + 22 种中文方言自动识别，LLM 自回归解码；GPU 加速是接入
 /// 本族的动机——sherpa ONNX int8 版 CPU 解码慢）。
 ///
 /// 单文件 GGUF（tokenizer/config sidecar 内嵌，上游 converter 默认嵌入）。

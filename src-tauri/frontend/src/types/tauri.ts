@@ -12,15 +12,6 @@ export interface ListenStopped {
   error: string | null;
 }
 
-/** `asr-model-download-progress` 事件载荷 */
-export type DownloadStage = "downloading" | "verifying" | "done";
-
-export interface DownloadProgress {
-  stage: DownloadStage;
-  percent: number;
-  message: string;
-}
-
 /** `get_asr_config` 返回（含可经 `set_asr_params` 调整的引擎参数） */
 export interface AsrConfigInfo {
   enabled: boolean;

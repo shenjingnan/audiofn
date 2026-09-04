@@ -501,7 +501,7 @@ pub fn list_models() -> Vec<LibraryModel> {
     let sel = current_selections();
     let locals = get_local_models();
     let mut out = Vec::new();
-    // 平台受限条目（如仅 darwin-aarch64 的 audiocpp TTS）在此过滤：不可见即不可下载
+    // 平台受限条目（如 darwin-aarch64 + linux-x86_64 的 audiocpp TTS）在此过滤：不可见即不可下载
     for reg in registry::models_for_current_platform() {
         out.push(build_registry_model(reg, &sel));
     }

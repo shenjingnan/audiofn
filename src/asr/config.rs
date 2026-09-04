@@ -52,7 +52,7 @@ pub enum AsrModelKind {
     /// 离线 Whisper：`<size>-encoder.onnx` + `<size>-decoder.onnx` + `<size>-tokens.txt`
     Whisper,
     /// 离线 Qwen3-ASR：`conv_frontend.onnx` + 裸名 `encoder/decoder.int8.onnx` +
-    /// `tokenizer/` 目录（LLM 自回归解码，29 语言自动识别，离线族中唯一支持热词）
+    /// `tokenizer/` 目录（LLM 自回归解码，30 语言自动识别，离线族中唯一支持热词）
     #[default]
     Qwen3Asr,
 }
@@ -901,7 +901,7 @@ impl AsrParamsPatch {
         // - blank_penalty：Qwen3-ASR（LLM 解码）同样跳过；hotwords 放行
         //   （qwen3 是离线族中唯一支持热词的，build 层转逗号格式嵌 prompt）
         // - language/use_itn 为 SenseVoice/Whisper 概念，Qwen3-ASR
-        //   （29 语言自动识别 + 原生标点）跳过
+        //   （30 语言自动识别 + 原生标点）跳过
         // - audiocpp 后端：hotwords 跳过（audio.cpp qwen3_asr 无 hotwords 选项，
         //   前端已隐藏，这里兜底）；language 放行（映射请求 language，量化下
         //   auto 语种识别不可靠时的显式兜底，上游文档明示）

@@ -48,23 +48,6 @@ impl Drop for ActiveModelGuard {
     }
 }
 
-/// 下载进度事件载荷（推给前端）。
-#[derive(Clone, Serialize)]
-struct DownloadProgressPayload {
-    stage: String,
-    percent: f64,
-    message: String,
-}
-
-/// 退出作用域（含 panic / 命令取消）时复位下载标志。
-struct ResetOnDrop(Arc<AtomicBool>);
-
-impl Drop for ResetOnDrop {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
-    }
-}
-
 /// 监听结束事件载荷（正常停止时 `error` 为 `None`）。
 #[derive(Clone, Serialize)]
 struct ListenStopped {
@@ -100,7 +83,9 @@ fn request_mic_permission() -> Result<bool, String> {
     audiofn::audio::request_mic_permission()
 }
 
-/// ASR 模型下载状态：防重入标志。
+/// ASR 下载通道占用标志（legacy 一键下载命令已移除，模型下载统一走
+/// `download_library_model`）。字段保留：`get_asr_config` 仍上报 `model_downloading`、
+/// 数据目录迁移仍经 `check_storage_busy` 检查；当前无写入方，恒为 false。
 struct AsrDownloadState {
     in_progress: Arc<AtomicBool>,
 }
@@ -378,53 +363,6 @@ fn is_asr_dictating(state: State<'_, AsrDictateState>) -> bool {
     state.is_dictating()
 }
 
-/// 下载并安装 ASR 模型（缺省 Qwen3-ASR 0.6B 单 GGUF，`~/.audiofn/models/<模型名>`）。
-///
-/// 防重入；下载在阻塞线程池执行，进度经 `asr-model-download-progress` 事件推给前端。
-#[tauri::command]
-async fn download_asr_model(
-    app: AppHandle,
-    state: State<'_, AsrDownloadState>,
-) -> Result<(), String> {
-    let flag = state.in_progress.clone();
-    if flag.swap(true, Ordering::SeqCst) {
-        return Err("模型下载已在进行中，请稍候".to_string());
-    }
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let _guard = ResetOnDrop(flag);
-        let model = audiofn::model_library::registry::model_for_current_platform(
-            audiofn::asr::config::DEFAULT_ASR_REGISTRY_ID,
-        )
-        .ok_or_else(|| {
-            format!(
-                "未知的模型库条目: {}",
-                audiofn::asr::config::DEFAULT_ASR_REGISTRY_ID
-            )
-        })?;
-        let mut progress = |p: audiofn::model_library::asset::DownloadProgress| {
-            let stage = match p.stage {
-                audiofn::model_library::asset::DownloadStage::Downloading => "downloading",
-                audiofn::model_library::asset::DownloadStage::Verifying => "verifying",
-                audiofn::model_library::asset::DownloadStage::Done => "done",
-            };
-            let _ = app.emit(
-                "asr-model-download-progress",
-                DownloadProgressPayload {
-                    stage: stage.to_string(),
-                    percent: p.percent,
-                    message: p.message,
-                },
-            );
-        };
-        audiofn::model_library::install_managed_model(model, &mut progress, None)
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("下载任务异常: {e}"))?
-}
-
 /// TTS 合成线程状态：共享 busy 标志 + 线程句柄。
 struct TtsSynthesizeState {
     busy: Arc<AtomicBool>,
@@ -444,7 +382,9 @@ impl TtsSynthesizeState {
     }
 }
 
-/// TTS 模型下载状态：防重入标志。
+/// TTS 下载通道占用标志（`download_tts_model` 已随 legacy 前端入口一并移除）。
+/// 保留原因同 [`AsrDownloadState`]：`get_tts_config` 上报 + 迁移占用检查，
+/// 当前无写入方，恒为 false。
 struct TtsDownloadState {
     in_progress: Arc<AtomicBool>,
 }
@@ -719,53 +659,6 @@ fn stop_tts(state: State<'_, TtsSynthesizeState>) -> Result<(), String> {
 #[tauri::command]
 fn is_tts_synthesizing(state: State<'_, TtsSynthesizeState>) -> bool {
     state.is_synthesizing()
-}
-
-/// 下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，`~/.audiofn/models/<模型名>`）。
-///
-/// 防重入；下载在阻塞线程池执行，进度经 `tts-model-download-progress` 事件推给前端。
-#[tauri::command]
-async fn download_tts_model(
-    app: AppHandle,
-    state: State<'_, TtsDownloadState>,
-) -> Result<(), String> {
-    let flag = state.in_progress.clone();
-    if flag.swap(true, Ordering::SeqCst) {
-        return Err("模型下载已在进行中，请稍候".to_string());
-    }
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let _guard = ResetOnDrop(flag);
-        let model = audiofn::model_library::registry::model_for_current_platform(
-            audiofn::tts::config::DEFAULT_TTS_REGISTRY_ID,
-        )
-        .ok_or_else(|| {
-            format!(
-                "未知的模型库条目: {}",
-                audiofn::tts::config::DEFAULT_TTS_REGISTRY_ID
-            )
-        })?;
-        let mut progress = |p: audiofn::model_library::asset::DownloadProgress| {
-            let stage = match p.stage {
-                audiofn::model_library::asset::DownloadStage::Downloading => "downloading",
-                audiofn::model_library::asset::DownloadStage::Verifying => "verifying",
-                audiofn::model_library::asset::DownloadStage::Done => "done",
-            };
-            let _ = app.emit(
-                "tts-model-download-progress",
-                DownloadProgressPayload {
-                    stage: stage.to_string(),
-                    percent: p.percent,
-                    message: p.message,
-                },
-            );
-        };
-        audiofn::model_library::install_managed_model(model, &mut progress, None)
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("下载任务异常: {e}"))?
 }
 
 /// 持久化「是否启用语音合成」，写入 `[tts].enabled`（缺省 true）。
@@ -1686,7 +1579,6 @@ pub fn run() {
             get_asr_config,
             set_asr_enabled,
             set_asr_params,
-            download_asr_model,
             transcribe_audio,
             start_asr_dictate,
             stop_asr_dictate,
@@ -1701,7 +1593,6 @@ pub fn run() {
             synthesize_tts,
             stop_tts,
             is_tts_synthesizing,
-            download_tts_model,
             set_tts_enabled,
             set_tts_params,
             set_tts_voice,

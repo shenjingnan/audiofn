@@ -91,29 +91,17 @@ type LibraryStub = {
   ownership: string;
 };
 
-/** 默认模型库桩：双语已装为当前，qwen3 未装（弹窗只依赖这两条）。 */
+/** 默认模型库桩：qwen3 已装非当前（一期 registry 唯一 ASR 条目；当前模型仍是老配置的 sherpa 目录）。 */
 function defaultAsrModelLibrary(): LibraryStub[] {
   return [
-    {
-      id: "asr-streaming-bilingual-zh-en",
-      displayName: "Streaming Zipformer ASR zh-en",
-      modelType: "asr",
-      installState: "installed",
-      current: true,
-      localPath:
-        "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
-      installId: "asr-streaming-bilingual-zh-en",
-      repoId: null,
-      ownership: "managed",
-    },
     {
       id: "asr-qwen3-0.6b-audiocpp",
       displayName: "Qwen3-ASR 0.6B (audio.cpp)",
       modelType: "asr",
-      installState: "not_installed",
+      installState: "installed",
       current: false,
-      localPath: null,
-      installId: null,
+      localPath: "/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp",
+      installId: "asr-qwen3-0.6b-audiocpp",
       repoId: null,
       ownership: "managed",
     },
@@ -146,9 +134,6 @@ function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
       return Promise.resolve(undefined);
     case "set_asr_params":
       asrConfig = { ...asrConfig, ...(args?.params ?? {}) };
-      return Promise.resolve(undefined);
-    case "download_asr_model":
-      asrConfig = { ...asrConfig, models_present: true };
       return Promise.resolve(undefined);
     case "transcribe_audio":
       return Promise.resolve({
@@ -208,7 +193,7 @@ describe("AsrPage（语音识别配置）", () => {
     ).toBeInTheDocument();
   });
 
-  it("模型缺失：Switch 禁用、未下载 Badge、下载按钮可用、测试禁用、警告提示", async () => {
+  it("模型缺失：Switch 禁用、未下载 Badge、选择模型入口可用、测试禁用、警告提示", async () => {
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("未听写")).toBeInTheDocument();
@@ -217,18 +202,18 @@ describe("AsrPage（语音识别配置）", () => {
     const runSwitch = screen.getByRole("switch", { name: "离线听写开关" });
     expect(runSwitch).toBeDisabled();
     expect(runSwitch).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("button", { name: "下载模型" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "选择模型" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "测试识别" })).toBeDisabled();
     expect(screen.getByText("模型文件缺失")).toBeInTheDocument();
   });
 
-  it("模型就绪：已就绪 Badge、Switch 可用、无下载按钮、测试可用", async () => {
+  it("模型就绪：已就绪 Badge、Switch 可用、无选择模型入口、测试可用", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("已就绪")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "离线听写开关" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "下载模型" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择模型" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "测试识别" })).toBeEnabled();
   });
 
@@ -456,39 +441,27 @@ describe("AsrPage（语音识别配置）", () => {
     });
   });
 
-  it("下载模型：调用 download_asr_model、显示进度、完成后 Badge 翻转", async () => {
+  it("模型缺失：点击「选择模型」打开弹窗并可在弹窗内下载（legacy 一键下载已移除）", async () => {
+    // qwen3 未装 → 弹窗内出现「下载」按钮
+    modelLibrary = defaultAsrModelLibrary().map((m) => ({
+      ...m,
+      installState: "not_installed",
+      current: false,
+      localPath: null,
+      installId: null,
+    }));
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByRole("button", { name: /下载模型/ });
+    // 模型缺失时不再出现 legacy「下载模型」一键按钮（装的是 registry 默认模型，
+    // 与当前模型目录不一致），统一走「选择模型」弹窗
+    expect(screen.queryByRole("button", { name: "下载模型" })).not.toBeInTheDocument();
 
-    let resolveDownload!: () => void;
-    const deferred = new Promise<void>((res) => {
-      resolveDownload = res;
-    });
-    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
-      cmd === "download_asr_model" ? deferred : defaultInvoke(cmd, args),
-    );
-
-    await user.click(screen.getByRole("button", { name: /下载模型/ }));
-    expect(screen.getByRole("button", { name: /下载中/ })).toBeDisabled();
-
-    act(() => {
-      listeners.get("asr-model-download-progress")?.({
-        payload: { stage: "downloading", percent: 42, message: "下载中 42%" },
-      });
-    });
-    expect(await screen.findByText("下载中 42%")).toBeInTheDocument();
-
-    await act(async () => {
-      // 模拟下载完成：后端模型文件就绪，get_asr_config 返回 models_present=true
-      asrConfig = { ...asrConfig, models_present: true };
-      resolveDownload();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("已就绪")).toBeInTheDocument();
-    });
-    expect(screen.queryByRole("button", { name: /下载模型/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "选择模型" }));
+    expect(await screen.findByText("选择识别模型")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "下载Qwen3-ASR 0.6B (audio.cpp)" }),
+    ).toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("download_asr_model");
   });
 
   it("测试识别（流式模型族）：同样走转写弹窗并自动转写示例音频", async () => {
@@ -775,7 +748,7 @@ describe("AsrPage（语音识别配置）", () => {
     expect(screen.getByRole("combobox", { name: "麦克风来源" })).toHaveTextContent("内置麦克风");
   });
 
-  it("当前模型行有「切换模型」入口，点击打开选择模型弹窗", async () => {
+  it("当前模型行有「切换模型」入口，点击打开选择模型弹窗（唯一预设 = Qwen3-ASR）", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
@@ -783,31 +756,16 @@ describe("AsrPage（语音识别配置）", () => {
 
     await user.click(screen.getByRole("button", { name: "切换识别模型" }));
     expect(await screen.findByText("选择识别模型")).toBeInTheDocument();
-    // 弹窗内展示内置预设：双语为当前，qwen3 未装 → 下载按钮
-    expect(screen.getByText("Streaming Zipformer ASR zh-en")).toBeInTheDocument();
+    // 一期 registry 只有一条 ASR 预设；已装非当前 → 「设为当前」/「卸载」
     expect(screen.getByText("Qwen3-ASR 0.6B (audio.cpp)")).toBeInTheDocument();
-    // 「当前模型」徽标依赖 list_model_library 异步返回（列表加载前两行都是下载按钮）；
-    // 页面行标签与弹窗徽标同名，取全部匹配断言两者都在
-    const currentBadges = await screen.findAllByText("当前模型");
-    expect(currentBadges.length).toBeGreaterThanOrEqual(2);
-    expect(
-      await screen.findByRole("button", { name: "下载Qwen3-ASR 0.6B (audio.cpp)" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("Streaming Zipformer ASR zh-en")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "设为当前" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "卸载" })).toBeEnabled();
   });
 
   it("正在听写时切换模型：set_current_model 后自动重启听写（stop → start）", async () => {
     asrConfig = { ...asrConfig, models_present: true };
-    // qwen3 已安装，可设为当前
-    modelLibrary = defaultAsrModelLibrary().map((m) =>
-      m.id === "asr-qwen3-0.6b-audiocpp"
-        ? {
-            ...m,
-            installState: "installed",
-            localPath: "/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp",
-            installId: m.id,
-          }
-        : m,
-    );
+    // 桩里 qwen3 已装非当前，可直接「设为当前」
     const user = userEvent.setup();
     renderAsrPage();
     await screen.findByText("未听写");
@@ -839,16 +797,6 @@ describe("AsrPage（语音识别配置）", () => {
 
   it("未听写时切换模型：只写配置，不重启听写", async () => {
     asrConfig = { ...asrConfig, models_present: true };
-    modelLibrary = defaultAsrModelLibrary().map((m) =>
-      m.id === "asr-qwen3-0.6b-audiocpp"
-        ? {
-            ...m,
-            installState: "installed",
-            localPath: "/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp",
-            installId: m.id,
-          }
-        : m,
-    );
     const user = userEvent.setup();
     renderAsrPage();
     await screen.findByText("未听写");
@@ -865,17 +813,13 @@ describe("AsrPage（语音识别配置）", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("start_asr_dictate");
   });
 
-  it("模型族切换后高级参数草稿按新键集重建，不崩溃（qwen3→zipformer 回归）", async () => {
-    // 初始：qwen3 离线族 → 高级参数数字草稿仅 num_threads 一个键
-    asrConfig = { ...asrConfig, model_type: "qwen3_asr", models_present: true };
-    // 双语（zipformer 族）已装非当前，供「设为当前」；切换后 get_asr_config 返回
-    // zipformer → numericKeys 从 1 个扩到 6 个（补 blank_penalty/断句等）
-    modelLibrary = defaultAsrModelLibrary().map((m) =>
-      m.id === "asr-streaming-bilingual-zh-en" ? { ...m, current: false } : m,
-    );
+  it("模型族切换后高级参数草稿按新键集重建，不崩溃（zipformer→qwen3）", async () => {
+    // 初始：老配置 zipformer（sherpa）→ 高级参数数字草稿 6 键（含 blank_penalty/断句）
+    asrConfig = { ...asrConfig, model_type: "zipformer", backend: "sherpa", models_present: true };
+    // 切到 qwen3（audiocpp）后 get_asr_config 返回离线族 → numericKeys 收缩为 num_threads
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "set_current_model") {
-        asrConfig = { ...asrConfig, model_type: "zipformer", backend: "sherpa" };
+        asrConfig = { ...asrConfig, model_type: "qwen3_asr", backend: "audiocpp" };
       }
       return defaultInvoke(cmd, args);
     });
@@ -887,19 +831,18 @@ describe("AsrPage（语音识别配置）", () => {
     await user.click(await screen.findByRole("button", { name: "设为当前" }));
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("set_current_model", {
-        id: "asr-streaming-bilingual-zh-en",
+        id: "asr-qwen3-0.6b-audiocpp",
       });
     });
 
-    // 修复前：新 config 键集扩展后，hydrate 用旧草稿（1 键）跑 isPristine →
-    // parseNumericDraft 读 draft["blank_penalty"]=undefined → .trim() 崩溃白屏。
-    // 修复后：草稿按新键集整体重建；展开高级参数，6 项齐全且回读后端现值
+    // 草稿按新键集整体重建：展开高级参数只余线程数（断句/空白惩罚属流式语义，不再展示）
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByText("选择识别模型")).not.toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: /高级参数/ }));
-    expect(await screen.findByLabelText("空白符惩罚")).toHaveValue("0");
-    expect(screen.getByLabelText("线程数")).toHaveValue("4");
+    expect(await screen.findByLabelText("线程数")).toHaveValue("4");
+    expect(screen.queryByLabelText("空白符惩罚")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("断句·尾随静音 1")).not.toBeInTheDocument();
   });
 });
