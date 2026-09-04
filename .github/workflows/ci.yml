@@ -33,35 +33,11 @@ jobs:
         run: rustup component add rustfmt clippy
 
       - name: Cache cargo build artifacts
-        # 缓存 ~/.cargo（registry）+ target/，替代原 sherpa-onnx 专用缓存：
-        # target/sherpa-onnx-prebuilt 解压目录名含版本号（sherpa-onnx-v1.13.x-...），
-        # 恢复旧缓存不会造成版本错配。key 由 rustc 版本 + Cargo.lock + .cargo/config.toml
-        # 生成；Cargo.lock 变化时自动回退恢复最近一份缓存，未变依赖仍命中。
-        # 保存前自动剔除 workspace 自身 crate 的产物，避免缓存随每次提交膨胀。
+        # 缓存 ~/.cargo（registry）+ target/。key 由 rustc 版本 + Cargo.lock +
+        # .cargo/config.toml 生成；Cargo.lock 变化时自动回退恢复最近一份缓存，
+        # 未变依赖仍命中。保存前自动剔除 workspace 自身 crate 的产物，避免
+        # 缓存随每次提交膨胀。
         uses: Swatinem/rust-cache@v2
-
-      - name: Cache sherpa-onnx prebuilt libs
-        # rust-cache 保存前会把 target/ 下非 cargo 构建目录里的文件全部清空，
-        # 恢复出的 target/sherpa-onnx-prebuilt 只剩空目录；sherpa-onnx-sys 的
-        # build.rs 却只判断 lib/ 目录是否存在——存在即跳过下载，到链接阶段才报
-        # 「could not find native static library sherpa-onnx-c-api」。因此预编译
-        # 库不能只依赖 rust-cache 缓存 target/ 的副作用，单独缓存一份，并由
-        # 下一步校验文件是否真的存在。
-        uses: actions/cache@v6
-        with:
-          path: target/sherpa-onnx-prebuilt
-          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-
-      - name: Rehydrate sherpa-onnx prebuilt libs
-        # rust-cache 恢复出空目录（目录在、文件全无）时整目录删除，强制
-        # build.rs 重新下载解压；上方缓存命中时本步骤为空操作。
-        shell: bash
-        run: |
-          if [ -d target/sherpa-onnx-prebuilt ] \
-            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
-            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
-            rm -rf target/sherpa-onnx-prebuilt
-          fi
 
       - name: Format check
         run: cargo fmt --check
@@ -77,8 +53,8 @@ jobs:
       - name: Spell check
         run: typos .
 
-      # 不在本 job 跑 cargo test：test matrix job 已在 ubuntu/macOS/Windows
-      # 三平台覆盖同一命令；此处重复跑会因 dev-deps 的 feature 统一差异
+      # 不在本 job 跑 cargo test：test matrix job 已在 ubuntu/macOS 两平台
+      # 覆盖同一命令；此处重复跑会因 dev-deps 的 feature 统一差异
       # 触发第二次全量重建（实测多付约 2 分钟）。
       - name: Build
         run: cargo build
@@ -102,23 +78,6 @@ jobs:
         # 拆成独立 job 后本 job 的 target/ 只有插桩这一种构建上下文，缓存自洽。
         uses: Swatinem/rust-cache@v2
 
-      - name: Cache sherpa-onnx prebuilt libs
-        # 同 check job：rust-cache 会清空 target/ 下非构建目录的文件，预编译库
-        # 需单独缓存并在下一步校验（见 check job 注释）。
-        uses: actions/cache@v6
-        with:
-          path: target/sherpa-onnx-prebuilt
-          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-
-      - name: Rehydrate sherpa-onnx prebuilt libs
-        shell: bash
-        run: |
-          if [ -d target/sherpa-onnx-prebuilt ] \
-            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
-            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
-            rm -rf target/sherpa-onnx-prebuilt
-          fi
-
       - name: Install cargo-tarpaulin
         uses: taiki-e/install-action@v2
         with:
@@ -138,21 +97,11 @@ jobs:
           fail_ci_if_error: false
 
   app-check:
-    # zapmomo-app 的平台门控代码（#[cfg(windows)] 等）只有本 job 用 -p 显式选中
-    # 才会编译（workspace default-members 只含根 CLI crate，test job 碰不到
-    # src-tauri）。v0.1.17 release 曾因 cfg(windows) 代码 E0308 在 windows-latest
-    # 首次编译即失败而 PR CI 全绿，故矩阵补 windows；macOS 由开发者本机日常
+    # zapmomo-app 只有本 job 用 -p 显式选中才会编译（workspace default-members
+    # 只含根 CLI crate，test job 碰不到 src-tauri）；macOS 由开发者本机日常
     # 编译覆盖，不另开腿。
-    name: Tauri App Check (${{ matrix.os }})
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-      fail-fast: false
-    runs-on: ${{ matrix.os }}
-    env:
-      # 同 test job：让 cmake 用静态 CRT（/MT）。check/clippy 不链接，目前用不上；
-      # 防止日后把本 job 升级为真实 build 时踩 MSVC 运行库坑。Linux 下 cmake 忽略该变量。
-      CMAKE_MSVC_RUNTIME_LIBRARY: "MultiThreaded"
+    name: Tauri App Check
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -171,35 +120,15 @@ jobs:
       - name: Cache cargo build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Cache sherpa-onnx prebuilt libs
-        # 同 check job：rust-cache 会清空 target/ 下非构建目录的文件，预编译库
-        # 需单独缓存并在下一步校验（见 check job 注释）。
-        uses: actions/cache@v6
-        with:
-          path: target/sherpa-onnx-prebuilt
-          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-
-      - name: Rehydrate sherpa-onnx prebuilt libs
-        shell: bash
-        run: |
-          if [ -d target/sherpa-onnx-prebuilt ] \
-            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
-            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
-            rm -rf target/sherpa-onnx-prebuilt
-          fi
-
       - name: Stub audio.cpp sidecar binary (externalBin presence)
-        # tauri 的 build.rs 在 check 阶段就校验 bundle.externalBin 文件存在
-        # （Windows 上额外要求 .exe 后缀）；本 job 只做静态检查不运行 sidecar，
-        # 放置空占位文件即可满足存在性（真实二进制由 release.yml 编译、
-        # 本地开发由 scripts/fetch-audiocpp-dev.sh）。
+        # tauri 的 build.rs 在 check 阶段就校验 bundle.externalBin 文件存在；
+        # 本 job 只做静态检查不运行 sidecar，放置空占位文件即可满足存在性
+        # （真实二进制由 release.yml 编译、本地开发由 scripts/fetch-audiocpp-dev.sh）。
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
           TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
-          SUFFIX=""
-          case "$RUNNER_OS" in Windows) SUFFIX=".exe" ;; esac
-          touch "src-tauri/binaries/audiocpp_server-${TRIPLE}${SUFFIX}"
+          touch "src-tauri/binaries/audiocpp_server-${TRIPLE}"
           ls -la src-tauri/binaries/
 
       - name: Lint (app crate)
@@ -212,7 +141,7 @@ jobs:
     name: Test (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -229,29 +158,8 @@ jobs:
         # 按 OS 自动区分缓存线（key 含 rustc 版本与 job 标识）
         uses: Swatinem/rust-cache@v2
 
-      - name: Cache sherpa-onnx prebuilt libs
-        # 同 check job：rust-cache 会清空 target/ 下非构建目录的文件，预编译库
-        # 需单独缓存并在下一步校验（见 check job 注释）。
-        uses: actions/cache@v6
-        with:
-          path: target/sherpa-onnx-prebuilt
-          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-
-      - name: Rehydrate sherpa-onnx prebuilt libs
-        shell: bash
-        run: |
-          if [ -d target/sherpa-onnx-prebuilt ] \
-            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
-            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
-            rm -rf target/sherpa-onnx-prebuilt
-          fi
-
       - name: Tests
         shell: bash
-        env:
-          # 让 cmake 用静态 CRT（/MT）：MSBuild 不 respect CMAKE_CXX_FLAGS 里的 -MT，
-          # 需通过 CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded 让 vcxproj 的 RuntimeLibrary 设为 /MT。
-          CMAKE_MSVC_RUNTIME_LIBRARY: "MultiThreaded"
         run: cargo test -- --test-threads=1
 
   frontend:

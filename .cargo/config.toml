@@ -1,22 +1,6 @@
-# Windows 上统一使用静态 CRT（/MT），避免 llama.cpp / sherpa-onnx 的 CRT 冲突。
-#
-# 背景：sherpa-onnx 预编译库是 /MT（静态 CRT）。llama.cpp 通过 cmake 的
-# CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded 也编译成 /MT；但 llama-cpp-sys-2 用 cc crate
-# 编译的 wrapper_common.cpp 以及 Rust std 本身默认是 /MD（动态 CRT），与 /MT 冲突（LNK2038）。
-# 这里让 Rust 在 Windows MSVC 上用 crt-static，使 wrapper、Rust std、llama.cpp、sherpa-onnx
-# 全部统一为 /MT。
-#
-# macOS：llama.cpp 源码（llama-cpp-sys-2 内置）在 ggml-backend-reg.cpp 使用了
-# std::filesystem::u8path，libc++ 将其标记为 macOS 10.15 起才可用；而 cargo 对
-# apple-darwin target 注入的 MACOSX_DEPLOYMENT_TARGET 默认是 10.13（来自 rustc
-# target 默认值），低于 10.15 会导致 C++ 编译直接报错。
-# 这里显式设置项目支持的最低 macOS 为 13.7.8（与开发机系统版本一致，且满足
-# 10.15 的编译下限）。cc（wrapper_common.cpp）和 CMake（llama.cpp）都会读取
-# 该环境变量，保证整条构建链的部署目标一致（该环境变量在 Linux/Windows 上
-# 无意义，被忽略）。
+# macOS 最低部署目标：与 src-tauri/tauri.conf.json 的 bundle.macOS.minimumSystemVersion
+# （13.7.8）保持一致。rustc 对 apple-darwin target 自带的默认部署目标低于应用声明值，
+# 而 cc/cmake 构建的 C/C++ 依赖会读这个环境变量；显式对齐可保证整条构建链的
+# 最低系统版本一致（该变量在 Linux 上无意义，被忽略）。
 [env]
-CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
 MACOSX_DEPLOYMENT_TARGET = "13.7.8"
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]

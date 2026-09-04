@@ -1734,47 +1734,20 @@ pub fn run() {
         .setup(|app| {
             // audio.cpp sidecar 环境：注入引擎搜索目录（externalBin 落位点 = 主程序
             // 同目录 + resource 目录），并启用 45s 空闲保活（GUI 测试语音/会话在窗口
-            // 内复用热 server，热请求 0.1s 级）。不在此预热：backend 缺省 sherpa 的
-            // 用户不触发进程；首次 audiocpp 合成时按需 spawn。
+            // 内复用热 server，热请求 0.1s 级）。不在此预热：首次 audiocpp 合成时
+            // 按需 spawn。
             {
-                /// 还原 `\\?\` / `\\?\UNC\` 扩展路径前缀为普通路径。Tauri 的
-                /// `resource_dir()` 在 Windows 返回带前缀的扩展路径，而子进程
-                /// PATH 里的 `\\?\` 条目对 Windows DLL 搜索**无效**（实测：引擎
-                /// 的 ggml/CUDA DLL 全部解析失败，cuda 与 cpu 后端一起挂），必须
-                /// strip 后再注入。
-                fn strip_extended_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
-                    let s = p.as_os_str().to_string_lossy();
-                    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-                        std::path::PathBuf::from(format!(r"\\{rest}"))
-                    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-                        std::path::PathBuf::from(rest)
-                    } else {
-                        p
-                    }
-                }
                 let mut search_dirs: Vec<std::path::PathBuf> = Vec::new();
                 if let Some(exe_dir) = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                 {
-                    search_dirs.push(strip_extended_prefix(exe_dir));
+                    search_dirs.push(exe_dir);
                 }
-                if let Ok(resource_dir) = app.path().resource_dir() {
-                    let resource_dir = strip_extended_prefix(resource_dir);
-                    if !search_dirs.contains(&resource_dir) {
-                        search_dirs.push(resource_dir.clone());
-                    }
-                    // Windows 引擎运行时 DLL 随 resources 落 `resource_dir\audiocpp\`
-                    // （ggml 动态后端 + MSVC CRT + CUDA 12.4 运行时）。子进程 PATH
-                    // 是平铺目录搜索、不递归子目录，必须把 DLL 所在目录本身加进
-                    // 去（见 server.rs::augmented_child_path）。注意不能以
-                    // `resource_dir != exe_dir` 为前提裁剪这一条：Windows NSIS 下
-                    // resource_dir == exe_dir（都落在安装根目录），引擎 exe 在根
-                    // 目录而 DLL 在 audiocpp\ 子目录——裁剪掉它子进程 PATH 就再也
-                    // 不含 DLL 目录，ggml 后端（cuda 和 cpu）一个都注册不上
-                    // （实测签名：cuda → "not registered (available: none)"，
-                    // cpu → "Failed to initialize CPU backend"）。
-                    search_dirs.push(resource_dir.join("audiocpp"));
+                if let Ok(resource_dir) = app.path().resource_dir()
+                    && !search_dirs.contains(&resource_dir)
+                {
+                    search_dirs.push(resource_dir);
                 }
                 tracing::info!(target: "audiocpp", resource_dir = ?app.path().resource_dir().ok(), search_dirs = ?search_dirs, "audiocpp 引擎搜索目录注入");
                 zapmomo::audiocpp::locator::set_search_dirs(search_dirs);
