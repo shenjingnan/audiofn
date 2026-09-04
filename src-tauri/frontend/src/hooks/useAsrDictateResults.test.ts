@@ -15,7 +15,11 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 function emitResult(text: string) {
-  act(() => resultHandlers.forEach((h) => h({ text, is_final: true })));
+  act(() =>
+    resultHandlers.forEach((h) => {
+      h({ text, is_final: true });
+    }),
+  );
 }
 
 beforeEach(() => {

@@ -155,7 +155,7 @@ pub(crate) fn apply_speed_to_samples(
     Ok(resampler.process(samples, true))
 }
 
-/// 生成唯一的 TTS 输出 wav 路径：`~/.zapmomo/tts/tts-<毫秒时间戳>.wav`
+/// 生成唯一的 TTS 输出 wav 路径：`~/.audiofn/tts/tts-<毫秒时间戳>.wav`
 pub fn default_output_path() -> PathBuf {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -239,7 +239,7 @@ mod tests {
         let started = std::time::Instant::now();
         let samples = engine
             .synthesize(
-                "你好，我是 ZapMomo 语音伙伴，正在验证 Qwen3-TTS 中文合成。",
+                "你好，我是 AudioFn 语音伙伴，正在验证 Qwen3-TTS 中文合成。",
                 1.0,
                 &voice,
             )

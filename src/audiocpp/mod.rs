@@ -64,7 +64,7 @@ impl AudiocppError {
         match self {
             Self::EngineNotFound { searched } => format!(
                 "未找到 audiocpp_server 引擎（已搜索：{}）。安装包应内置该引擎；\
-                 开发模式请运行 scripts/fetch-audiocpp-dev.sh 或放置到 ~/.zapmomo/engines/。",
+                 开发模式请运行 scripts/fetch-audiocpp-dev.sh 或放置到 ~/.audiofn/engines/。",
                 searched
                     .iter()
                     .map(|p| p.display().to_string())
@@ -89,7 +89,7 @@ impl AudiocppError {
             ),
             Self::ModelNotListed { model_id } => format!(
                 "audiocpp_server 未加载模型 {model_id}，请检查模型文件是否完整\
-                 （在模型库重新下载，或运行 `zapmomo install-model`）。"
+                 （在模型库重新下载，或运行 `audiofn install-model`）。"
             ),
             Self::Connection(e) => {
                 format!("无法连接 audiocpp_server（引擎未启动或已退出）: {e}")

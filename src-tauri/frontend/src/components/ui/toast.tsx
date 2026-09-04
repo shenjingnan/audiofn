@@ -46,7 +46,7 @@ const ICONS: Record<ToastVariant, { icon: typeof Info; className: string }> = {
 
 const DURATION_MS = 3500;
 
-/** 轻量 ToastProvider：右上角 viewport，自动消失，复用 ZapMomo panel 视觉。 */
+/** 轻量 ToastProvider：右上角 viewport，自动消失，复用 AudioFn panel 视觉。 */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);

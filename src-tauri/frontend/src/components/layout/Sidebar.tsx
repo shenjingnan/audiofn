@@ -25,7 +25,7 @@ export function Sidebar() {
       />
 
       <div className="flex items-center justify-center px-6 pt-1">
-        <img src="/logo.svg" alt="ZapMomo" className="h-24 w-24" />
+        <img src="/logo.svg" alt="AudioFn" className="h-24 w-24" />
       </div>
 
       <nav className="mt-5 flex flex-col gap-1.5 px-4">

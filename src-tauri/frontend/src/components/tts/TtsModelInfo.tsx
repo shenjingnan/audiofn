@@ -7,7 +7,8 @@ import { useRuntime } from "@/providers/RuntimeContext";
 /**
  * 模型信息（默认展开）：运行时 / 执行 Provider / 线程数 / 支持语言 / 模型目录 / 配置路径。
  * 全部来自 get_tts_config 的只读字段，无任何可编辑项。
- * 注意：TTS 运行时固定为 sherpa-onnx；config.provider（cpu）是执行 Provider/后端，两者概念不同。
+ * 注意：config.backend（audiocpp）是引擎运行时，config.provider（cpu/metal）是执行
+ * Provider，两者概念不同。
  * 采样率不在 get_tts_config 中（仅在合成结果 tts-result.sample_rate 出现），故此处不展示。
  */
 export function TtsModelInfo() {
@@ -36,10 +37,12 @@ export function TtsModelInfo() {
         <CollapsibleContent className="border-t border-divider">
           {config && (
             <dl>
-              {/* 固定运行时：TTS 在 ZapMomo 中始终使用 sherpa-onnx */}
+              {/* 运行时来自 config.backend（一期 TTS 只有 audiocpp sidecar） */}
               <div className="flex items-center justify-between gap-3.5 px-3.5 py-2.5">
                 <dt className="text-sm text-text-primary">运行时</dt>
-                <dd className="truncate text-sm text-text-secondary">sherpa-onnx</dd>
+                <dd className="truncate text-sm text-text-secondary">
+                  {config.backend === "audiocpp" ? "audio.cpp" : config.backend}
+                </dd>
               </div>
               <div className="flex items-center justify-between gap-3.5 px-3.5 py-2.5">
                 <dt className="text-sm text-text-primary">执行 Provider</dt>

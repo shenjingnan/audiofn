@@ -39,7 +39,7 @@ export function ModelConfirmDialog({ open, onClose, model, onConfirm }: ModelCon
       </p>
       <p className="text-sm text-text-secondary">
         {external
-          ? "只会取消 ZapMomo 中的登记，不会删除你的原始模型文件。"
+          ? "只会取消 AudioFn 中的登记，不会删除你的原始模型文件。"
           : "模型文件将从本地删除。"}
       </p>
     </ModelDialog>

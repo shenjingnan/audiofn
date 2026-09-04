@@ -1,4 +1,4 @@
-//! ZapMomo Verified Registry（**验证 overlay**）。
+//! AudioFn Verified Registry（**验证 overlay**）。
 //!
 //! 只保存验证信息（repo 映射 / recommended variant / architecture hint / notes），
 //! **不复制** `model_registry.json` 的完整模型定义（下载 URL / required files / install spec）。
@@ -55,7 +55,7 @@ impl VerifiedRegistry {
         &self.entries
     }
 
-    /// 该 repo 是否经过 ZapMomo 验证（repo_id 大小写不敏感）。
+    /// 该 repo 是否经过 AudioFn 验证（repo_id 大小写不敏感）。
     pub fn is_verified_repo(&self, repo_id: &str) -> bool {
         self.entry_for_repo(repo_id).is_some()
     }

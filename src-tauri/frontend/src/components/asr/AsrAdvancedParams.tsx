@@ -310,7 +310,7 @@ export function AsrAdvancedParams() {
                     setSaveError(null);
                     setHotwordsDraft(e.target.value);
                   }}
-                  placeholder="如：文森特卡索 ZapMomo"
+                  placeholder="如：文森特卡索 AudioFn"
                   aria-label="热词增强"
                 />
               </div>

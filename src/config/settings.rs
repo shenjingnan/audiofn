@@ -1,7 +1,7 @@
 /// Settings - TOML 配置管理
 ///
 /// 提供通用的配置读写功能，支持 ${env.VAR} 环境变量引用。
-/// 配置文件存储在 `~/.zapmomo/settings.toml`。
+/// 配置文件存储在 `~/.audiofn/settings.toml`。
 use crate::config::shortcuts::ShortcutsSettings;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use std::sync::RwLock;
 use std::time::SystemTime;
 
-const PROJECT_DIR: &str = ".zapmomo";
+const PROJECT_DIR: &str = ".audiofn";
 const SETTINGS_FILE: &str = "settings.toml";
 
 /// 获取用户 home 目录（跨平台：macOS/Linux 用 $HOME，Windows 用 %USERPROFILE%）
@@ -30,7 +30,7 @@ pub fn get_settings_path() -> PathBuf {
     get_settings_dir().join(SETTINGS_FILE)
 }
 
-/// 获取模型目录路径：`<data_dir>/models`（data_dir 未设置时为 `~/.zapmomo/models`）。
+/// 获取模型目录路径：`<data_dir>/models`（data_dir 未设置时为 `~/.audiofn/models`）。
 ///
 /// 模型统一安装到用户目录，不随仓库/安装包分发。
 pub fn get_models_dir() -> PathBuf {
@@ -39,7 +39,7 @@ pub fn get_models_dir() -> PathBuf {
         .join("models")
 }
 
-/// 旧版默认模型根 `~/.zapmomo/models`：`data_dir` 指向别处时返回 `Some`，
+/// 旧版默认模型根 `~/.audiofn/models`：`data_dir` 指向别处时返回 `Some`，
 /// 供双根扫描/默认目录回退/迁移定位存量安装；未自定义时返回 `None`。
 pub fn legacy_models_dir() -> Option<PathBuf> {
     let default = get_settings_dir().join("models");
@@ -97,7 +97,7 @@ fn settings_mtime_len() -> (Option<SystemTime>, Option<u64>) {
 
 /// 解析 `data_dir` 设置（支持 `${env.VAR}` 引用）。
 ///
-/// 未设置 / 空串 / 相对路径 / env 解析失败 → `None`（回退默认根 `~/.zapmomo`，
+/// 未设置 / 空串 / 相对路径 / env 解析失败 → `None`（回退默认根 `~/.audiofn`，
 /// 调用方拿 `PathBuf` 的签名不能 Err，降级并 `warn`）。
 pub fn get_data_dir() -> Option<PathBuf> {
     let path = get_settings_path();
@@ -169,7 +169,7 @@ pub(crate) fn reset_data_dir_cache_for_test() {
     refresh_data_dir_cache();
 }
 
-/// 获取 TTS 合成音频输出目录：`~/.zapmomo/tts`（供前端 asset 协议播放）。
+/// 获取 TTS 合成音频输出目录：`~/.audiofn/tts`（供前端 asset 协议播放）。
 pub fn get_tts_output_dir() -> PathBuf {
     get_settings_dir().join("tts")
 }
@@ -214,7 +214,7 @@ pub struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub microphone: Option<String>,
     /// 自定义数据目录（绝对路径，支持 ${env.VAR}）：模型存放在 `<data_dir>/models`；
-    /// settings/日志等小文件仍留在 `~/.zapmomo`。缺省 = `~/.zapmomo`。
+    /// settings/日志等小文件仍留在 `~/.audiofn`。缺省 = `~/.audiofn`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
     /// 「存储位置引导」已确认过（首次下载/导入前的一次性弹窗标记，确认后不再弹）。
@@ -257,7 +257,7 @@ pub struct LocalModel {
 /// 模型库配置段。
 ///
 /// 只保存**用户配置**（本地注册），不保存 installed inventory。
-/// "电脑上装了哪些模型" 的唯一事实来源是 `~/.zapmomo/models/**/.zapmomo-lib.json` 扫描。
+/// "电脑上装了哪些模型" 的唯一事实来源是 `~/.audiofn/models/**/.audiofn-lib.json` 扫描。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ModelLibrarySettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -438,7 +438,7 @@ impl Default for AppConfig {
     }
 }
 
-/// 加载 ~/.zapmomo/settings.toml
+/// 加载 ~/.audiofn/settings.toml
 ///
 /// 文件不存在时返回 None，不报错。
 pub fn load_settings() -> Result<Option<AppConfig>, String> {
@@ -455,7 +455,7 @@ pub fn load_settings() -> Result<Option<AppConfig>, String> {
     Ok(Some(config))
 }
 
-/// 保存配置到 `~/.zapmomo/settings.toml`（自动创建父目录）。
+/// 保存配置到 `~/.audiofn/settings.toml`（自动创建父目录）。
 ///
 /// 采用「临时文件 + 替换」的安全写：先把完整内容写入带 pid 后缀的临时文件，
 /// 再 rename 到正式路径。POSIX 上 rename 同文件系统是原子的（直接覆盖）；Windows
@@ -501,7 +501,7 @@ mod tests {
     fn test_get_settings_path() {
         run_with_temp_home(|home| {
             let path = get_settings_path();
-            assert_eq!(path, home.join(".zapmomo/settings.toml"));
+            assert_eq!(path, home.join(".audiofn/settings.toml"));
         });
     }
 
@@ -509,7 +509,7 @@ mod tests {
     fn test_get_settings_dir() {
         run_with_temp_home(|home| {
             let dir = get_settings_dir();
-            assert_eq!(dir, home.join(".zapmomo"));
+            assert_eq!(dir, home.join(".audiofn"));
         });
     }
 
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     fn test_get_tts_output_dir() {
         run_with_temp_home(|home| {
-            assert_eq!(get_tts_output_dir(), home.join(".zapmomo/tts"));
+            assert_eq!(get_tts_output_dir(), home.join(".audiofn/tts"));
         });
     }
 
@@ -786,7 +786,7 @@ mod tests {
             let loaded = load_settings().unwrap().unwrap();
             assert_eq!(loaded, config);
             // 文件确实写到了 HOME 下
-            assert!(home.join(".zapmomo/settings.toml").is_file());
+            assert!(home.join(".audiofn/settings.toml").is_file());
         });
     }
 
@@ -808,14 +808,14 @@ mod tests {
             // 未设置时字段不序列化
             let toml_str = toml::to_string(&AppConfig::default()).unwrap();
             assert!(!toml_str.contains("data_dir"));
-            assert!(home.join(".zapmomo/settings.toml").is_file());
+            assert!(home.join(".audiofn/settings.toml").is_file());
         });
     }
 
     #[test]
     fn test_get_models_dir_default_unchanged() {
         run_with_temp_home(|home| {
-            assert_eq!(get_models_dir(), home.join(".zapmomo/models"));
+            assert_eq!(get_models_dir(), home.join(".audiofn/models"));
             assert_eq!(legacy_models_dir(), None);
         });
     }
@@ -828,7 +828,7 @@ mod tests {
             assert_eq!(get_data_dir(), Some(data.clone()));
             assert_eq!(get_models_dir(), data.join("models"));
             // 旧根指向默认位置（供双根扫描/迁移定位存量）
-            assert_eq!(legacy_models_dir(), Some(home.join(".zapmomo/models")));
+            assert_eq!(legacy_models_dir(), Some(home.join(".audiofn/models")));
         });
     }
 
@@ -853,7 +853,7 @@ mod tests {
         run_with_temp_home(|home| {
             write_data_dir_settings(Some("${env.NONEXISTENT_DATA_DIR_XYZ}"));
             assert_eq!(get_data_dir(), None);
-            assert_eq!(get_models_dir(), home.join(".zapmomo/models"));
+            assert_eq!(get_models_dir(), home.join(".audiofn/models"));
             assert_eq!(legacy_models_dir(), None);
         });
     }
@@ -928,7 +928,7 @@ mod tests {
                 get_models_dir(),
                 expected
                     .map(|d| d.join("models"))
-                    .unwrap_or_else(|| home.join(".zapmomo/models"))
+                    .unwrap_or_else(|| home.join(".audiofn/models"))
             );
         });
     }
@@ -989,9 +989,9 @@ mod tests {
             };
             save_settings(&config).unwrap();
             // 正式文件存在
-            assert!(home.join(".zapmomo/settings.toml").is_file());
+            assert!(home.join(".audiofn/settings.toml").is_file());
             // 临时文件被清理（rename 成功）
-            let tmp = home.join(format!(".zapmomo/settings.toml.tmp.{}", std::process::id()));
+            let tmp = home.join(format!(".audiofn/settings.toml.tmp.{}", std::process::id()));
             assert!(!tmp.exists());
             // 覆盖保存仍成功且内容完整
             let config2 = AppConfig {

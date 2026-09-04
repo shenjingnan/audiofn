@@ -146,7 +146,7 @@ pub const SUGGEST_MARGIN_BYTES: u64 = 1024 * 1024 * 1024;
 /// 规则：排除可移动 / 只读卷、home 所在卷、挂载点深度 > 1 的卷（网络盘
 /// `\\?\UNC\...`、squashfs/snap 等伪挂载）；剩余空间最大者；须 ≥
 /// [`SUGGEST_MIN_BYTES`] 且比 home 卷可用空间多 [`SUGGEST_MARGIN_BYTES`] 以上。
-/// 返回 `<挂载点>/ZapMomo`；无合格候选（典型：单盘机器）→ `None`。
+/// 返回 `<挂载点>/AudioFn`；无合格候选（典型：单盘机器）→ `None`。
 pub fn pick_suggested_dir(disks: &[DiskInfo], home: &Path) -> Option<PathBuf> {
     let home_volume = volume_of(disks, home);
     let candidate = disks
@@ -165,7 +165,7 @@ pub fn pick_suggested_dir(disks: &[DiskInfo], home: &Path) -> Option<PathBuf> {
                 .cmp(&b.available)
                 .then_with(|| b.mount_point.cmp(&a.mount_point))
         })?;
-    Some(candidate.mount_point.join("ZapMomo"))
+    Some(candidate.mount_point.join("AudioFn"))
 }
 
 /// 挂载点深度：除根/盘符前缀外的路径成分数。`C:\` 与 `/` 均为 0，
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn test_volume_of_matches_verbatim_dir() {
         let disks = vec![disk("D:\\", 100 * GB)];
-        let d = volume_of(&disks, Path::new(r"\\?\D:\zapmomo\models")).unwrap();
+        let d = volume_of(&disks, Path::new(r"\\?\D:\audiofn\models")).unwrap();
         assert_eq!(d.available, 100 * GB);
         // 普通路径不受影响；剥前缀后仍不属于该卷 → None
         assert_eq!(
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_volume_of_matches_verbatim_unc_dir() {
         let disks = vec![disk(r"\\server\share", 100 * GB)];
-        let d = volume_of(&disks, Path::new(r"\\?\UNC\server\share\zapmomo")).unwrap();
+        let d = volume_of(&disks, Path::new(r"\\?\UNC\server\share\audiofn")).unwrap();
         assert_eq!(d.available, 100 * GB);
     }
 
@@ -295,7 +295,7 @@ mod tests {
     fn test_pick_largest_non_home_volume() {
         let disks = vec![disk("/home", 100 * GB), disk("/data", 500 * GB)];
         let picked = pick_suggested_dir(&disks, Path::new("/home/u")).unwrap();
-        assert_eq!(picked, PathBuf::from("/data/ZapMomo"));
+        assert_eq!(picked, PathBuf::from("/data/AudioFn"));
     }
 
     #[test]
@@ -345,7 +345,7 @@ mod tests {
             disk("/a", 500 * GB),
         ];
         let picked = pick_suggested_dir(&disks, Path::new("/home/u")).unwrap();
-        assert_eq!(picked, PathBuf::from("/a/ZapMomo"));
+        assert_eq!(picked, PathBuf::from("/a/AudioFn"));
     }
 
     #[test]

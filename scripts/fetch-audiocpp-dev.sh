@@ -78,4 +78,4 @@ fi
 chmod +x "$DEST"
 ls -lh "$DEST"
 echo "完成：$DEST"
-echo "提示：也可以不放此处——引擎还可放在 ~/.zapmomo/engines/ 或 PATH 中（locator 自动发现）。"
+echo "提示：也可以不放此处——引擎还可放在 ~/.audiofn/engines/ 或 PATH 中（locator 自动发现）。"

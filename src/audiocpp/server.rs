@@ -274,32 +274,7 @@ fn allocate_port() -> Result<u16, AudiocppError> {
         .map_err(|e| AudiocppError::SpawnFailed(format!("读取端口失败: {e}")))
 }
 
-/// 子进程 PATH：引擎目录 + 注入的搜索目录 + 现有 PATH（去重保序）。
-///
-/// Windows CUDA 运行时 DLL 随 resources 落 `resource_dir\cuda\`，与引擎 exe
-/// 不同目录——Windows loader 在标准搜索序**末位**查 PATH，前置我们的目录既
-/// 让 DLL 可解析，又压过 system32 里可能存在的旧版 cudart。跨平台设置无害。
-fn augmented_child_path(
-    engine_dir: &std::path::Path,
-    search_dirs: &[std::path::PathBuf],
-    current: &std::ffi::OsStr,
-) -> std::ffi::OsString {
-    let mut dirs: Vec<std::path::PathBuf> = Vec::with_capacity(search_dirs.len() + 2);
-    dirs.push(engine_dir.to_path_buf());
-    for d in search_dirs {
-        if !dirs.contains(d) {
-            dirs.push(d.clone());
-        }
-    }
-    for d in std::env::split_paths(current) {
-        if !dirs.contains(&d) {
-            dirs.push(d);
-        }
-    }
-    std::env::join_paths(&dirs).unwrap_or_else(|_| current.to_os_string())
-}
-
-/// ggml 核心库文件名（后端 DLL 目录的判定标志，随平台命名）。
+/// ggml 核心库文件名（后端库目录的判定标志，随平台命名）。
 fn ggml_core_lib_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "ggml-base.dll"
@@ -341,13 +316,9 @@ fn spawn_instance(
 
     let mut cmd = Command::new(engine);
     cmd.arg("--config").arg(&config_path);
-    // DLL 搜索路径前置（CUDA 运行时不在引擎旁时依赖子进程 PATH 解析）
     let search_dirs = super::locator::search_dirs();
     let engine_dir = engine.parent().map(Path::to_path_buf).unwrap_or_default();
-    let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let child_path = augmented_child_path(&engine_dir, &search_dirs, &current_path);
-    tracing::info!(target: "audiocpp", engine = %engine.display(), child_path = %child_path.to_string_lossy(), "spawn audiocpp_server");
-    cmd.env("PATH", child_path);
+    tracing::info!(target: "audiocpp", engine = %engine.display(), "spawn audiocpp_server");
     // ggml 后端枚举只扫「引擎目录 + 子进程 CWD」，把 CWD 指到含 ggml 库的目录
     if let Some(backend_dir) = pick_backend_dir(&engine_dir, &search_dirs) {
         tracing::debug!(target: "audiocpp", backend_dir = %backend_dir.display(), "引擎子进程 CWD 指向 ggml 后端目录");
@@ -559,7 +530,7 @@ mod tests {
     /// 放入固定临时目录并注入 SEARCH_DIRS（OnceLock 全局一次，目录固定保证幂等）。
     #[cfg(all(unix, not(target_os = "macos")))]
     fn setup_stub_engine() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join("zapmomo-audiocpp-stub-test");
+        let dir = std::env::temp_dir().join("audiofn-audiocpp-stub-test");
         std::fs::create_dir_all(&dir).unwrap();
         let script = r#"#!/usr/bin/env python3
 import sys, json, struct
@@ -775,7 +746,7 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
         crate::test_util::run_with_temp_home(|home| {
             // 覆盖 setup_stub_engine 已注入的搜索目录：直接换掉脚本内容为退出脚本。
             // SEARCH_DIRS 指向固定目录，覆盖同名文件即生效。
-            let dir = std::env::temp_dir().join("zapmomo-audiocpp-stub-test");
+            let dir = std::env::temp_dir().join("audiofn-audiocpp-stub-test");
             std::fs::create_dir_all(&dir).unwrap();
             let exe = dir.join(super::super::locator::engine_file_name());
             std::fs::write(&exe, "#!/bin/sh\nexit 3\n").unwrap();
@@ -846,7 +817,7 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
     #[cfg(all(unix, not(target_os = "macos")))]
     fn test_lease_fallback_still_fails_reports_cpu_error() {
         crate::test_util::run_with_temp_home(|home| {
-            let dir = std::env::temp_dir().join("zapmomo-audiocpp-stub-test");
+            let dir = std::env::temp_dir().join("audiofn-audiocpp-stub-test");
             std::fs::create_dir_all(&dir).unwrap();
             let exe = dir.join(super::super::locator::engine_file_name());
             std::fs::write(&exe, "#!/bin/sh\nexit 3\n").unwrap();
@@ -865,36 +836,6 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
 
             setup_stub_engine();
         });
-    }
-
-    /// 子进程 PATH 前置：引擎目录与搜索目录在先、原有 PATH 随后去重保序。
-    #[test]
-    fn test_augmented_child_path_order_and_dedup() {
-        let engine_dir = std::path::Path::new("/engines");
-        let search_dirs = vec![
-            std::path::PathBuf::from("/resources/cuda"),
-            std::path::PathBuf::from("/engines"), // 与引擎目录重复 → 不重复出现
-        ];
-        // 用 join_paths 构造（分隔符随平台；Windows 为 `;`）
-        let current = std::env::join_paths([
-            std::path::Path::new("/usr/bin"),
-            std::path::Path::new("/engines"),
-            std::path::Path::new("/windows"),
-        ])
-        .unwrap();
-        let joined = augmented_child_path(engine_dir, &search_dirs, &current);
-        let dirs: Vec<String> = std::env::split_paths(&joined)
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            dirs,
-            vec![
-                "/engines".to_string(),
-                "/resources/cuda".to_string(),
-                "/usr/bin".to_string(),
-                "/windows".to_string()
-            ]
-        );
     }
 
     /// 多实例并存：不同配置指纹各起实例、互不误杀；释放一个不影响另一个。

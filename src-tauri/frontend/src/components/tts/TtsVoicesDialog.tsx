@@ -28,7 +28,7 @@ interface TtsVoicesDialogProps {
 /**
  * 管理音色对话框：列出已保存的自定义音色（可删除）+ 添加音色
  * （上传音频或在线录音 → 命名 → 自动转写参考文本 → 保存到音色库）。
- * 自定义音色保存在 `~/.zapmomo/voices/`，重启后仍可选用。
+ * 自定义音色保存在 `~/.audiofn/voices/`，重启后仍可选用。
  */
 export function TtsVoicesDialog({ open, onClose }: TtsVoicesDialogProps) {
   const { tts, anyListening, device } = useRuntime();

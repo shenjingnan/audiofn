@@ -1,6 +1,6 @@
 //! 本地安装存储（ModelStorage）与安装事实（LocalModelInstall）。
 //!
-//! Source of Truth：**installed inventory 只来源于模型目录 + `.zapmomo-lib.json` 扫描**，
+//! Source of Truth：**installed inventory 只来源于模型目录 + `.audiofn-lib.json` 扫描**，
 //! Settings 不保存 installed inventory。`is_current` 不持久化，由 Settings current path 派生。
 
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub enum ArtifactSource {
 /// 元数据 schema 版本（v2：新增 source/model_id/artifact_id/variant 等）。
 pub const META_SCHEMA_VERSION: u32 = 2;
 
-/// `.zapmomo-lib.json` 内容。
+/// `.audiofn-lib.json` 内容。
 ///
 /// **不保存**：is_current / download state / 临时进度。
 /// **Legacy 兼容**：schema_version=1 只有 `registry_id/version/installed_at/managed`，均 `#[serde(default)]`。
@@ -124,12 +124,12 @@ pub struct LocalModelInstall {
 pub struct ModelStorage;
 
 impl ModelStorage {
-    /// 根目录：`~/.zapmomo/models`。
+    /// 根目录：`~/.audiofn/models`。
     pub fn root() -> PathBuf {
         get_models_dir()
     }
 
-    /// 分类子目录：`~/.zapmomo/models/<llm|asr|tts|kws>`。
+    /// 分类子目录：`~/.audiofn/models/<llm|asr|tts|kws>`。
     pub fn category_dir(cat: ModelCategory) -> PathBuf {
         ModelStorage::root().join(cat.as_str())
     }
@@ -158,7 +158,7 @@ impl ModelStorage {
         }
     }
 
-    /// artifact 安装目录：`~/.zapmomo/models/<category>/<storageKey>/<artifact_id>`。
+    /// artifact 安装目录：`~/.audiofn/models/<category>/<storageKey>/<artifact_id>`。
     pub fn install_dir(
         provider: &str,
         model_id: &str,
@@ -171,7 +171,7 @@ impl ModelStorage {
     }
 
     pub fn meta_path(dir: &Path) -> PathBuf {
-        dir.join(".zapmomo-lib.json")
+        dir.join(".audiofn-lib.json")
     }
 
     /// 读取安装元数据（缺失/损坏返回 None）。
@@ -202,12 +202,12 @@ impl ModelStorage {
         roots
     }
 
-    /// 扫描所有已安装模型（`.zapmomo-lib.json`）。
+    /// 扫描所有已安装模型（`.audiofn-lib.json`）。
     /// 返回 (install_dir, meta)。这是 installed inventory 的唯一事实来源。
     ///
     /// 支持两种布局：
-    /// - HF 布局：`<category>/<storageKey>/<artifact_id>/.zapmomo-lib.json`
-    /// - legacy 布局：`<reg.name>/.zapmomo-lib.json`（内置模型，无分类子目录）
+    /// - HF 布局：`<category>/<storageKey>/<artifact_id>/.audiofn-lib.json`
+    /// - legacy 布局：`<reg.name>/.audiofn-lib.json`（内置模型，无分类子目录）
     ///
     /// 自定义 `data_dir` 后扫描双根，按 install_id 去重（新根优先）；
     /// v1 legacy meta 的 install_id 为空时用规范化目录路径作 key。

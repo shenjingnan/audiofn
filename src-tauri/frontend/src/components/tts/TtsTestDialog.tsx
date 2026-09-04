@@ -13,7 +13,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { useRuntime } from "@/providers/RuntimeContext";
-import { modelNameFromDir, isCloneRequiredTtsKind } from "./ttsMeta";
+import { isCloneRequiredTtsKind, modelNameFromDir } from "./ttsMeta";
 
 /** 退出动画时长，需与卡片/遮罩的 duration 一致。 */
 const EXIT_MS = 200;
@@ -41,7 +41,7 @@ export function TtsTestDialog({ open, onClose, onManageVoices, manageOpen }: Tts
   const { tts } = useRuntime();
   const [mounted, setMounted] = useState(open);
   const [closing, setClosing] = useState(false);
-  const [text, setText] = useState("你好，我是 ZapMomo。");
+  const [text, setText] = useState("你好，我是 AudioFn。");
   const [speed, setSpeed] = useState(1);
   // 本次合成是否由本对话框发起：决定关闭时是否调用 stop_tts 清理
   const startedByDialog = useRef(false);

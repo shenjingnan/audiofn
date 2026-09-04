@@ -2,7 +2,7 @@
 //!
 //! 分层（不依赖 Tauri runtime state）：
 //! - `registry`：RegistryModel 目录（这个模型是什么）
-//! - `Installation`：managed 安装目录（`.zapmomo-lib.json`）与 external 注册（settings）
+//! - `Installation`：managed 安装目录（`.audiofn-lib.json`）与 external 注册（settings）
 //! - `RuntimeSelection`：复用现有 `model_dir / model_path`（用户选择哪个）
 //! - `RuntimeActual`：由 Tauri 层持有的运行时状态，经 `enrich_runtime_status` 注入
 //!
@@ -46,9 +46,9 @@ pub enum ModelSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageOwnership {
-    /// ZapMomo 自己下载安装到 `~/.zapmomo/models`，拥有文件生命周期管理权
+    /// AudioFn 自己下载安装到 `~/.audiofn/models`，拥有文件生命周期管理权
     Managed,
-    /// 用户注册，ZapMomo 不拥有文件（移除时绝不删除原始文件）
+    /// 用户注册，AudioFn 不拥有文件（移除时绝不删除原始文件）
     External,
 }
 
@@ -173,7 +173,7 @@ pub struct RuntimeActuals<'a> {
     pub tts_active: bool,
 }
 
-/// managed 安装元数据（`.zapmomo-lib.json`）。只记录安装信息，不含 current/enabled。
+/// managed 安装元数据（`.audiofn-lib.json`）。只记录安装信息，不含 current/enabled。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedMeta {
     pub schema_version: u32,
@@ -512,7 +512,7 @@ pub fn list_models() -> Vec<LibraryModel> {
             out.push(m);
         }
     }
-    // HF 在线下载安装（scan `.zapmomo-lib.json`）
+    // HF 在线下载安装（scan `.audiofn-lib.json`）
     for (dir, meta) in crate::model_library::install::ModelStorage::scan_installs() {
         if meta.source == "hf"
             && let Some(m) = build_installed_model(&dir, &meta)
@@ -727,7 +727,7 @@ fn build_local_model(lm: &LocalModel, sel: &Selections) -> Option<LibraryModel> 
 }
 
 fn managed_meta_path(dir: &Path) -> PathBuf {
-    dir.join(".zapmomo-lib.json")
+    dir.join(".audiofn-lib.json")
 }
 
 fn read_managed_installed_at(dir: &Path) -> Option<String> {
@@ -775,7 +775,7 @@ pub fn locate_managed_dir(name: &str) -> Option<PathBuf> {
 
 /// 删除前路径安全校验并删除（目标必须在模型根之一内，且不能是根目录本身）。
 ///
-/// 自定义 `data_dir` 后旧默认根 `~/.zapmomo/models` 下的存量安装同样可删。
+/// 自定义 `data_dir` 后旧默认根 `~/.audiofn/models` 下的存量安装同样可删。
 pub fn delete_managed_dir(dir: &Path) -> Result<(), String> {
     let real = dir
         .canonicalize()
@@ -791,7 +791,7 @@ pub fn delete_managed_dir(dir: &Path) -> Result<(), String> {
         }
     }
     if !allowed {
-        return Err("拒绝删除：模型目录不在 ZapMomo 管理目录内".to_string());
+        return Err("拒绝删除：模型目录不在 AudioFn 管理目录内".to_string());
     }
     if dir.is_dir() {
         std::fs::remove_dir_all(dir)
@@ -1517,7 +1517,7 @@ mod tests {
     #[test]
     fn test_delete_managed_dir_safety() {
         run_with_temp_home(|home| {
-            let models = home.join(".zapmomo/models");
+            let models = home.join(".audiofn/models");
             std::fs::create_dir_all(&models).unwrap();
             let inside = models.join("some-model");
             std::fs::create_dir_all(&inside).unwrap();
@@ -1633,7 +1633,7 @@ mod tests {
                 "GGUF 应落在 <models>/<name>/<archive>"
             );
             assert_eq!(std::fs::read(&final_file).unwrap(), bytes);
-            assert!(final_dir.join(".zapmomo-lib.json").is_file());
+            assert!(final_dir.join(".audiofn-lib.json").is_file());
             // 安装落位与 managed_install_dir 必须一致（幂等预检 / 缺省目录解析的事实源）
             assert!(paths_equal(&final_dir, &managed_install_dir(&reg)));
         });
@@ -1670,7 +1670,7 @@ mod tests {
             let dest =
                 stage_and_commit(&reg_ok, &[&good], good.size_bytes, &mut |_| {}, None).unwrap();
             assert!(has_required_files(&dest, &[gguf]));
-            assert!(dest.join(".zapmomo-lib.json").is_file());
+            assert!(dest.join(".audiofn-lib.json").is_file());
 
             // 失败：sha 不匹配 → 正式目录绝不能出现，staging 被清理
             let bad = mk_asset("0".repeat(64));
@@ -1693,7 +1693,7 @@ mod tests {
     fn test_legacy_managed_recognition_and_metadata_best_effort() {
         run_with_temp_home(|home| {
             // 用 audiocpp Qwen3-ASR 的落位布局摆一个「完整但无 metadata」的旧目录
-            let models = home.join(".zapmomo/models");
+            let models = home.join(".audiofn/models");
             let dest = models.join("qwen3-asr-0.6b-audiocpp");
             std::fs::create_dir_all(&dest).unwrap();
             std::fs::write(
@@ -1713,7 +1713,7 @@ mod tests {
                 "legacy 完整目录应识别为已安装"
             );
             // 补写 metadata 成功（best-effort）
-            assert!(dest.join(".zapmomo-lib.json").is_file());
+            assert!(dest.join(".audiofn-lib.json").is_file());
         });
     }
 
@@ -1758,7 +1758,7 @@ mod tests {
         run_with_temp_home(|home| {
             let data = set_custom_data_dir(home);
             // 双根同 install_id（用户手动复制场景）：只显示新根一份
-            let legacy = home.join(".zapmomo/models/llm/k--m/a");
+            let legacy = home.join(".audiofn/models/llm/k--m/a");
             make_hf_install_at(&legacy, "install-dup", "m1");
             let new = data.join("models/llm/k--m/a");
             make_hf_install_at(&new, "install-dup", "m1");
@@ -1772,7 +1772,7 @@ mod tests {
     fn test_scan_finds_legacy_root_only_installs() {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
-            let legacy = home.join(".zapmomo/models/llm/k--m/b");
+            let legacy = home.join(".audiofn/models/llm/k--m/b");
             make_hf_install_at(&legacy, "install-legacy-only", "m2");
             let installs = crate::model_library::install::ModelStorage::scan_installs();
             assert_eq!(installs.len(), 1, "旧根存量应被扫描到");
@@ -1784,7 +1784,7 @@ mod tests {
     fn test_delete_accepts_legacy_root_when_custom() {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
-            let legacy = home.join(".zapmomo/models/legacy-model");
+            let legacy = home.join(".audiofn/models/legacy-model");
             std::fs::create_dir_all(&legacy).unwrap();
             std::fs::write(legacy.join("f.onnx"), b"x").unwrap();
             delete_managed_dir(&legacy).unwrap();
@@ -1795,7 +1795,7 @@ mod tests {
     #[test]
     fn test_delete_rejects_models_root_itself() {
         run_with_temp_home(|home| {
-            std::fs::create_dir_all(home.join(".zapmomo/models")).unwrap();
+            std::fs::create_dir_all(home.join(".audiofn/models")).unwrap();
             let root = crate::config::settings::get_models_dir();
             let err = delete_managed_dir(&root).unwrap_err();
             assert!(err.contains("拒绝"), "删除根目录本身必须被拒绝：{err}");
@@ -1807,7 +1807,7 @@ mod tests {
         run_with_temp_home(|home| {
             let data = set_custom_data_dir(home);
             // 只在旧根 → 定位到旧根
-            let legacy_dir = home.join(".zapmomo/models/reg-model-a");
+            let legacy_dir = home.join(".audiofn/models/reg-model-a");
             std::fs::create_dir_all(&legacy_dir).unwrap();
             assert_eq!(locate_managed_dir("reg-model-a"), Some(legacy_dir.clone()));
             // 新根出现 → 定位切到新根
@@ -1841,7 +1841,7 @@ mod tests {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
             // 旧版默认根下摆一个完整的 audiocpp Qwen3-ASR 目录（同 legacy 识别测试的摆法）
-            let dest = home.join(".zapmomo/models/qwen3-asr-0.6b-audiocpp");
+            let dest = home.join(".audiofn/models/qwen3-asr-0.6b-audiocpp");
             std::fs::create_dir_all(&dest).unwrap();
             std::fs::write(
                 dest.join(crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file),
@@ -1862,7 +1862,7 @@ mod tests {
             assert!(
                 m.local_path
                     .as_deref()
-                    .is_some_and(|p| p.contains(".zapmomo")),
+                    .is_some_and(|p| p.contains(".audiofn")),
                 "local_path 应指向旧根实际位置"
             );
         });

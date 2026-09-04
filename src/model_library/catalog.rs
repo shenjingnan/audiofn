@@ -38,7 +38,7 @@ impl ModelCategory {
 }
 
 /// 兼容性等级：
-/// - `Verified`：ZapMomo 人工验证过的模型（verified_registry）。
+/// - `Verified`：AudioFn 人工验证过的模型（verified_registry）。
 /// - `Compatible`：已检查 runtime/format/required files/文件结构，可确认能运行。
 /// - `Possible`：仅凭 summary（pipeline/tags/library/format）看起来可能兼容，未查文件，不保证。
 /// - `Unsupported`：已检查并明确发现 runtime 不支持 / 缺 required files / 格式不支持。

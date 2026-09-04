@@ -21,7 +21,7 @@ use crate::model_library;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageInfoView {
-    /// 已解析的 data_dir 展示值（`None` = 使用默认 `~/.zapmomo`）。
+    /// 已解析的 data_dir 展示值（`None` = 使用默认 `~/.audiofn`）。
     pub data_dir: Option<String>,
     /// 模型根目录（当前生效）。
     pub models_dir: String,
@@ -153,7 +153,7 @@ pub fn collect_storage_info() -> Result<StorageInfoView, String> {
 pub struct StoragePromptView {
     /// 是否建议弹引导（`data_dir` 未设置 && 无已装模型 && 用户未确认过）。
     pub prompt_recommended: bool,
-    /// 默认数据根展示值（`~/.zapmomo` 展开后的绝对路径）。
+    /// 默认数据根展示值（`~/.audiofn` 展开后的绝对路径）。
     pub default_dir: String,
     /// 当前生效模型根目录。
     pub models_dir: String,
@@ -165,7 +165,7 @@ pub struct StoragePromptView {
     pub default_available: u64,
 }
 
-/// models 根（双根）是否已有托管安装（`.zapmomo-lib.json`；staging 不算）。
+/// models 根（双根）是否已有托管安装（`.audiofn-lib.json`；staging 不算）。
 fn has_installed_models() -> bool {
     !super::install::ModelStorage::scan_installs().is_empty()
 }
@@ -249,7 +249,7 @@ pub fn validate_data_dir(path: &Path) -> Result<PathBuf, String> {
     }
     std::fs::create_dir_all(path).map_err(|e| format!("无法创建数据目录：{e}"))?;
     // 写删探针验证可写
-    let probe = path.join(".zapmomo-probe");
+    let probe = path.join(".audiofn-probe");
     std::fs::write(&probe, b"ok").map_err(|e| format!("数据目录不可写：{e}"))?;
     let _ = std::fs::remove_file(&probe);
 
@@ -257,7 +257,7 @@ pub fn validate_data_dir(path: &Path) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|e| format!("无法访问数据目录：{e}"))?;
 
-    // 新 models 根 = data_dir/models；旧根 = ~/.zapmomo/models
+    // 新 models 根 = data_dir/models；旧根 = ~/.audiofn/models
     let new_models_root = canon.join("models");
     if let Some(legacy) = settings::legacy_models_dir()
         && let Ok(legacy_canon) = legacy.canonicalize()
@@ -521,10 +521,10 @@ fn copy_dir_with_progress(
     Ok(())
 }
 
-/// dest 完整性判定（看 `.zapmomo-lib.json` 元数据标记）。
+/// dest 完整性判定（看 `.audiofn-lib.json` 元数据标记）。
 fn dest_complete(item: &MigrateItem) -> bool {
     let _ = item;
-    item.dest.join(".zapmomo-lib.json").is_file()
+    item.dest.join(".audiofn-lib.json").is_file()
 }
 
 /// 条目迁移成功后改写引用（settings 绝对路径字段）。
@@ -625,7 +625,7 @@ mod tests {
 
     fn make_installed_model(dir: &Path) {
         make_model_dir(dir, "f.onnx");
-        std::fs::write(dir.join(".zapmomo-lib.json"), "{}").unwrap();
+        std::fs::write(dir.join(".audiofn-lib.json"), "{}").unwrap();
     }
 
     #[test]
@@ -641,7 +641,7 @@ mod tests {
     fn test_validate_rejects_nested_in_legacy_root() {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
-            let nested = home.join(".zapmomo/models/somewhere");
+            let nested = home.join(".audiofn/models/somewhere");
             let err = validate_data_dir(&nested).unwrap_err();
             assert!(err.contains("嵌套"), "{err}");
         });
@@ -682,11 +682,11 @@ mod tests {
         run_with_temp_home(|_home| {
             let info = collect_prompt_info().unwrap();
             assert!(info.prompt_recommended);
-            // 默认根 = ~/.zapmomo（temp home 展开）；路径感知比较（Windows 分隔符为 \）
-            assert!(Path::new(&info.models_dir).ends_with(".zapmomo/models"));
-            // 建议目录依赖真实磁盘（单盘机器为 None）；有值则必以 ZapMomo 结尾
+            // 默认根 = ~/.audiofn（temp home 展开）；路径感知比较（Windows 分隔符为 \）
+            assert!(Path::new(&info.models_dir).ends_with(".audiofn/models"));
+            // 建议目录依赖真实磁盘（单盘机器为 None）；有值则必以 AudioFn 结尾
             if let Some(dir) = &info.suggested_dir {
-                assert!(dir.ends_with("ZapMomo"), "{dir}");
+                assert!(dir.ends_with("AudioFn"), "{dir}");
             }
         });
     }
@@ -703,9 +703,9 @@ mod tests {
     fn test_prompt_not_recommended_when_models_installed() {
         run_with_temp_home(|home| {
             // scan_installs 只认可解析的 meta（meta 键为 camelCase），`{}` 不算已装
-            let dir = home.join(".zapmomo/models/a");
+            let dir = home.join(".audiofn/models/a");
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(".zapmomo-lib.json"), r#"{"schemaVersion":2}"#).unwrap();
+            std::fs::write(dir.join(".audiofn-lib.json"), r#"{"schemaVersion":2}"#).unwrap();
             assert!(!collect_prompt_info().unwrap().prompt_recommended);
         });
     }
@@ -726,7 +726,7 @@ mod tests {
     fn test_plan_skips_install_dir() {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
-            let legacy_models = home.join(".zapmomo/models");
+            let legacy_models = home.join(".audiofn/models");
             make_model_dir(&legacy_models.join("model-a"), "f.onnx");
             make_model_dir(&legacy_models.join(".install/tmp-x"), "f");
 
@@ -741,7 +741,7 @@ mod tests {
     fn test_migrate_same_volume_moves_and_rewrites() {
         run_with_temp_home(|home| {
             let data = set_custom_data_dir(home);
-            let legacy_models = home.join(".zapmomo/models");
+            let legacy_models = home.join(".audiofn/models");
             make_installed_model(&legacy_models.join("model-a"));
 
             // settings 里指向旧根的绝对路径字段（asr.model_dir；保留 data_dir）
@@ -771,7 +771,7 @@ mod tests {
     fn test_migrate_force_copy_path() {
         run_with_temp_home(|home| {
             let data = set_custom_data_dir(home);
-            make_model_dir(&home.join(".zapmomo/models/model-copy"), "f.onnx");
+            make_model_dir(&home.join(".audiofn/models/model-copy"), "f.onnx");
             let mut bytes_seen = 0u64;
             let outcome = run_migration(
                 true,
@@ -791,7 +791,7 @@ mod tests {
     fn test_migrate_idempotent_rerun() {
         run_with_temp_home(|home| {
             let data = set_custom_data_dir(home);
-            make_model_dir(&home.join(".zapmomo/models/m"), "f");
+            make_model_dir(&home.join(".audiofn/models/m"), "f");
             run_migration(false, &mut |_| {}, None).unwrap();
             // 重跑即续：旧根已清空 → 无条目可迁移，无 moved 无 skipped
             let second = run_migration(false, &mut |_| {}, None).unwrap();
@@ -806,8 +806,8 @@ mod tests {
         run_with_temp_home(|home| {
             let data = set_custom_data_dir(home);
             let cancel = AtomicBool::new(false);
-            make_model_dir(&home.join(".zapmomo/models/m1"), "f");
-            make_model_dir(&home.join(".zapmomo/models/m2"), "f");
+            make_model_dir(&home.join(".audiofn/models/m1"), "f");
+            make_model_dir(&home.join(".audiofn/models/m2"), "f");
             let mut seen = 0u32;
             let outcome = run_migration(
                 false,
@@ -833,10 +833,10 @@ mod tests {
             let data = set_custom_data_dir(home);
             // dest 已有完整安装（带 meta），source 也有 → 保留 dest、删 source
             make_installed_model(&data.join("models/dup"));
-            make_model_dir(&home.join(".zapmomo/models/dup"), "old.onnx");
+            make_model_dir(&home.join(".audiofn/models/dup"), "old.onnx");
             let outcome = run_migration(false, &mut |_| {}, None).unwrap();
-            assert!(data.join("models/dup/.zapmomo-lib.json").is_file());
-            assert!(!home.join(".zapmomo/models/dup").exists());
+            assert!(data.join("models/dup/.audiofn-lib.json").is_file());
+            assert!(!home.join(".audiofn/models/dup").exists());
             assert!(
                 outcome.skipped.iter().any(|n| n == "dup")
                     || outcome.moved.iter().any(|n| n == "dup")

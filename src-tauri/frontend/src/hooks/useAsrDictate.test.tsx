@@ -34,11 +34,19 @@ vi.mock("@/lib/tauri", () => ({
 }));
 
 function emitStarted(payload: { error?: string | null } = {}) {
-  act(() => startedHandlers.forEach((h) => h(payload)));
+  act(() =>
+    startedHandlers.forEach((h) => {
+      h(payload);
+    }),
+  );
 }
 
 function emitStopped(payload: { error?: string | null } = {}) {
-  act(() => stoppedHandlers.forEach((h) => h(payload)));
+  act(() =>
+    stoppedHandlers.forEach((h) => {
+      h(payload);
+    }),
+  );
 }
 
 function Probe() {

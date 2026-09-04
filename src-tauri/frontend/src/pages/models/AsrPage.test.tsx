@@ -39,7 +39,7 @@ const ASR_CONFIG: AsrConfigInfo = {
   model_type: "zipformer",
   backend: "sherpa",
   model_dir:
-    "/home/user/.zapmomo/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
+    "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
   provider: "cpu",
   num_threads: 4,
   sample_rate: 16000,
@@ -56,17 +56,17 @@ const ASR_CONFIG: AsrConfigInfo = {
   models_present: false,
   punctuation_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
 };
 
 const TTS_CONFIG = {
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-zipvoice",
+  model_dir: "/home/user/.audiofn/models/sherpa-onnx-zipvoice",
   provider: "cpu",
   num_threads: 4,
   enabled: true,
   models_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
 };
 
 /** 可变 ASR 配置：单个用例可翻转 models_present 等字段（贴近真实后端）。 */
@@ -101,7 +101,7 @@ function defaultAsrModelLibrary(): LibraryStub[] {
       installState: "installed",
       current: true,
       localPath:
-        "/home/user/.zapmomo/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
+        "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
       installId: "asr-streaming-bilingual-zh-en",
       repoId: null,
       ownership: "managed",
@@ -126,7 +126,7 @@ let modelLibrary: LibraryStub[] = defaultAsrModelLibrary();
 function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
   switch (cmd) {
     case "get_app_info":
-      return Promise.resolve({ version: "0.1.4", product_name: "ZapMomo" });
+      return Promise.resolve({ version: "0.1.4", product_name: "AudioFn" });
     case "list_devices":
       return Promise.resolve(["内置麦克风", "USB 麦克风"]);
     case "get_microphone":
@@ -154,7 +154,7 @@ function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
       return Promise.resolve({
         text: "你好，世界",
         model_type: "sensevoice",
-        model_dir: "/home/user/.zapmomo/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8",
+        model_dir: "/home/user/.audiofn/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8",
       });
     case "list_model_library":
       return Promise.resolve(modelLibrary);
@@ -162,7 +162,7 @@ function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
       return Promise.resolve({
         modelType: "asr",
         modelId: "asr-qwen3-0.6b-audiocpp",
-        path: "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
+        path: "/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp",
         runtimeAction: "restart_required",
         effectiveImmediately: false,
         message: "已将 Qwen3-ASR 0.6B (audio.cpp) 设为 ASR 当前模型，将在下次启动识别时生效",
@@ -803,7 +803,7 @@ describe("AsrPage（语音识别配置）", () => {
         ? {
             ...m,
             installState: "installed",
-            localPath: "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
+            localPath: "/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp",
             installId: m.id,
           }
         : m,
@@ -844,7 +844,7 @@ describe("AsrPage（语音识别配置）", () => {
         ? {
             ...m,
             installState: "installed",
-            localPath: "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
+            localPath: "/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp",
             installId: m.id,
           }
         : m,

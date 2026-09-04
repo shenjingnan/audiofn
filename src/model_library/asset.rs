@@ -1,7 +1,7 @@
 //! 模型资产下载基础设施（全项目共享，不隶属任何具体能力模块）。
 //!
 //! 模型元数据编译期嵌入（`include_str!`），运行时从用户目录
-//! `~/.zapmomo/models/<name>` 安装/查找，供 asr / tts / model_library、
+//! `~/.audiofn/models/<name>` 安装/查找，供 asr / tts / model_library、
 //! CLI（`asr/tts install-model`）及 GUI（下载按钮）复用。流程：
 //! 下载 → sha256 校验 → 原子落位，幂等可重跑。
 //!
@@ -73,7 +73,7 @@ pub fn manifest_roles() -> Vec<&'static str> {
     manifest().assets.iter().map(|a| a.role.as_str()).collect()
 }
 
-/// 用户模型根目录：`~/.zapmomo/models`
+/// 用户模型根目录：`~/.audiofn/models`
 pub fn user_models_dir() -> PathBuf {
     get_models_dir()
 }

@@ -37,8 +37,8 @@ vi.mock("@/providers/RuntimeContext", () => ({
 function storageInfo(overrides: Partial<StorageInfo> = {}): StorageInfo {
   return {
     dataDir: null,
-    modelsDir: "/zap/.zapmomo/models",
-    legacyModelsDir: "/zap/.zapmomo/models",
+    modelsDir: "/zap/.audiofn/models",
+    legacyModelsDir: "/zap/.audiofn/models",
     legacyModelsBytes: 1024,
     migrationAvailable: true,
     migrating: false,
@@ -79,12 +79,12 @@ describe("SettingsPage 存储位置", () => {
   it("渲染数据目录与迁移行", async () => {
     renderPage();
     expect(await screen.findByText("存储位置")).toBeInTheDocument();
-    expect(await screen.findByText("/zap/.zapmomo/models")).toBeInTheDocument();
+    expect(await screen.findByText("/zap/.audiofn/models")).toBeInTheDocument();
     expect(screen.getByText("数据目录（模型）")).toBeInTheDocument();
     // 伙伴目录概念已随伴侣功能删除
     expect(screen.queryByText(/伙伴/)).not.toBeInTheDocument();
     // 小文件不迁移的说明
-    expect(screen.getByText(/仍保留在 ~\/.zapmomo/)).toBeInTheDocument();
+    expect(screen.getByText(/仍保留在 ~\/.audiofn/)).toBeInTheDocument();
     expect(await screen.findByText("开始迁移")).toBeInTheDocument();
     expect(screen.getByText(/旧目录占用/)).toBeInTheDocument();
   });

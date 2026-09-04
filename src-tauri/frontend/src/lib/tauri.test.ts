@@ -10,15 +10,15 @@ describe("toAssetUrl", () => {
     stubUserAgent(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
     );
-    expect(toAssetUrl("/Users/zap/.zapmomo/tts/hello.wav")).toBe(
-      "asset://localhost//Users/zap/.zapmomo/tts/hello.wav",
+    expect(toAssetUrl("/Users/zap/.audiofn/tts/hello.wav")).toBe(
+      "asset://localhost//Users/zap/.audiofn/tts/hello.wav",
     );
   });
 
   it("uses the http virtual-host form on Windows (WebView2 rejects custom schemes)", () => {
     stubUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-    expect(toAssetUrl("C:\\Users\\Administrator\\.zapmomo\\tts\\hello.wav")).toBe(
-      "http://asset.localhost/C%3A/Users/Administrator/.zapmomo/tts/hello.wav",
+    expect(toAssetUrl("C:\\Users\\Administrator\\.audiofn\\tts\\hello.wav")).toBe(
+      "http://asset.localhost/C%3A/Users/Administrator/.audiofn/tts/hello.wav",
     );
   });
 

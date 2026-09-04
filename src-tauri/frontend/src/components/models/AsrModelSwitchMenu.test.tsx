@@ -38,7 +38,7 @@ function makeAsrConfig(modelDir?: string) {
       config: {
         model_dir:
           modelDir ??
-          "/home/user/.zapmomo/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
+          "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
         models_present: true,
       },
     },
@@ -129,7 +129,7 @@ describe("AsrModelSwitchMenu 模型快速切换（弹窗版）", () => {
   });
 
   it("切换到 qwen3 后显示新模型目录名", () => {
-    makeAsrConfig("/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp");
+    makeAsrConfig("/home/user/.audiofn/models/qwen3-asr-0.6b-audiocpp");
     renderMenu();
     expect(screen.getByText("qwen3-asr-0.6b-audiocpp")).toBeInTheDocument();
   });

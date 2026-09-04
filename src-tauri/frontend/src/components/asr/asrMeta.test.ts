@@ -29,9 +29,7 @@ describe("isStreamingAsr", () => {
 
 describe("asrDictateStatus", () => {
   it("状态机：错误 > 启动中 > 听写中 > 未听写", () => {
-    expect(asrDictateStatus({ isDictating: false, pending: false, error: "x" }).label).toBe(
-      "错误",
-    );
+    expect(asrDictateStatus({ isDictating: false, pending: false, error: "x" }).label).toBe("错误");
     expect(asrDictateStatus({ isDictating: false, pending: true, error: null }).label).toBe(
       "启动中",
     );

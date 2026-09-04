@@ -38,7 +38,7 @@ function makeAsr(o?: {
       config: {
         enabled: o?.enabled ?? false,
         models_present: o?.modelsPresent ?? false,
-        model_dir: "/zap/.zapmomo/models/asr",
+        model_dir: "/zap/.audiofn/models/asr",
       },
       refresh: vi.fn(),
       setEnabled: vi.fn(),
@@ -57,7 +57,7 @@ function makeTts(o?: { modelsPresent?: boolean; enabled?: boolean; synthesizing?
     config: {
       enabled: o?.enabled ?? true,
       models_present: o?.modelsPresent ?? false,
-      model_dir: "/zap/.zapmomo/models/tts",
+      model_dir: "/zap/.audiofn/models/tts",
     },
     configError: null,
     synthesizing: o?.synthesizing ?? false,

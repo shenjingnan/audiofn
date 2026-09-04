@@ -223,7 +223,7 @@ impl Resampler {
 
 /// 录制 N 秒麦克风并保存为 16k mono PCM wav。
 ///
-/// 返回 wav 路径（位于 `~/.zapmomo/tts/`）。采集复用 `start_capture`，
+/// 返回 wav 路径（位于 `~/.audiofn/tts/`）。采集复用 `start_capture`，
 /// 在调用线程按截止时间循环收块，重采样到 16k 后写入。
 pub fn record_voice(seconds: u32, device: Option<&str>) -> Result<PathBuf, String> {
     let out_dir = crate::config::settings::get_tts_output_dir();

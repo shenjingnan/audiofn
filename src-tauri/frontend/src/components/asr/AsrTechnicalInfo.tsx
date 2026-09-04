@@ -1,7 +1,7 @@
 import { AudioWaveform, ChevronDown } from "lucide-react";
 import { useState } from "react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { isStreamingAsr } from "@/components/asr/asrMeta";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useRuntime } from "@/providers/RuntimeContext";
 
@@ -10,9 +10,7 @@ function asrLanguagesLabel(modelType: string | null | undefined, modelDir: strin
   const dir = modelDir ?? "";
   switch (modelType) {
     case "paraformer":
-      return dir.includes("trilingual")
-        ? "中文、粤语、English"
-        : "中文、English";
+      return dir.includes("trilingual") ? "中文、粤语、English" : "中文、English";
     case "sensevoice":
       return "中文、English、日本語、한국어、粤语";
     case "whisper":

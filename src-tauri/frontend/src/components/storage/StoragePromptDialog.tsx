@@ -36,7 +36,7 @@ function DirRow({ label, dir, available }: { label: string; dir: string; availab
 /**
  * 存储位置引导弹窗：首次下载/导入前询问模型存放目录。
  *
- * 背景：Windows 上默认落在系统盘（`C:\Users\<u>\.zapmomo`），大模型会挤占 C 盘。
+ * 背景：Windows 上默认落在系统盘（`C:\Users\<u>\.audiofn`），大模型会挤占 C 盘。
  * 建议目录由后端挑选（非系统盘、非可移动盘、剩余空间最大），用户也可自选任意目录；
  * 「取消」不写确认标记，下次操作会再次询问。
  */
@@ -84,7 +84,7 @@ export function StoragePromptDialog({
         )}
       </dl>
       <p className="text-xs text-text-muted">
-        settings、日志等小文件仍保留在 ~/.zapmomo，不会迁移；之后可随时在「设置 →
+        settings、日志等小文件仍保留在 ~/.audiofn，不会迁移；之后可随时在「设置 →
         存储位置」更改并迁移已有模型。
       </p>
     </ModelDialog>

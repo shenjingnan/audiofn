@@ -1,4 +1,4 @@
-/// 自定义音色库：`~/.zapmomo/voices/` 目录 + `manifest.json`。
+/// 自定义音色库：`~/.audiofn/voices/` 目录 + `manifest.json`。
 ///
 /// 每个自定义音色 = `<id>.wav`（从上传/录音源拷贝）+ 清单条目
 /// `{ id, name, wav, reference_text }`。清单用 JSON（`serde_json` 已是依赖），
@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::tts::voice::TtsVoice;
 
-/// 用户音色目录名（相对 `~/.zapmomo/`）。
+/// 用户音色目录名（相对 `~/.audiofn/`）。
 const VOICES_DIR_NAME: &str = "voices";
 /// 音色清单文件名。
 const MANIFEST_NAME: &str = "manifest.json";
@@ -27,7 +27,7 @@ pub struct VoiceEntry {
     pub reference_text: String,
 }
 
-/// 音色目录：`~/.zapmomo/voices/`。
+/// 音色目录：`~/.audiofn/voices/`。
 pub fn voices_dir() -> std::path::PathBuf {
     crate::config::settings::get_settings_dir().join(VOICES_DIR_NAME)
 }

@@ -88,7 +88,7 @@ pub struct RegistryModel {
     pub optional_assets: Vec<String>,
     /// 可用平台约束（`None` = 全平台；取值对齐 target triple 简写，如
     /// "darwin-aarch64"）。平台不符的条目在模型库中隐藏——如 audiocpp qwen3
-    /// 依赖 GPU 加速，仅 macOS arm64 / Windows CUDA 的 sidecar 构建可用，
+    /// 依赖 GPU 加速，仅 macOS arm64 Metal 的 sidecar 构建可用，
     /// 其余平台纯 CPU 实测不可用（技术方案 R1 预案）。
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
@@ -98,6 +98,10 @@ pub struct RegistryModel {
 
 /// 当前平台的 triple 简写（与 registry `platforms` 字段取值对齐；
 /// crate 内共享事实源——audiocpp provider 平台缺省也从此取值）。
+///
+/// 取值随构建白名单收窄（macOS / Linux x86_64）；`platform_allows` 对
+/// `platforms` 数据是纯字符串匹配，历史 JSON 里的其它 triple 值仍可被解析、
+/// 只是永不与当前平台相等。
 pub(crate) fn current_platform_triple() -> &'static str {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
@@ -111,15 +115,10 @@ pub(crate) fn current_platform_triple() -> &'static str {
     {
         "linux-x86_64"
     }
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        "windows-x86_64"
-    }
     #[cfg(not(any(
         all(target_os = "macos", target_arch = "aarch64"),
         all(target_os = "macos", target_arch = "x86_64"),
         all(target_os = "linux", target_arch = "x86_64"),
-        all(target_os = "windows", target_arch = "x86_64"),
     )))]
     {
         "other"

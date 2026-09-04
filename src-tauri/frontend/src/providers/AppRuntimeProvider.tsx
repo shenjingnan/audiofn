@@ -41,13 +41,13 @@ export function AppRuntimeProvider({ children }: { children: ReactNode }) {
       if (saved) {
         setDeviceState(saved);
       } else {
-        const legacy = localStorage.getItem("zapmomo.microphone");
+        const legacy = localStorage.getItem("audiofn.microphone");
         if (legacy) {
           setDeviceState(legacy);
           void api.setMicrophone({ mic: legacy }).catch(() => {});
         }
       }
-      localStorage.removeItem("zapmomo.microphone");
+      localStorage.removeItem("audiofn.microphone");
     })();
     return () => {
       cancelled = true;

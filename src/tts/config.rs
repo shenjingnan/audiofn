@@ -227,7 +227,7 @@ fn default_registry_model_dir_name() -> String {
         .clone()
 }
 
-/// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
+/// 用户默认模型目录：`~/.audiofn/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
     crate::config::settings::get_models_dir().join(default_registry_model_dir_name())
 }
@@ -451,7 +451,7 @@ mod tests {
             crate::test_util::set_custom_data_dir(home);
             let new_dir = user_default_model_dir();
             let legacy_dir = home
-                .join(".zapmomo")
+                .join(".audiofn")
                 .join("models")
                 .join(new_dir.file_name().unwrap());
             let gguf = crate::audiocpp::families::QWEN3_TTS_06B.gguf_file;
@@ -548,7 +548,7 @@ mod tests {
             let dir = super::user_default_model_dir();
             assert_eq!(
                 dir,
-                home.join(".zapmomo/models")
+                home.join(".audiofn/models")
                     .join("qwen3-tts-06b-base-audiocpp")
             );
         });
@@ -673,7 +673,7 @@ mod tests {
                 ..TtsSettings::default()
             };
             let cfg = resolve(Some(&settings), None).unwrap();
-            assert_eq!(cfg.model_dir, home.join(".zapmomo/models/my-tts"));
+            assert_eq!(cfg.model_dir, home.join(".audiofn/models/my-tts"));
         });
     }
 

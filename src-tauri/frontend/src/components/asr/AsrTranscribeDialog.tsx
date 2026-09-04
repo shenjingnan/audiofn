@@ -2,9 +2,9 @@ import { Check, CircleAlert, Copy, FileAudio, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import { useAsrTranscribe } from "@/hooks/useAsrTranscribe";
+import { cn } from "@/lib/utils";
 import { useRuntime } from "@/providers/RuntimeContext";
 import { asrModelKindLabel, modelNameFromDir } from "./asrMeta";
 
@@ -40,12 +40,12 @@ export function AsrTranscribeDialog({ open, onClose, autoRun }: AsrTranscribeDia
   }, [open]);
 
   // 离线「测试识别」：打开即自动转写模型自带示例音频（仅触发一次）
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 有意仅随「打开且模型就绪」触发一次，避免回调标识变化重复转写
   useEffect(() => {
     if (open && mounted && autoRun && !autoRunHandled.current) {
       autoRunHandled.current = true;
       void runDefaultTest();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mounted, autoRun]);
 
   const finishClose = useCallback(() => {
@@ -70,9 +70,9 @@ export function AsrTranscribeDialog({ open, onClose, autoRun }: AsrTranscribeDia
   }, [mounted, closing, close]);
 
   // 关闭后清空上一次结果（下次打开重新选择）
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 有意仅在关闭时清空，clear/mounted 标识变化不应额外触发
   useEffect(() => {
     if (!open && mounted) clear();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!mounted) return null;

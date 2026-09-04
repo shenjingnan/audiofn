@@ -136,7 +136,7 @@ fn temp_wav_path() -> PathBuf {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     std::env::temp_dir().join(format!(
-        "zapmomo-dictate-{}-{nanos}.wav",
+        "audiofn-dictate-{}-{nanos}.wav",
         std::process::id()
     ))
 }

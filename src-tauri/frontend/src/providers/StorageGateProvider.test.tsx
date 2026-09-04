@@ -71,9 +71,9 @@ function renderGate(
 function promptInfo(overrides: Partial<StoragePrompt> = {}): StoragePrompt {
   return {
     promptRecommended: true,
-    defaultDir: "/home/u/.zapmomo",
-    modelsDir: "/home/u/.zapmomo/models",
-    suggestedDir: "/data/ZapMomo",
+    defaultDir: "/home/u/.audiofn",
+    modelsDir: "/home/u/.audiofn/models",
+    suggestedDir: "/data/AudioFn",
     suggestedAvailable: 500 * 1024 * 1024 * 1024,
     defaultAvailable: 20 * 1024 * 1024 * 1024,
     ...overrides,
@@ -130,7 +130,7 @@ describe("StorageGateProvider", () => {
   });
 
   it("「选择其他位置」走 set_data_dir → acknowledge → 放行", async () => {
-    openMock.mockResolvedValue("/data/ZapMomo");
+    openMock.mockResolvedValue("/data/AudioFn");
     const results: boolean[] = [];
     const user = userEvent.setup();
     renderGate((v) => results.push(v));
@@ -141,7 +141,7 @@ describe("StorageGateProvider", () => {
 
     await waitFor(() => expect(results).toEqual([true]));
     expect(openMock).toHaveBeenCalled();
-    expect(invokeMock).toHaveBeenCalledWith("set_data_dir", { path: "/data/ZapMomo" });
+    expect(invokeMock).toHaveBeenCalledWith("set_data_dir", { path: "/data/AudioFn" });
     expect(invokeMock).toHaveBeenCalledWith("acknowledge_storage_prompt");
   });
 

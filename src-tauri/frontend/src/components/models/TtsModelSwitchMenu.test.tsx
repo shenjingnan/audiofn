@@ -34,7 +34,7 @@ function makeTtsConfig(modelDir?: string) {
   state.tts = {
     config: {
       model_dir:
-        modelDir ?? "/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+        modelDir ?? "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
       models_present: true,
     },
   };

@@ -29,7 +29,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 const ASR_CONFIG = {
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-streaming-zipformer",
+  model_dir: "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer",
   provider: "cpu",
   num_threads: 4,
   sample_rate: 16000,
@@ -37,17 +37,17 @@ const ASR_CONFIG = {
   models_present: false,
   punctuation_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
 };
 
 const TTS_CONFIG = {
-  model_dir: "/home/user/.zapmomo/models/qwen3-tts",
+  model_dir: "/home/user/.audiofn/models/qwen3-tts",
   provider: "cpu",
   num_threads: 4,
   enabled: true,
   models_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
 };
 
 /** 可变 ASR/TTS 配置（引导卡「全部正常不渲染」等用例需置 models_present）。 */
@@ -79,7 +79,7 @@ beforeEach(() => {
     (cmd: string, args?: { enabled?: boolean; mic?: string; device?: string | null }) => {
       switch (cmd) {
         case "get_app_info":
-          return Promise.resolve({ version: "0.1.4", product_name: "ZapMomo" });
+          return Promise.resolve({ version: "0.1.4", product_name: "AudioFn" });
         case "list_devices":
           return Promise.resolve(devices);
         case "request_mic_permission":
@@ -127,7 +127,7 @@ beforeEach(() => {
 describe("App（路由收敛：概览 / 模型 / 设置）", () => {
   it("渲染 Sidebar 导航（概览 / 模型 / 设置）与模型概览页", async () => {
     renderApp("/models");
-    expect(screen.getByAltText("ZapMomo")).toBeInTheDocument();
+    expect(screen.getByAltText("AudioFn")).toBeInTheDocument();
     expect(screen.getByText("概览")).toBeInTheDocument();
     expect(screen.getByText("设置")).toBeInTheDocument();
     expect(screen.getByText("模型摘要")).toBeInTheDocument();

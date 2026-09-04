@@ -56,7 +56,7 @@ export interface SystemResources {
 
 /** 存储信息（`get_storage_info`），与 Rust `StorageInfoView` camelCase 对应。 */
 export interface StorageInfo {
-  /** 已解析的 data_dir（null = 使用默认 ~/.zapmomo） */
+  /** 已解析的 data_dir（null = 使用默认 ~/.audiofn） */
   dataDir: string | null;
   modelsDir: string;
   legacyModelsDir: string | null;
@@ -77,7 +77,7 @@ export interface MigrateFailedItem {
 export interface StoragePrompt {
   /** 是否建议弹引导（data_dir 未设置 && 无已装模型 && 用户未确认过） */
   promptRecommended: boolean;
-  /** 默认数据根展示值（~/.zapmomo 展开后的绝对路径） */
+  /** 默认数据根展示值（~/.audiofn 展开后的绝对路径） */
   defaultDir: string;
   modelsDir: string;
   /** 建议目录（非默认卷中剩余空间最大的固定盘；单盘机器 = null） */

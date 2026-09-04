@@ -1,4 +1,4 @@
-//! ZapMomo 桌面应用（Tauri 2）。
+//! AudioFn 桌面应用（Tauri 2）。
 //!
 //! 复用根 crate `audiofn` 的音频 / 配置逻辑：通过 Tauri command 暴露设备列表、
 //! ASR / TTS 配置与模型库管理；识别/合成在独立线程执行，进度与结果经
@@ -378,7 +378,7 @@ fn is_asr_dictating(state: State<'_, AsrDictateState>) -> bool {
     state.is_dictating()
 }
 
-/// 下载并安装 ASR 模型（缺省 Qwen3-ASR 0.6B 单 GGUF，`~/.zapmomo/models/<模型名>`）。
+/// 下载并安装 ASR 模型（缺省 Qwen3-ASR 0.6B 单 GGUF，`~/.audiofn/models/<模型名>`）。
 ///
 /// 防重入；下载在阻塞线程池执行，进度经 `asr-model-download-progress` 事件推给前端。
 #[tauri::command]
@@ -656,7 +656,7 @@ fn synthesize_tts(
     // 失败同步返回清晰错误（避免在后台线程里才报错）
     audiofn::tts::config::preflight(&cfg).map_err(|e| {
         format!(
-            "{e}\n\n请在「配置」面板点击「选择模型」，或运行 `zapmomo tts install-model` 下载模型。"
+            "{e}\n\n请在「配置」面板点击「选择模型」，或运行 `audiofn tts install-model` 下载模型。"
         )
     })?;
 
@@ -721,7 +721,7 @@ fn is_tts_synthesizing(state: State<'_, TtsSynthesizeState>) -> bool {
     state.is_synthesizing()
 }
 
-/// 下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，`~/.zapmomo/models/<模型名>`）。
+/// 下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，`~/.audiofn/models/<模型名>`）。
 ///
 /// 防重入；下载在阻塞线程池执行，进度经 `tts-model-download-progress` 事件推给前端。
 #[tauri::command]
@@ -1603,7 +1603,7 @@ fn open_storage_dir() -> Result<(), String> {
 }
 
 /// 托盘 id（档位变化后 `tray_by_id` 定位托盘并重建菜单）。
-const TRAY_ID: &str = "zapmomo-tray";
+const TRAY_ID: &str = "audiofn-tray";
 
 /// 构建托盘「开机自启动」动作项（按当前状态显示相反动作）。
 fn build_autostart_item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
@@ -1756,7 +1756,7 @@ pub fn run() {
             // 设置窗口：默认隐藏，由 cmd+, 或托盘菜单打开；关闭时隐藏而非退出。
             let mut settings =
                 WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-                    .title("ZapMomo 设置")
+                    .title("AudioFn 设置")
                     .inner_size(1180.0, 760.0)
                     .min_inner_size(1180.0, 640.0)
                     .resizable(true)
@@ -1810,7 +1810,7 @@ pub fn run() {
                 });
             }
 
-            // 应用菜单（仅 macOS）：「ZapMomo」子菜单（偏好设置 cmd+, / 退出 Cmd+Q）
+            // 应用菜单（仅 macOS）：「AudioFn」子菜单（偏好设置 cmd+, / 退出 Cmd+Q）
             // 与「编辑」菜单。macOS 的 Cmd+C/V/X/A/Z 依赖菜单中的「编辑」项
             // （key equivalent）才能派发到 WebView 输入框；自定义菜单若缺少这些项，
             // 复制/粘贴/全选会全部失效。
@@ -1846,13 +1846,13 @@ pub fn run() {
                 // 整个退出被取消（Cmd+Q 表现为窗口隐藏、进程残留）。自定义项直接走
                 // handle_menu("quit") → app.exit(0)，绕过窗口询问，与托盘「退出」一致。
                 let quit =
-                    MenuItem::with_id(app, "quit", "退出 ZapMomo", true, Some("CmdOrCtrl+Q"))?;
+                    MenuItem::with_id(app, "quit", "退出 AudioFn", true, Some("CmdOrCtrl+Q"))?;
                 // 注意：muda 在 macOS 只把 Submenu 渲染为菜单栏项，顶级普通 MenuItem
                 // 不显示（快捷键仍可派发）。因此偏好设置/退出须收进 app 名子菜单，
-                // 保持「Apple | ZapMomo | 编辑」的 macOS 惯例结构。
+                // 保持「Apple | AudioFn | 编辑」的 macOS 惯例结构。
                 let sep = PredefinedMenuItem::separator(app)?;
                 let app_submenu =
-                    Submenu::with_items(app, "ZapMomo", true, &[&show_settings, &sep, &quit])?;
+                    Submenu::with_items(app, "AudioFn", true, &[&show_settings, &sep, &quit])?;
                 let app_menu = Menu::with_items(app, &[&app_submenu, &edit_menu])?;
                 app.set_menu(app_menu)?;
             }
@@ -1908,12 +1908,12 @@ mod autostart_tests {
     fn test_autostart_flag_hits_at_any_position() {
         // 尾部命中（系统拉起的典型形态：可执行路径 + 插件附加参数）
         assert!(is_launched_by_autostart([
-            "/usr/bin/ZapMomo",
+            "/usr/bin/AudioFn",
             "--autostart"
         ]));
         // 中段命中（未来若再附加其它参数）
         assert!(is_launched_by_autostart([
-            "/Applications/ZapMomo.app/Contents/MacOS/ZapMomo",
+            "/Applications/AudioFn.app/Contents/MacOS/AudioFn",
             "--autostart",
             "--other"
         ]));
@@ -1923,7 +1923,7 @@ mod autostart_tests {
     fn test_autostart_flag_requires_exact_match() {
         // 空命令行 / 仅可执行路径
         assert!(!is_launched_by_autostart(Vec::<String>::new()));
-        assert!(!is_launched_by_autostart(["target/debug/ZapMomo"]));
+        assert!(!is_launched_by_autostart(["target/debug/AudioFn"]));
         // 前缀 / 去杠 / 赋值变体均不命中（精确匹配，避免误吞用户显式参数）
         assert!(!is_launched_by_autostart(["--autostart-x"]));
         assert!(!is_launched_by_autostart(["autostart"]));

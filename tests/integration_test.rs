@@ -19,8 +19,9 @@ async fn test_run_config_returns_ok() {
 #[test]
 fn test_cli_help_has_no_legacy_brand_or_greet() {
     // CLI 面验收：帮助文案不含旧品牌与已删除的 greet
+    // "momo" 是旧品牌的核心子串：覆盖其任意大小写与连字符变体，比完整旧名更严
     let help = Cli::command().render_help().to_string();
-    assert!(!help.to_lowercase().contains("zapmomo"), "help: {help}");
+    assert!(!help.to_lowercase().contains("momo"), "help: {help}");
     assert!(!help.contains("greet"), "help: {help}");
 }
 

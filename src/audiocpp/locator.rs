@@ -45,7 +45,7 @@ pub fn engine_file_name() -> String {
 /// 进程级搜索目录注入（宿主应用在启动时调用一次）。
 ///
 /// GUI（src-tauri）注入 `resource_dir` 与 `current_exe` 同目录；CLI 不注入，
-/// 依赖 `~/.zapmomo/engines/` 与 PATH 兜底。
+/// 依赖 `~/.audiofn/engines/` 与 PATH 兜底。
 static SEARCH_DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
 
 /// 注入引擎搜索目录（仅首次调用生效，幂等）。
@@ -55,13 +55,13 @@ pub fn set_search_dirs(dirs: Vec<PathBuf>) {
 
 /// 注入的搜索目录快照（未注入 → 空）。
 ///
-/// 供 spawn 时构造子进程 DLL 搜索路径（Windows CUDA 运行时 DLL 随
-/// resources 落 resource_dir，与引擎 exe 不同目录时依赖子进程 PATH 解析）。
+/// 供 spawn 时挑选 ggml 后端库目录（`pick_backend_dir`）：后端库随资源落
+/// resource_dir、与引擎 exe 不同目录时，靠它定位含核心 ggml 库的目录。
 pub fn search_dirs() -> Vec<PathBuf> {
     SEARCH_DIRS.get().cloned().unwrap_or_default()
 }
 
-/// 引擎目录（`<data_dir>/engines`，未自定义时为 `~/.zapmomo/engines`）。
+/// 引擎目录（`<data_dir>/engines`，未自定义时为 `~/.audiofn/engines`）。
 pub fn engines_dir() -> PathBuf {
     crate::config::settings::get_data_dir()
         .unwrap_or_else(crate::config::settings::get_settings_dir)
@@ -95,7 +95,7 @@ fn find_in_path() -> Option<PathBuf> {
 /// 定位 audiocpp_server 引擎二进制。
 ///
 /// 优先级：显式覆盖（`[tts].engine_path` / CLI `--engine-path`）> 注入目录
-/// （GUI externalBin 落位点）> `~/.zapmomo/engines/` > `PATH`。
+/// （GUI externalBin 落位点）> `~/.audiofn/engines/` > `PATH`。
 /// 全部未命中返回 [`AudiocppError::EngineNotFound`]（带已搜索路径列表）。
 pub fn locate_engine(explicit: Option<&std::path::Path>) -> Result<PathBuf, AudiocppError> {
     let engines = engines_dir();
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn test_locate_engine_explicit_missing_reports_searched() {
         // 隔离 HOME：显式路径不存在且后续候选（engines 目录）为空 → EngineNotFound，
-        // 文案含该路径（真机 ~/.zapmomo/engines/ 可能放有引擎，不隔离会 fallback 命中）
+        // 文案含该路径（真机 ~/.audiofn/engines/ 可能放有引擎，不隔离会 fallback 命中）
         crate::test_util::run_with_temp_home(|_| {
             let err = locate_engine(Some(std::path::Path::new("/nonexistent/audiocpp_server")))
                 .unwrap_err();

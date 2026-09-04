@@ -35,7 +35,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 const KWS_CONFIG = {
   enabled: false,
   custom_keywords: "",
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-kws-zipformer-zh-en-3M",
+  model_dir: "/home/user/.audiofn/models/sherpa-onnx-kws-zipformer-zh-en-3M",
   provider: "cpu",
   num_threads: 4,
   sample_rate: 16000,
@@ -46,11 +46,11 @@ const KWS_CONFIG = {
   keywords: ["文森特卡索"],
   models_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
 };
 
 const ASR_CONFIG = {
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-streaming-zipformer",
+  model_dir: "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer",
   provider: "cpu",
   num_threads: 4,
   sample_rate: 16000,
@@ -67,18 +67,19 @@ const ASR_CONFIG = {
   models_present: false,
   punctuation_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
 };
 
 const TTS_CONFIG = {
   model_type: "zipvoice",
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+  model_dir: "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+  backend: "audiocpp",
   provider: "cpu",
   num_threads: 4,
   enabled: true,
   models_present: false,
   model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
+  settings_path: "/home/user/.audiofn/settings.toml",
   num_steps: 4,
   speed: 1.0,
   debug: false,
@@ -119,7 +120,7 @@ function defaultTtsModelLibrary(): LibraryStub[] {
       modelType: "tts",
       installState: "installed",
       current: true,
-      localPath: "/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+      localPath: "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
       installId: "tts-zipvoice-distill-int8",
       repoId: null,
       ownership: "managed",
@@ -144,7 +145,7 @@ function defaultInvoke(
 ) {
   switch (cmd) {
     case "get_app_info":
-      return Promise.resolve({ version: "0.1.4", product_name: "ZapMomo" });
+      return Promise.resolve({ version: "0.1.4", product_name: "AudioFn" });
     case "list_devices":
       return Promise.resolve(["内置麦克风"]);
     case "get_kws_config":
@@ -167,7 +168,7 @@ function defaultInvoke(
       const saved = {
         id: "custom-1",
         name: args?.name ?? "我的声音",
-        wav_path: "/home/user/.zapmomo/voices/custom-1.wav",
+        wav_path: "/home/user/.audiofn/voices/custom-1.wav",
         reference_text: args?.referenceText ?? "",
         custom: true,
       };
@@ -178,7 +179,7 @@ function defaultInvoke(
       ttsVoices = ttsVoices.filter((v) => v.id !== (args?.id ?? ""));
       return Promise.resolve(undefined);
     case "record_tts_voice":
-      return Promise.resolve("/home/user/.zapmomo/tts/rec-1.wav");
+      return Promise.resolve("/home/user/.audiofn/tts/rec-1.wav");
     case "synthesize_tts":
       return Promise.resolve(undefined);
     case "stop_tts":
@@ -227,7 +228,7 @@ beforeEach(() => {
       id: "leijun-1",
       name: "雷军（男）",
       wav_path:
-        "/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/leijun-1.wav",
+        "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/leijun-1.wav",
       reference_text: "那还是36年前, 1987年.",
       custom: false,
     },
@@ -235,7 +236,7 @@ beforeEach(() => {
       id: "news-female",
       name: "新闻女声",
       wav_path:
-        "/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/news-female.wav",
+        "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/news-female.wav",
       reference_text: "各位村民, 大家新年好!",
       custom: false,
     },
@@ -407,14 +408,15 @@ describe("TtsPage（语音合成 TTS）", () => {
     const trigger = screen.getByRole("button", { name: /模型信息/ });
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("运行时")).toBeInTheDocument();
-    expect(screen.getByText("sherpa-onnx")).toBeInTheDocument();
+    // 「audio.cpp」同时出现在模型信息运行时行与顶部引擎徽标，用 getAll 断言存在
+    expect(screen.getAllByText("audio.cpp").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("执行 Provider")).toBeInTheDocument();
     expect(screen.getByText("cpu")).toBeInTheDocument();
     // 「线程数」同时出现在模型信息与高级参数（折叠区仍在 DOM），用 getAll 断言存在
     expect(screen.getAllByText("线程数").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("支持语言")).toBeInTheDocument();
     expect(
-      screen.getByText("/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"),
+      screen.getByText("/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"),
     ).toBeInTheDocument();
     expect(screen.getByText("配置路径")).toBeInTheDocument();
   });
@@ -488,7 +490,7 @@ describe("TtsPage（语音合成 TTS）", () => {
     ttsConfig = {
       ...ttsConfig,
       model_type: "qwen3_tts_06",
-      model_dir: "/home/user/.zapmomo/models/qwen3-tts-12hz-0.6b-base-q8_0",
+      model_dir: "/home/user/.audiofn/models/qwen3-tts-12hz-0.6b-base-q8_0",
       models_present: true,
     };
     const user = userEvent.setup();
@@ -583,7 +585,7 @@ describe("TtsPage（语音合成 TTS）", () => {
       expect(invokeMock).toHaveBeenCalledWith("record_tts_voice", { seconds: 5, device: null });
     });
     // 录音完成后回填 wav 路径（供保存为音色）
-    expect(await screen.findByText("/home/user/.zapmomo/tts/rec-1.wav")).toBeInTheDocument();
+    expect(await screen.findByText("/home/user/.audiofn/tts/rec-1.wav")).toBeInTheDocument();
   });
 
   it("TestDialog 内「管理音色」入口：保存后下拉含自定义音色，选中合成携带 referenceWav/referenceText", async () => {
@@ -627,7 +629,7 @@ describe("TtsPage（语音合成 TTS）", () => {
         text: "用我的声音",
         speed: 1,
         voice: null,
-        referenceWav: "/home/user/.zapmomo/voices/custom-1.wav",
+        referenceWav: "/home/user/.audiofn/voices/custom-1.wav",
         referenceText: "克隆参考文本",
       });
     });
@@ -639,14 +641,14 @@ describe("TtsPage（语音合成 TTS）", () => {
         id: "leijun-1",
         name: "雷军（男）",
         wav_path:
-          "/home/user/.zapmomo/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/leijun-1.wav",
+          "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/leijun-1.wav",
         reference_text: "那还是36年前, 1987年.",
         custom: false,
       },
       {
         id: "custom-1",
         name: "我的声音",
-        wav_path: "/home/user/.zapmomo/voices/custom-1.wav",
+        wav_path: "/home/user/.audiofn/voices/custom-1.wav",
         reference_text: "克隆参考文本",
         custom: true,
       },

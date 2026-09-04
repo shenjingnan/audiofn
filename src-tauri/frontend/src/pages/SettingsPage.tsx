@@ -174,7 +174,7 @@ export function SettingsPage() {
           <div className="flex items-center justify-between gap-3.5 px-3.5 py-2.5">
             <div className="min-w-0">
               <dt className="text-sm text-text-primary">重启应用</dt>
-              <dd className="mt-0.5 text-xs text-text-muted">关闭并重新启动 ZapMomo</dd>
+              <dd className="mt-0.5 text-xs text-text-muted">关闭并重新启动 AudioFn</dd>
             </div>
             <Button size="sm" onClick={() => void api.restartApp()}>
               重启
@@ -201,7 +201,7 @@ export function SettingsPage() {
               <h2 className="text-base font-semibold text-text-primary">存储位置</h2>
               <p className="mt-0.5 text-xs text-text-muted">
                 自定义模型的存放目录；切换后新下载走新目录，已有模型保持可用。 settings
-                与日志等小文件仍保留在 ~/.zapmomo
+                与日志等小文件仍保留在 ~/.audiofn
               </p>
             </div>
           </div>
@@ -213,7 +213,7 @@ export function SettingsPage() {
               <dt className="text-sm text-text-primary">数据目录（模型）</dt>
               <dd className="mt-0.5 space-y-0.5 break-all text-xs text-text-muted">
                 <div>
-                  {storageInfo?.modelsDir ?? (storageLoading ? "加载中…" : "~/.zapmomo/models")}
+                  {storageInfo?.modelsDir ?? (storageLoading ? "加载中…" : "~/.audiofn/models")}
                 </div>
               </dd>
             </div>
@@ -322,7 +322,7 @@ export function SettingsPage() {
         <p className="text-sm text-text-muted">
           切换后新的模型下载将进入新目录，已有模型仍保持可用。
           如需释放旧目录空间，可稍后在「存储位置」执行迁移。 settings 与日志等小文件仍保留在
-          ~/.zapmomo。
+          ~/.audiofn。
         </p>
       </ModelDialog>
 

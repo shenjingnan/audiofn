@@ -305,7 +305,7 @@ fn default_registry_model_dir_name() -> String {
         .clone()
 }
 
-/// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
+/// 用户默认模型目录：`~/.audiofn/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
     crate::config::settings::get_models_dir().join(default_registry_model_dir_name())
 }
@@ -354,7 +354,7 @@ pub fn default_model_dir() -> PathBuf {
 const LEGACY_PUNCTUATION_DIR_NAME: &str =
     "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12";
 
-/// 标点模型默认目录：用户目录（`~/.zapmomo/models/<标点名>`）优先，旧根存量兜底。
+/// 标点模型默认目录：用户目录（`~/.audiofn/models/<标点名>`）优先，旧根存量兜底。
 fn punctuation_default_dir() -> PathBuf {
     let new = crate::config::settings::get_models_dir().join(LEGACY_PUNCTUATION_DIR_NAME);
     if new.join(DEFAULT_PUNCT_MODEL).is_file() {
@@ -977,7 +977,7 @@ mod tests {
             crate::test_util::set_custom_data_dir(home);
             let new_dir = user_default_model_dir();
             let legacy_dir = home
-                .join(".zapmomo")
+                .join(".audiofn")
                 .join("models")
                 .join(new_dir.file_name().unwrap());
             let gguf = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
@@ -1003,7 +1003,7 @@ mod tests {
             let new_punct =
                 crate::config::settings::get_models_dir().join(LEGACY_PUNCTUATION_DIR_NAME);
             let legacy_punct = home
-                .join(".zapmomo")
+                .join(".audiofn")
                 .join("models")
                 .join(new_punct.file_name().unwrap());
 
@@ -1054,7 +1054,7 @@ mod tests {
             let dir = super::user_default_model_dir();
             assert_eq!(
                 dir,
-                home.join(".zapmomo/models")
+                home.join(".audiofn/models")
                     .join(super::default_registry_model_dir_name())
             );
         });
@@ -1095,7 +1095,7 @@ mod tests {
                 ..AsrSettings::default()
             };
             let cfg = resolve(Some(&settings), None).unwrap();
-            assert_eq!(cfg.model_dir, home.join(".zapmomo/models/my-asr"));
+            assert_eq!(cfg.model_dir, home.join(".audiofn/models/my-asr"));
         });
     }
 
@@ -1188,7 +1188,7 @@ mod tests {
             // 标点资产已随清单裁剪下架：默认仅锚定历史目录名（老 settings 兼容），不 panic
             assert_eq!(
                 cfg.punctuation_model,
-                home.join(".zapmomo/models")
+                home.join(".audiofn/models")
                     .join(LEGACY_PUNCTUATION_DIR_NAME)
                     .join(DEFAULT_PUNCT_MODEL)
             );
@@ -1920,14 +1920,14 @@ mod tests {
         let patch = AsrParamsPatch {
             num_threads: Some(4),
             blank_penalty: Some(1.5),
-            hotwords: Some("尼日尔河 ZapMomo".to_string()),
+            hotwords: Some("尼日尔河 AudioFn".to_string()),
             language: Some("zh".to_string()),
             use_itn: Some(true),
             ..AsrParamsPatch::default()
         };
         patch.apply_to(&mut asr).unwrap();
         assert_eq!(asr.num_threads, Some(4));
-        assert_eq!(asr.hotwords.as_deref(), Some("尼日尔河 ZapMomo"));
+        assert_eq!(asr.hotwords.as_deref(), Some("尼日尔河 AudioFn"));
         assert_eq!(asr.blank_penalty, None, "空白惩罚不应落盘");
         assert_eq!(asr.language, None, "qwen3 自动识别语种，language 不落盘");
         assert_eq!(asr.use_itn, None, "qwen3 原生标点，use_itn 不落盘");
@@ -1945,7 +1945,7 @@ mod tests {
             ..AsrSettings::default()
         };
         patch.apply_to(&mut zip).unwrap();
-        assert_eq!(zip.hotwords.as_deref(), Some("尼日尔河 ZapMomo"));
+        assert_eq!(zip.hotwords.as_deref(), Some("尼日尔河 AudioFn"));
         assert_eq!(zip.blank_penalty, Some(1.5));
         assert_eq!(zip.language.as_deref(), Some("zh"));
     }
@@ -2212,7 +2212,7 @@ mod tests {
         };
         let patch = AsrParamsPatch {
             num_threads: Some(4),
-            hotwords: Some("尼日尔河 ZapMomo".to_string()),
+            hotwords: Some("尼日尔河 AudioFn".to_string()),
             language: Some("zh".to_string()),
             ..AsrParamsPatch::default()
         };
@@ -2232,7 +2232,7 @@ mod tests {
             ..AsrSettings::default()
         };
         patch.apply_to(&mut sherpa).unwrap();
-        assert_eq!(sherpa.hotwords.as_deref(), Some("尼日尔河 ZapMomo"));
+        assert_eq!(sherpa.hotwords.as_deref(), Some("尼日尔河 AudioFn"));
         assert_eq!(sherpa.language, None);
     }
 }

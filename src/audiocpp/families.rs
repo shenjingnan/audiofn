@@ -19,7 +19,7 @@ pub enum VoiceSemantics {
     /// 强制参考音频克隆（qwen3_tts Base）：与 [`VoiceSemantics::ReferenceClone`]
     /// 同款 `voice_ref`+`reference_text` 映射，但 `Sid`/缺省**必须拦截**--
     /// 上游 Base 版无 auto voice（实测报错 "requires voice clone reference
-    /// audio"），ZapMomo 侧提前报错给中文文案。
+    /// audio"），AudioFn 侧提前报错给中文文案。
     ReferenceCloneRequired,
 }
 

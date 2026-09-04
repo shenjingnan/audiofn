@@ -600,15 +600,16 @@ mod tests {
     /// `--help` 可见文案不得残留旧品牌与已删除的 greet 命令（CLI 面验收）。
     #[test]
     fn test_help_text_has_no_legacy_brand_or_greet() {
-        // bin_name 必须显式固定为 audiofn：否则运行时会取 argv[0]（旧二进制文件名
-        // zapmomo-cli）写进用法行，--help 又会露出旧品牌
+        // bin_name 必须显式固定为 audiofn：否则运行时会取 argv[0]（旧二进制文件名）
+        // 写进用法行，--help 又会露出旧品牌
         assert_eq!(
             Cli::command().get_bin_name(),
             Some("audiofn"),
             "显式 bin_name 缺失，--help 用法行会回退到旧二进制名"
         );
+        // "momo" 是旧品牌的核心子串：覆盖其任意大小写与连字符变体，比完整旧名更严
         let help = Cli::command().render_help().to_string();
-        for banned in ["zapmomo", "ZapMomo", "greet"] {
+        for banned in ["momo", "greet"] {
             assert!(
                 !help.to_lowercase().contains(&banned.to_lowercase()),
                 "--help 不应包含 {banned}\n{help}"
@@ -624,7 +625,7 @@ mod tests {
             Err(e) => e.render().to_string(),
             Ok(_) => panic!("--help 应以 DisplayHelp 错误结束"),
         };
-        for banned in ["zapmomo", "ZapMomo", "greet"] {
+        for banned in ["momo", "greet"] {
             assert!(
                 !asr_help.to_lowercase().contains(&banned.to_lowercase()),
                 "asr --help 不应包含 {banned}\n{asr_help}"
