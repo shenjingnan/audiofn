@@ -2,7 +2,7 @@
 ///
 /// 一期后端收敛为 audiocpp sidecar 的 qwen3_asr（Qwen3-ASR-0.6B）：
 /// - [`offline`]：整段文件转写（CLI `asr test` / Tauri `transcribe_audio`）；
-/// - [`dictate`]：麦克风免提听写；
+/// - [`dictate`]：麦克风免提听写（整段录制，停止后一次转写）；
 /// - [`config`]：配置解析与模型 preflight。
 ///
 /// 识别结果经可插拔的 [`AsrReaction`] 回调（CLI 打印 / GUI 发事件给前端）。

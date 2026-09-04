@@ -123,18 +123,6 @@ pub fn tts_user_model_dir() -> PathBuf {
     get_models_dir().join(&tts_asset().name)
 }
 
-/// Silero VAD 资产（清单中 `role == "asr-vad"` 的资产，裸 .onnx 单文件，听写分段用）。
-pub fn asr_vad_asset() -> &'static ModelAsset {
-    asset_by_role("asr-vad").expect("模型清单缺少 asr-vad 资产")
-}
-
-/// Silero VAD 模型文件路径：`~/.zapmomo/models/silero-vad/silero_vad.onnx`。
-pub fn asr_vad_user_model_path() -> PathBuf {
-    get_models_dir()
-        .join(&asr_vad_asset().name)
-        .join(&asr_vad_asset().archive)
-}
-
 /// 声纹识别 embedding 模型资产（清单中 `role == "speaker-embedding"` 的资产，
 /// 裸 .onnx 单文件，CAM++ 中文 16k）。
 pub fn speaker_asset() -> &'static ModelAsset {
@@ -847,30 +835,6 @@ pub(crate) mod tests {
 
         // 声码器与主包落位到同一模型目录
         assert_eq!(tts_asset().name, tts_vocoder_asset().name);
-    }
-
-    #[test]
-    fn test_manifest_asr_vad_asset() {
-        let a = asr_vad_asset();
-        assert_eq!(a.role, "asr-vad");
-        assert!(a.is_raw(), "VAD 是 raw 单文件");
-        assert_eq!(a.archive, "silero_vad.onnx");
-        assert!(a.source.starts_with("http"));
-        assert_eq!(a.sha256.len(), 64);
-        // 自洽：清单中 role == "asr-vad"
-        let m = manifest();
-        assert!(
-            m.assets
-                .iter()
-                .any(|x| x.role == "asr-vad" && x.name == a.name),
-            "asr-vad 不在清单中"
-        );
-        assert_eq!(asset_by_role("asr-vad").unwrap().name, a.name);
-        // 落位目录：~/.zapmomo/models/<name>/silero_vad.onnx
-        assert_eq!(
-            asr_vad_user_model_path(),
-            get_models_dir().join(&a.name).join("silero_vad.onnx")
-        );
     }
 
     #[test]

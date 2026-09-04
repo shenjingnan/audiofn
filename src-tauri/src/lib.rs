@@ -202,8 +202,6 @@ struct AsrConfigInfo {
     debug: bool,
     models_present: bool,
     punctuation_present: bool,
-    /// Silero VAD 模型是否已就绪（离线听写首次启动会自动下载）
-    vad_present: bool,
     model_downloading: bool,
     settings_path: String,
 }
@@ -247,7 +245,6 @@ fn get_asr_config(state: State<'_, AsrDownloadState>) -> Result<AsrConfigInfo, S
         debug: cfg.debug,
         models_present,
         punctuation_present,
-        vad_present: zapmomo::asr::dictate::vad_model_present(),
         model_downloading: state.in_progress.load(Ordering::Relaxed),
         settings_path: zapmomo::config::settings::get_settings_path()
             .display()
@@ -291,7 +288,7 @@ async fn transcribe_audio(wav_path: Option<String>) -> Result<TranscribeResult, 
 /// 开始离线免提听写的内部实现（command 与「切换设备重启」共用）。
 ///
 /// 守卫：仅在离线模型（非 zipformer/paraformer 流式族）下可用。
-/// 线程内先惰性下载 Silero VAD 模型，再跑 `run_dictate`（VAD 分段 → 每段整句送 audiocpp qwen3_asr）。
+/// 线程内跑 `run_dictate`：整段录音，停止后一次转写，结果经 `asr-dictate-result` 推给前端。
 fn start_asr_dictate_impl(
     app: AppHandle,
     state: &AsrDictateState,
@@ -328,40 +325,14 @@ fn start_asr_dictate_impl(
             app: thread_app.clone(),
         };
 
-        // 首次听写自动下载 Silero VAD 模型（~0.6MB，幂等）；失败则停止并报错
-        let result = {
-            let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
-                let stage = match p.stage {
-                    zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
-                    zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
-                    zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
-                    zapmomo::model_library::asset::DownloadStage::Done => "done",
-                };
-                let _ = thread_app.emit(
-                    "asr-vad-download-progress",
-                    DownloadProgressPayload {
-                        stage: stage.to_string(),
-                        percent: p.percent,
-                        message: p.message,
-                    },
-                );
-            };
-            match zapmomo::asr::dictate::ensure_vad_model(&mut progress) {
-                Ok(vad_path) => {
-                    let vad_cfg =
-                        zapmomo::asr::dictate::DictateConfig::new(vad_path).with_runtime(&cfg);
-                    zapmomo::asr::dictate::run_dictate(
-                        &cfg,
-                        &vad_cfg,
-                        device.as_deref(),
-                        None,
-                        &mut reaction,
-                        Some(&running),
-                    )
-                }
-                Err(e) => Err(e),
-            }
-        };
+        // 整段录音：停止标志置位后转写（耗时数秒），期间仅 reaction 发最终结果事件
+        let result = zapmomo::asr::dictate::run_dictate(
+            &cfg,
+            device.as_deref(),
+            None,
+            &mut reaction,
+            Some(&running),
+        );
 
         running.store(false, Ordering::Relaxed);
         match &result {
@@ -414,9 +385,18 @@ fn stop_asr_dictate_inner(state: &AsrDictateState) -> Result<(), String> {
 }
 
 /// 停止离线听写：置停止标志并等待线程退出。
+///
+/// 异步命令：免 VAD 后停止要等「整段转写」跑完（数秒）才能返回，若在主线程
+/// `join` 会冻结整个 UI，因此放到阻塞线程池执行；前端在等待期间保持停止态，
+/// 最终结果与 `asr-dictate-stopped` 由听写线程经事件推送。
 #[tauri::command]
-fn stop_asr_dictate(state: State<'_, AsrDictateState>) -> Result<(), String> {
-    stop_asr_dictate_inner(state.inner())
+async fn stop_asr_dictate(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AsrDictateState>();
+        stop_asr_dictate_inner(state.inner())
+    })
+    .await
+    .map_err(|e| format!("停止听写任务异常: {e}"))?
 }
 
 /// 当前是否正在离线听写。
@@ -899,27 +879,30 @@ fn get_microphone() -> Result<String, String> {
 /// 若离线听写正在运行，用新设备自动重启监听，使切换立即生效；
 /// 重启失败（如新设备不可用）返回错误，已停止的任务保持停止。
 #[tauri::command]
-fn set_microphone(
-    app: AppHandle,
-    asr_dictate: State<'_, AsrDictateState>,
-    mic: String,
-) -> Result<(), String> {
-    let mut settings = settings::load_settings()?.unwrap_or_default();
-    settings.microphone = if mic.trim().is_empty() {
-        None
-    } else {
-        Some(mic.trim().to_string())
-    };
-    settings::save_settings(&settings)?;
+async fn set_microphone(app: AppHandle, mic: String) -> Result<(), String> {
+    // 听写运行中切设备要「停止旧录音 → 等整段转写完 → 再启动新录音」，耗时较长，
+    // 与 `stop_asr_dictate` 同理放到阻塞线程池，避免卡 UI 主线程
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut settings = settings::load_settings()?.unwrap_or_default();
+        settings.microphone = if mic.trim().is_empty() {
+            None
+        } else {
+            Some(mic.trim().to_string())
+        };
+        settings::save_settings(&settings)?;
 
-    let new_mic = settings.microphone.clone();
+        let new_mic = settings.microphone.clone();
 
-    // 离线听写运行中 → 用新设备重启。
-    if asr_dictate.is_dictating() {
-        stop_asr_dictate_inner(asr_dictate.inner())?;
-        start_asr_dictate_impl(app.clone(), asr_dictate.inner(), new_mic.clone())?;
-    }
-    Ok(())
+        // 离线听写运行中 → 用新设备重启。
+        let asr_dictate = app.state::<AsrDictateState>();
+        if asr_dictate.is_dictating() {
+            stop_asr_dictate_inner(asr_dictate.inner())?;
+            start_asr_dictate_impl(app.clone(), asr_dictate.inner(), new_mic.clone())?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("切换麦克风任务异常: {e}"))?
 }
 
 /// 持久化文字输入条窗口位置（逻辑像素），供下次启动恢复。

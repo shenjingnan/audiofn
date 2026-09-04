@@ -81,7 +81,7 @@ pub enum AsrCmd {
         #[arg(long)]
         force: bool,
     },
-    /// 免提连续听写（Silero VAD 分段，每段整句送 audiocpp qwen3_asr 转写）
+    /// 免提听写（录音 → 停止后整段送 audiocpp qwen3_asr 转写）
     Dictate {
         /// 模型目录（覆盖 settings.toml 的 asr.model_dir）
         #[arg(long)]
@@ -295,28 +295,53 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
             if use_itn.is_some() {
                 cfg.use_itn = use_itn;
             }
-            let mut progress = |p: crate::asr::DownloadProgress| {
-                let stage = match p.stage {
-                    crate::asr::DownloadStage::Downloading => "下载",
-                    crate::asr::DownloadStage::Verifying => "校验",
-                    crate::asr::DownloadStage::Extracting => "解压",
-                    crate::asr::DownloadStage::Done => "完成",
-                };
-                println!("[{stage}] {}", p.message);
-            };
-            let vad_path = crate::asr::dictate::ensure_vad_model(&mut progress)?;
-            let vad_cfg = crate::asr::dictate::DictateConfig::new(vad_path).with_runtime(&cfg);
+            let stop = install_dictate_stop_signals();
+            println!("开始录音（回车或 Ctrl-C 停止并转写）...");
             let mut reaction = ConsoleAsrReaction;
             crate::asr::dictate::run_dictate(
                 &cfg,
-                &vad_cfg,
                 device.as_deref(),
                 duration,
                 &mut reaction,
-                None,
+                Some(&stop),
             )
         }
     }
+}
+
+/// 听写的 CLI 停止信号：回车（stdin 一行）或 Ctrl-C（tokio signal）都置位标志。
+///
+/// Ctrl-C 经 tokio signal 驱动接管——录音期间按下不再直接终止进程，而是走
+/// 「停止录音 → 整段转写 → 输出文本」的正常收尾，转写完进程自然退出。
+/// stdin EOF（管道 / 重定向输入）不置位，避免非交互场景刚启动就停；
+/// 此时仍有 Ctrl-C 与 `--duration` 两个停止途径。
+fn install_dictate_stop_signals() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stop = Arc::new(AtomicBool::new(false));
+
+    // 回车：阻塞读一行（线程内，不占用异步运行时）
+    std::thread::spawn({
+        let stop = stop.clone();
+        move || {
+            let mut line = String::new();
+            match std::io::stdin().read_line(&mut line) {
+                Ok(0) | Err(_) => {}
+                Ok(_) => stop.store(true, Ordering::Relaxed),
+            }
+        }
+    });
+    // Ctrl-C：信号事件由运行时投递（`#[tokio::main]` 为多线程 runtime，
+    // 录音循环阻塞在其中一个 worker 上时其余 worker 仍可处理信号任务）
+    tokio::spawn({
+        let stop = stop.clone();
+        async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                stop.store(true, Ordering::Relaxed);
+            }
+        }
+    });
+    stop
 }
 
 /// 读取 settings 并解析 ASR 配置
