@@ -77,7 +77,7 @@ cargo run -- asr devices                           # 列出输入设备
 
 # 语音合成（音色克隆）
 cargo run -- tts run --text "你好" --reference-wav ref.wav --reference-text "参考文本" --output out.wav
-cargo run -- tts voices                            # 音色库（模型包内置 + 自定义音色）
+cargo run -- tts voices                            # 音色库（自定义音色；Base 版需克隆）
 
 # 其它
 cargo run -- config                                # 显示配置

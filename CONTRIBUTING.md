@@ -84,7 +84,7 @@ Qwen3-ASR-0.6B 离线转写（audio.cpp 引擎，GGUF 单文件）：30 语言�
 # 1. 下载模型（约 1.1GB，默认安装到 ~/.audiofn/models/<模型名>，不入库）
 cargo run -- asr install-model
 
-# 2. 文件转写（--wav 缺省用模型自带 test_wavs/ 示例音频；语种自动识别，也可 --language zh）
+# 2. 文件转写（--wav 指定要转写的音频；语种自动识别，也可 --language zh）
 cargo run -- asr transcribe --wav rec.wav
 
 # 3. 免提听写：录音 → 回车 / Ctrl-C / --duration 停止 → 整段转写输出全文
@@ -124,7 +124,7 @@ Qwen3-TTS-0.6B / 1.7B Base（audio.cpp 引擎，12Hz，24kHz 输出）零样本�
 # 1. 下载模型（0.6B 约 1.9GB / 1.7B 约 2.5GB，默认安装到 ~/.audiofn/models/<模型名>）
 cargo run -- tts install-model                     # 缺省 0.6B；--registry-id 切 1.7B
 
-# 2. 查看音色库（模型包内置参考音色 + 自定义音色库）
+# 2. 查看音色库（自定义音色；Base 版需克隆音色）
 cargo run -- tts voices
 
 # 3. 克隆合成：参考音频 + 参考文本 → 任意文本
@@ -143,7 +143,7 @@ cargo run -- tts run --text "你好" --voice <音色id>
 | 命令 | 说明 |
 |------|------|
 | `tts run` | 合成文本为 wav。`--text` 必填；`--reference-wav/--reference-text` 克隆参考、`--voice` 音色 id、`--speed` 语速、`--output` 输出路径、`--model-dir`/`--engine-path` 覆盖定位 |
-| `tts voices` | 列出可用音色（模型包内置 + 自定义音色库）。`--model-dir` |
+| `tts voices` | 列出可用音色（自定义音色库）。`--model-dir` |
 | `tts install-model` | 下载安装 TTS 模型。`--registry-id`（缺省 `tts-qwen3-06b-base-q8-audiocpp`）、`--force` |
 
 配置（`~/.audiofn/settings.toml` 的 `[tts]` 段，全部可选）：

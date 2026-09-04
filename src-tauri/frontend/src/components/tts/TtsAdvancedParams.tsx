@@ -10,9 +10,9 @@ import { cn } from "@/lib/utils";
 import { useRuntime } from "@/providers/RuntimeContext";
 import type { TtsConfigInfo, TtsParamsPatch } from "@/types/tauri";
 
-type ParamKey = "num_steps" | "speed" | "num_threads";
+type ParamKey = "speed" | "num_threads";
 
-const PARAM_KEYS: ParamKey[] = ["num_steps", "speed", "num_threads"];
+const PARAM_KEYS: ParamKey[] = ["speed", "num_threads"];
 
 interface ParamMeta {
   label: string;
@@ -26,15 +26,6 @@ interface ParamMeta {
 
 /** 参数元数据：前端预校验边界与后端 `TtsParamsPatch::apply_to` 一致（后端是权威）。 */
 const PARAM_META: Record<ParamKey, ParamMeta> = {
-  num_steps: {
-    label: "扩散步数",
-    kind: "number",
-    min: 1,
-    max: 32,
-    step: 1,
-    suffix: "步",
-    hint: "ZipVoice 扩散解码步数，越高音质越好、合成越慢。",
-  },
   speed: {
     label: "默认语速",
     kind: "slider",
@@ -56,10 +47,9 @@ const PARAM_META: Record<ParamKey, ParamMeta> = {
 
 function toDraft(params: TtsConfigInfo | null | undefined): Record<ParamKey, string> {
   if (!params) {
-    return { num_steps: "", speed: "", num_threads: "" };
+    return { speed: "", num_threads: "" };
   }
   return {
-    num_steps: String(params.num_steps),
     speed: String(params.speed),
     num_threads: String(params.num_threads),
   };
@@ -137,8 +127,8 @@ function ParamRow({ key_, value, onChange }: ParamRowProps) {
 }
 
 /**
- * 高级参数：扩散步数、默认语速、线程数（批保存）+ 调试输出开关。
- * TTS 引擎在每次合成时新建，因此保存后**下一次合成即生效**，无需重启（区别于 KWS/ASR）。
+ * 高级参数：默认语速、线程数（批保存）+ 调试输出开关。
+ * TTS 引擎在每次合成时新建，因此保存后**下一次合成即生效**，无需重启（区别于 ASR）。
  */
 export function TtsAdvancedParams() {
   const { tts } = useRuntime();
@@ -149,8 +139,6 @@ export function TtsAdvancedParams() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const params = tts.config;
-  // 收录模型均为扩散/克隆模型，扩散步数全族适用（无按 kind 隐藏项）
-  const visibleKeys = PARAM_KEYS;
 
   // hydrate：config 就绪时填充草稿；dirty 时保留用户编辑，否则随 config 同步
   useEffect(() => {
@@ -203,7 +191,7 @@ export function TtsAdvancedParams() {
             <SlidersHorizontal className="h-4 w-4 shrink-0 text-text-secondary" />
             <span>
               <h2 className="text-base font-semibold text-text-primary">高级参数</h2>
-              <p className="mt-0.5 text-xs text-text-muted">扩散步数、语速、性能等</p>
+              <p className="mt-0.5 text-xs text-text-muted">语速、性能等</p>
             </span>
           </span>
           <ChevronDown
@@ -215,7 +203,7 @@ export function TtsAdvancedParams() {
         </CollapsibleTrigger>
         <CollapsibleContent className="border-t border-divider">
           <div>
-            {visibleKeys.map((k) => (
+            {PARAM_KEYS.map((k) => (
               <ParamRow
                 key={k}
                 key_={k}

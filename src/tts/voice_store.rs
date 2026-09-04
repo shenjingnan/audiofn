@@ -54,8 +54,8 @@ fn load_manifest() -> Vec<VoiceEntry> {
 /// 原子写清单：先写临时文件再 rename，避免中断留下半截清单。
 ///
 /// 防护：目标清单已存在但解析失败时拒绝写入——此刻内存里的 entries 很可能
-/// 来自「损坏读成的空列表」，直接覆盖会把用户全部音色清掉（对齐
-/// `companion::load_library_inner`「损坏不覆盖」防护），提示用户手动处理。
+/// 来自「损坏读成的空列表」，直接覆盖会把用户全部音色清掉（「损坏不覆盖」
+/// 防护），提示用户手动处理。
 fn save_manifest(entries: &[VoiceEntry]) -> Result<(), String> {
     if let Ok(content) = std::fs::read_to_string(manifest_path())
         && serde_json::from_str::<Vec<VoiceEntry>>(&content).is_err()
@@ -106,9 +106,9 @@ pub fn list_custom_voices() -> Vec<TtsVoice> {
 
 /// 按 id 严格匹配音色库条目（不匹配展示名、不回退模型包内置音色）。
 ///
-/// 结构化绑定（伙伴音色 `companion::CompanionModel.voice_id`）专用：`resolve_reference`
-/// 的「id 或名称」宽容语义与 builtin 回退在这里是歧义源（名称碰撞 / 绑到 builtin
-/// 后跨模型失效），绑定校验与解析必须走本函数。
+/// 结构化绑定（持久化音色 id）专用：`resolve_reference` 的「id 或名称」宽容语义
+/// 与 builtin 回退在这里是歧义源（名称碰撞 / 绑到 builtin 后跨模型失效），
+/// 绑定校验与解析必须走本函数。
 pub fn find_voice_by_id(id: &str) -> Option<TtsVoice> {
     list_custom_voices().into_iter().find(|v| v.id == id)
 }

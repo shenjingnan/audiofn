@@ -77,7 +77,7 @@ cargo run -- asr devices                           # List input devices
 
 # Speech synthesis (voice cloning)
 cargo run -- tts run --text "Hello" --reference-wav ref.wav --reference-text "reference transcript" --output out.wav
-cargo run -- tts voices                            # Voice library (bundled + custom voices)
+cargo run -- tts voices                            # Voice library (custom voices; cloning required)
 
 # Misc
 cargo run -- config                                # Show config

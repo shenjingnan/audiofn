@@ -39,7 +39,7 @@ audiofn asr install-model                    # 下载模型（--registry-id / --
 
 | 命令 | 说明 |
 | ---- | ---- |
-| `asr transcribe` | 离线转写 wav。`--wav`（缺省用模型自带示例音频）、`--language`、`--model-dir` |
+| `asr transcribe` | 离线转写 wav。`--wav`（必填，要转写的音频文件）、`--language`、`--model-dir` |
 | `asr dictate` | 录音 → 停止 → 整段转写。`--device`、`--duration`、`--language`、`--model-dir` |
 | `asr devices` | 列出可用输入设备 |
 | `asr install-model` | 安装 ASR 模型（缺省 `asr-qwen3-0.6b-audiocpp`） |
@@ -53,7 +53,7 @@ Qwen3-TTS-0.6B / 1.7B 零样本音色克隆（10 语种）。Base 版无内置�
 audiofn tts run --text "你好" \
   --reference-wav ref.wav --reference-text "参考音频里说的原话" --output out.wav
 audiofn tts run --text "你好" --voice my-voice --speed 1.1
-audiofn tts voices                           # 音色库：模型包内置 + 自定义音色
+audiofn tts voices                           # 音色库：自定义音色（Base 版需克隆）
 audiofn tts install-model                    # 下载模型（缺省 0.6B，--registry-id 切 1.7B）
 ```
 

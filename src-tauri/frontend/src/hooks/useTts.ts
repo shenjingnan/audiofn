@@ -13,7 +13,7 @@ export interface TtsState {
   configError: string | null;
   refreshConfig: () => Promise<void>;
   setEnabled: (enabled: boolean) => Promise<void>;
-  /** 批量保存合成参数（扩散步数/默认语速/线程/调试）；失败向上抛出，由调用方展示内联错误。 */
+  /** 批量保存合成参数（默认语速/线程/调试）；失败向上抛出，由调用方展示内联错误。 */
   setParams: (patch: TtsParamsPatch) => Promise<void>;
   /** 音色列表（模型包内置 + 用户自定义音色库）。 */
   voices: TtsVoice[];
@@ -150,7 +150,7 @@ export function useTts(): TtsState {
     [voices, selectedVoice],
   );
 
-  // 批量保存合成参数（扩散步数/默认语速/线程/调试），写入 [tts] 后刷新配置。
+  // 批量保存合成参数（默认语速/线程/调试），写入 [tts] 后刷新配置。
   // 不 catch：保存失败向上抛出，由调用方（高级参数表单）展示内联错误。
   const setParams = useCallback(
     async (patch: TtsParamsPatch) => {

@@ -193,7 +193,7 @@ describe("AsrPage（语音识别配置）", () => {
     ).toBeInTheDocument();
   });
 
-  it("模型缺失：Switch 禁用、未下载 Badge、选择模型入口可用、测试禁用、警告提示", async () => {
+  it("模型缺失：Switch 禁用、未下载 Badge、选择模型入口可用、转写禁用、警告提示", async () => {
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("未听写")).toBeInTheDocument();
@@ -203,27 +203,26 @@ describe("AsrPage（语音识别配置）", () => {
     expect(runSwitch).toBeDisabled();
     expect(runSwitch).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("button", { name: "选择模型" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "测试识别" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "转写文件" })).toBeDisabled();
     expect(screen.getByText("模型文件缺失")).toBeInTheDocument();
   });
 
-  it("模型就绪：已就绪 Badge、Switch 可用、无选择模型入口、测试可用", async () => {
+  it("模型就绪：已就绪 Badge、Switch 可用、无选择模型入口、转写可用", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("已就绪")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "离线听写开关" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "选择模型" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "测试识别" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "转写文件" })).toBeEnabled();
   });
 
-  it("离线模型（SenseVoice）：听写开关可用、测试识别/转写文件可用", async () => {
+  it("离线模型（SenseVoice）：听写开关可用、转写文件可用", async () => {
     asrConfig = { ...asrConfig, models_present: true, model_type: "sensevoice" };
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("已就绪")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "离线听写开关" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "测试识别" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "转写文件" })).toBeEnabled();
   });
 
@@ -245,21 +244,6 @@ describe("AsrPage（语音识别配置）", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("stop_asr_dictate");
     });
-  });
-
-  it("离线模型测试识别：自动转写自带示例音频（wavPath=null）", async () => {
-    asrConfig = { ...asrConfig, models_present: true, model_type: "sensevoice" };
-    const user = userEvent.setup();
-    renderAsrPage();
-    await screen.findByText("语音识别（ASR）配置");
-
-    await user.click(screen.getByRole("button", { name: "测试识别" }));
-    expect(await screen.findByText("转写音频文件")).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("transcribe_audio", { wavPath: null });
-    });
-    expect(await screen.findByText("你好，世界")).toBeInTheDocument();
   });
 
   it("转写文件：选择 wav → transcribe_audio → 展示结果", async () => {
@@ -464,36 +448,32 @@ describe("AsrPage（语音识别配置）", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("download_asr_model");
   });
 
-  it("测试识别（流式模型族）：同样走转写弹窗并自动转写示例音频", async () => {
+  it("转写弹窗打开后不自动转写（无示例音频路径），需先选择文件", async () => {
     asrConfig = { ...asrConfig, models_present: true, model_type: "zipformer" };
     const user = userEvent.setup();
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
 
-    await user.click(await screen.findByRole("button", { name: /测试识别/ }));
+    await user.click(await screen.findByRole("button", { name: /转写文件/ }));
     expect(await screen.findByText("转写音频文件")).toBeInTheDocument();
 
+    // 打开弹窗不会触发任何转写调用（收录模型不带示例音频，wavPath 必须来自用户选择）
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("transcribe_audio", { wavPath: null });
+      const calls = invokeMock.mock.calls.filter((c) => c[0] === "transcribe_audio");
+      expect(calls.length).toBe(0);
     });
-    expect(await screen.findByText("你好，世界")).toBeInTheDocument();
-
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    // 关闭不再触发第二次转写
-    const calls = invokeMock.mock.calls.filter((c) => c[0] === "transcribe_audio");
-    expect(calls.length).toBe(1);
+    expect(screen.getByRole("button", { name: "选择音频文件…" })).toBeEnabled();
   });
 
-  it("测试识别重新打开：再次自动转写一次", async () => {
+  it("转写弹窗重新打开：清空上次结果，可再次选择文件", async () => {
     asrConfig = { ...asrConfig, models_present: true, model_type: "qwen3_asr" };
+    dialogOpenMock.mockResolvedValue("/tmp/input.wav");
     const user = userEvent.setup();
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
 
-    await user.click(await screen.findByRole("button", { name: /测试识别/ }));
+    await user.click(await screen.findByRole("button", { name: /转写文件/ }));
+    await user.click(await screen.findByRole("button", { name: "选择音频文件…" }));
     expect(await screen.findByText("你好，世界")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
@@ -501,12 +481,11 @@ describe("AsrPage（语音识别配置）", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: /测试识别/ }));
-    await waitFor(() => {
-      const calls = invokeMock.mock.calls.filter((c) => c[0] === "transcribe_audio");
-      expect(calls.length).toBe(2);
-    });
+    await user.click(screen.getByRole("button", { name: /转写文件/ }));
     expect(await screen.findByText("转写音频文件")).toBeInTheDocument();
+    // 上一次结果已清空（等待新选择）
+    expect(screen.queryByText("你好，世界")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "选择音频文件…" })).toBeEnabled();
   });
 
   it("模型信息默认展开显示只读字段", async () => {

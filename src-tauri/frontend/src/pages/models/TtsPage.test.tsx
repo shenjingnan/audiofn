@@ -32,23 +32,6 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(async () => "/fake/path/ref.wav"),
 }));
 
-const KWS_CONFIG = {
-  enabled: false,
-  custom_keywords: "",
-  model_dir: "/home/user/.audiofn/models/sherpa-onnx-kws-zipformer-zh-en-3M",
-  provider: "cpu",
-  num_threads: 4,
-  sample_rate: 16000,
-  chunk_size: 3200,
-  keywords_score: 1.0,
-  keywords_threshold: 0.25,
-  debug: false,
-  keywords: ["文森特卡索"],
-  models_present: false,
-  model_downloading: false,
-  settings_path: "/home/user/.audiofn/settings.toml",
-};
-
 const ASR_CONFIG = {
   model_dir: "/home/user/.audiofn/models/sherpa-onnx-streaming-zipformer",
   provider: "cpu",
@@ -71,8 +54,8 @@ const ASR_CONFIG = {
 };
 
 const TTS_CONFIG = {
-  model_type: "zipvoice",
-  model_dir: "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+  model_type: "qwen3_tts_06",
+  model_dir: "/home/user/.audiofn/models/qwen3-tts-06b-base-audiocpp",
   backend: "audiocpp",
   provider: "cpu",
   num_threads: 4,
@@ -80,7 +63,6 @@ const TTS_CONFIG = {
   models_present: false,
   model_downloading: false,
   settings_path: "/home/user/.audiofn/settings.toml",
-  num_steps: 4,
   speed: 1.0,
   debug: false,
   voice: null as string | null,
@@ -148,8 +130,6 @@ function defaultInvoke(
       return Promise.resolve({ version: "0.1.4", product_name: "AudioFn" });
     case "list_devices":
       return Promise.resolve(["内置麦克风"]);
-    case "get_kws_config":
-      return Promise.resolve({ ...KWS_CONFIG });
     case "get_asr_config":
       return Promise.resolve({ ...ASR_CONFIG });
     case "get_tts_config":
@@ -227,16 +207,14 @@ beforeEach(() => {
     {
       id: "leijun-1",
       name: "雷军（男）",
-      wav_path:
-        "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/leijun-1.wav",
+      wav_path: "/home/user/.audiofn/models/qwen3-tts-06b-base-audiocpp/test_wavs/leijun-1.wav",
       reference_text: "那还是36年前, 1987年.",
       custom: false,
     },
     {
       id: "news-female",
       name: "新闻女声",
-      wav_path:
-        "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/news-female.wav",
+      wav_path: "/home/user/.audiofn/models/qwen3-tts-06b-base-audiocpp/test_wavs/news-female.wav",
       reference_text: "各位村民, 大家新年好!",
       custom: false,
     },
@@ -253,9 +231,7 @@ describe("TtsPage（语音合成 TTS）", () => {
 
   it("未下载模型：显示模型名与「未下载」Badge、顶部状态「未下载模型」、「选择模型」可用、测试禁用", async () => {
     renderTtsPage();
-    expect(
-      await screen.findByText("sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("qwen3-tts-06b-base-audiocpp")).toBeInTheDocument();
     expect(await screen.findByText("未下载模型")).toBeInTheDocument();
     expect(screen.getByText("未下载")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "选择模型" })).toBeEnabled();
@@ -346,7 +322,7 @@ describe("TtsPage（语音合成 TTS）", () => {
     );
 
     // 回显解析后的参数
-    expect(await screen.findByRole("textbox", { name: "扩散步数" })).toHaveValue("4");
+    expect(await screen.findByRole("slider", { name: "默认语速" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "默认语速" })).toHaveValue("1");
     expect(screen.getByRole("textbox", { name: "线程数" })).toHaveValue("4");
     expect(screen.getByText("修改保存后，下一次合成自动生效。")).toBeInTheDocument();
@@ -354,38 +330,38 @@ describe("TtsPage（语音合成 TTS）", () => {
     expect(screen.queryByText(/重启/)).not.toBeInTheDocument();
   });
 
-  it("修改扩散步数并保存调用 set_tts_params", async () => {
+  it("修改线程数并保存调用 set_tts_params（语速/线程/调试整批直传）", async () => {
     ttsConfig = { ...ttsConfig, models_present: true };
     const user = userEvent.setup();
     renderTtsPage();
     await screen.findByText("语音合成（TTS）配置");
     await user.click(screen.getByRole("button", { name: /高级参数/ }));
 
-    const numSteps = await screen.findByRole("textbox", { name: "扩散步数" });
-    await user.clear(numSteps);
-    await user.type(numSteps, "8");
+    const threads = await screen.findByRole("textbox", { name: "线程数" });
+    await user.clear(threads);
+    await user.type(threads, "8");
     await user.click(screen.getByRole("button", { name: "保存参数" }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("set_tts_params", {
-        params: { num_steps: 8, speed: 1, num_threads: 4, debug: false },
+        params: { speed: 1, num_threads: 8, debug: false },
       });
     });
   });
 
-  it("扩散步数越界：保存失败并显示内联错误，不调用 set_tts_params", async () => {
+  it("线程数越界：保存失败并显示内联错误，不调用 set_tts_params", async () => {
     ttsConfig = { ...ttsConfig, models_present: true };
     const user = userEvent.setup();
     renderTtsPage();
     await screen.findByText("语音合成（TTS）配置");
     await user.click(screen.getByRole("button", { name: /高级参数/ }));
 
-    const numSteps = await screen.findByRole("textbox", { name: "扩散步数" });
-    await user.clear(numSteps);
-    await user.type(numSteps, "100");
+    const threads = await screen.findByRole("textbox", { name: "线程数" });
+    await user.clear(threads);
+    await user.type(threads, "64");
     await user.click(screen.getByRole("button", { name: "保存参数" }));
 
-    expect(await screen.findByText(/扩散步数 需在 1~32/)).toBeInTheDocument();
+    expect(await screen.findByText(/线程数 需在 1~32/)).toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith("set_tts_params", expect.anything());
   });
 
@@ -420,7 +396,7 @@ describe("TtsPage（语音合成 TTS）", () => {
     expect(screen.getAllByText("线程数").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("支持语言")).toBeInTheDocument();
     expect(
-      screen.getByText("/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"),
+      screen.getByText("/home/user/.audiofn/models/qwen3-tts-06b-base-audiocpp"),
     ).toBeInTheDocument();
     expect(screen.getByText("配置路径")).toBeInTheDocument();
   });
@@ -644,8 +620,7 @@ describe("TtsPage（语音合成 TTS）", () => {
       {
         id: "leijun-1",
         name: "雷军（男）",
-        wav_path:
-          "/home/user/.audiofn/models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/leijun-1.wav",
+        wav_path: "/home/user/.audiofn/models/qwen3-tts-06b-base-audiocpp/test_wavs/leijun-1.wav",
         reference_text: "那还是36年前, 1987年.",
         custom: false,
       },

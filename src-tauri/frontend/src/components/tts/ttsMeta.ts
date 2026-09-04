@@ -34,7 +34,8 @@ export function ttsStatus(
   return { tone: "good", label: "已就绪" };
 }
 
-/** 模型类型徽标文案（选择模型弹窗 / 音色语义判断共用）。 */
+/** 模型类型徽标文案（选择模型弹窗 / 音色语义判断共用）。
+ *  zipvoice/omnivoice/voxcpm2 分支为旧值防御：后端 `TtsModelKind` 已只产出 qwen3 两尺寸。 */
 export function ttsModelKindLabel(kind: string): string {
   switch (kind) {
     case "zipvoice":
@@ -52,8 +53,8 @@ export function ttsModelKindLabel(kind: string): string {
 }
 
 /**
- * 参考音频克隆族（共享音色库与音色管理入口）：
- * zipvoice（sherpa）/ omnivoice / voxcpm2 / qwen3_tts 两尺寸（audiocpp）。
+ * 参考音频克隆族（共享音色库与音色管理入口）：qwen3_tts 两尺寸（audiocpp）。
+ * zipvoice（sherpa）/ omnivoice / voxcpm2 为旧值防御分支，后端已不会下发。
  * 音色语义判断（TtsBasicConfig / TtsTestDialog）的统一事实源，新增克隆族只改这里。
  */
 export function isCloneTtsKind(kind: string): boolean {

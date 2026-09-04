@@ -140,9 +140,10 @@ impl AsrReaction for TauriAsrDictateReaction {
 #[derive(Serialize)]
 struct AsrConfigInfo {
     enabled: bool,
-    /// 模型类型（zipformer/paraformer/sensevoice/whisper），前端据此隐藏流式专属参数
+    /// 模型类型（qwen3_asr；zipformer/paraformer/sensevoice/whisper 仅老配置可达），
+    /// 前端据此隐藏流式专属参数
     model_type: String,
-    /// 推理后端（sherpa/audiocpp），前端据此显示 audio.cpp 标识与隐藏热词参数
+    /// 推理后端（audiocpp；`sherpa` 仅老配置可达），前端据此显示 audio.cpp 标识与隐藏热词参数
     backend: String,
     model_dir: String,
     provider: String,
@@ -218,20 +219,20 @@ struct TranscribeResult {
     model_dir: String,
 }
 
-/// 一键离线转写 wav 文件（走 audiocpp qwen3_asr，经 `asr::transcribe_wav`）。
+/// 离线转写指定 wav 文件（走 audiocpp qwen3_asr，经 `asr::transcribe_wav`）。
 ///
-/// `wav_path` 为 None 时转写模型自带的 `test_wavs/` 示例音频（「测试识别」）；
-/// 阻塞线程池执行避免卡 UI。
+/// `wav_path` 必须由前端传入（收录模型为 raw 单 GGUF，安装目录没有示例音频可
+/// 自动转写）；阻塞线程池执行避免卡 UI。
 #[tauri::command]
 async fn transcribe_audio(wav_path: Option<String>) -> Result<TranscribeResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let settings = audiofn::config::settings::load_settings()?;
         let asr_settings = settings.as_ref().and_then(|s| s.asr.clone());
         let cfg = audiofn::asr::config::resolve(asr_settings.as_ref(), None)?;
-        let wav_path = wav_path
-            .map(std::path::PathBuf::from)
-            .or_else(|| audiofn::asr::default_test_wav(&cfg.model_dir))
-            .ok_or_else(|| "未指定音频路径，且模型目录没有 test_wavs/*.wav 示例音频".to_string())?;
+        let wav_path = std::path::PathBuf::from(wav_path.ok_or_else(|| {
+            "未指定音频文件：请在「转写文件」中选择要转写的 wav（CLI 用 `asr transcribe --wav <文件>`）"
+                .to_string()
+        })?);
         let text = audiofn::asr::transcribe_wav(&cfg, &wav_path)?;
         Ok(TranscribeResult {
             text,
@@ -402,7 +403,7 @@ impl Default for TtsDownloadState {
 struct TtsConfigInfo {
     /// 模型类型（qwen3_tts_06/qwen3_tts_17），前端据此切换音色语义
     model_type: String,
-    /// 推理后端（sherpa/audiocpp），前端据此显示引擎徽标
+    /// 推理后端（audiocpp；`sherpa` 仅老配置可达），前端据此显示引擎徽标
     backend: String,
     model_dir: String,
     provider: String,
@@ -411,13 +412,11 @@ struct TtsConfigInfo {
     models_present: bool,
     model_downloading: bool,
     settings_path: String,
-    /// 扩散解码步数（质量/速度权衡），可经 `set_tts_params` 修改
-    num_steps: i32,
     /// 默认语速，可经 `set_tts_params` 修改
     speed: f32,
     /// 调试输出，可经 `set_tts_params` 修改
     debug: bool,
-    /// 默认音色 id（`None` = 用内置 leijun），可经 `set_tts_voice` 修改
+    /// 默认音色 id（自定义音色库 id；`None` = 未设置），可经 `set_tts_voice` 修改
     voice: Option<String>,
 }
 
@@ -450,7 +449,6 @@ fn get_tts_config(state: State<'_, TtsDownloadState>) -> Result<TtsConfigInfo, S
         settings_path: audiofn::config::settings::get_settings_path()
             .display()
             .to_string(),
-        num_steps: cfg.num_steps,
         speed: cfg.speed,
         debug: cfg.debug,
         voice: cfg.voice.clone(),
@@ -525,15 +523,6 @@ fn save_tts_voice(
 fn delete_tts_voice(id: String) -> Result<(), String> {
     audiofn::tts::voice_store::delete_voice(&id)?;
     Ok(())
-}
-
-/// 列出音色库全部自定义音色（模型无关，供伙伴页音色绑定选择器）。
-///
-/// 与 `list_tts_voices` 的区别：后者按当前 TTS 模型过滤（非克隆模型返回空、
-/// 含 builtin 条目），绑定是持久化元数据、跨模型有效，必须看到全量音色库。
-#[tauri::command]
-fn list_voice_library() -> Result<Vec<audiofn::tts::TtsVoice>, String> {
-    Ok(audiofn::tts::voice_store::list_custom_voices())
 }
 
 /// 录制 N 秒麦克风并保存为 16k wav，返回 wav 路径（供后续保存为音色）。
@@ -671,9 +660,9 @@ fn set_tts_enabled(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 批量持久化 TTS 合成参数（扩散步数/默认语速/线程/调试），写入 `[tts]`。
+/// 批量持久化 TTS 合成参数（默认语速/线程/调试），写入 `[tts]`。
 ///
-/// 载荷为 `{ params: { num_steps, speed, ... } }`（snake_case 直传）；
+/// 载荷为 `{ params: { speed, num_threads, debug } }`（snake_case 直传）；
 /// `None` 字段保持原有配置不变。值先整体校验、再写入，出错时不部分修改。
 /// 引擎在每次合成时新建，因此保存后下一次合成即生效，无需重启。
 #[tauri::command]
@@ -738,7 +727,7 @@ fn set_asr_params(params: AsrParamsPatch) -> Result<(), String> {
     settings::save_settings(&settings)
 }
 
-/// 读取全局默认麦克风输入设备名（空串 = 系统默认），KWS / ASR 共用。
+/// 读取全局默认麦克风输入设备名（空串 = 系统默认），听写 / 音色录制共用。
 #[tauri::command]
 fn get_microphone() -> Result<String, String> {
     Ok(settings::load_settings()?
@@ -1585,7 +1574,6 @@ pub fn run() {
             is_asr_dictating,
             get_tts_config,
             list_tts_voices,
-            list_voice_library,
             save_tts_voice,
             delete_tts_voice,
             record_tts_voice,

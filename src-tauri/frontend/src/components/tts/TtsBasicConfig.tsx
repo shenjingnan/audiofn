@@ -37,9 +37,9 @@ export function TtsBasicConfig({
   const enabled = config?.enabled ?? true;
   const modelPath = config?.model_dir ?? "";
   const modelName = modelNameFromDir(modelPath);
-  // 收录的 TTS 模型均为参考音频克隆族（zipvoice/omnivoice/voxcpm2/qwen3_tts），
-  // 共享音色库与音色管理入口；omnivoice/voxcpm2 无内置音色，未选时走 server
-  // auto voice；qwen3_tts 为强制克隆族——上游 Base 无 auto voice 兜底，必须选择克隆音色。
+  // 收录的 TTS 模型均为 Qwen3-TTS 参考音频克隆族（qwen3_tts_06 / qwen3_tts_17），
+  // 共享音色库与音色管理入口；qwen3_tts 为强制克隆族——上游 Base 无 auto voice
+  // 兜底，必须选择克隆音色。（zipvoice/omnivoice/voxcpm2 分支为旧值防御，后端已不会下发）
   const modelKind = config?.model_type ?? "";
   const clone = isCloneTtsKind(modelKind);
   const cloneRequired = isCloneRequiredTtsKind(modelKind);

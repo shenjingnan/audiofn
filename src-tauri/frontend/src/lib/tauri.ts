@@ -38,7 +38,7 @@ export const api = {
   startAsrDictate: (args: { device: string | null }) => invoke<void>("start_asr_dictate", args),
   stopAsrDictate: () => invoke<void>("stop_asr_dictate"),
   isAsrDictating: () => invoke<boolean>("is_asr_dictating"),
-  transcribeAudio: (args: { wavPath: string | null }) =>
+  transcribeAudio: (args: { wavPath: string }) =>
     invoke<TranscribeResult>("transcribe_audio", args),
   getTtsConfig: () => invoke<TtsConfigInfo>("get_tts_config"),
   listTtsVoices: () => invoke<TtsVoice[]>("list_tts_voices"),

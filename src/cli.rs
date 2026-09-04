@@ -49,7 +49,7 @@ pub enum Commands {
 pub enum AsrCmd {
     /// 离线转写 wav 文件（不需要麦克风；audiocpp qwen3_asr，自动识别语种）
     Transcribe {
-        /// wav 路径；缺省用模型目录内 test_wavs/ 示例音频
+        /// 要转写的 wav 文件路径（必填）
         #[arg(long)]
         wav: Option<PathBuf>,
         /// 模型目录（覆盖 settings.toml 的 asr.model_dir）
@@ -116,7 +116,7 @@ pub enum TtsCmd {
         /// 输出 wav 路径；缺省为用户数据目录下 tts/<时间戳>.wav
         #[arg(long)]
         output: Option<PathBuf>,
-        /// 音色 id（模型包内置参考音色 / 自定义音色库 id）
+        /// 音色 id（自定义音色库 id；Base 版需克隆音色）
         #[arg(long)]
         voice: Option<String>,
         /// 自定义参考音频 wav（配合 --reference-text 使用）
@@ -126,7 +126,7 @@ pub enum TtsCmd {
         #[arg(long)]
         reference_text: Option<String>,
     },
-    /// 列出可用音色（模型包内置参考音色 + 自定义音色库）
+    /// 列出可用音色（自定义音色库；Base 版需克隆音色）
     Voices {
         /// 模型目录（覆盖 settings.toml 的 tts.model_dir）
         #[arg(long)]
@@ -201,15 +201,12 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
             if use_itn.is_some() {
                 cfg.use_itn = use_itn;
             }
-            let wav_path = wav
-                .or_else(|| crate::asr::default_test_wav(&cfg.model_dir))
-                .ok_or_else(|| {
-                    format!(
-                        "未指定 --wav 且 {} 下没有 test_wavs/*.wav 示例音频。\n若模型尚未安装，请先执行 {} 下载（安装后自带示例音频）。",
-                        cfg.model_dir.display(),
-                        crate::audiocpp::asr_families::QWEN3_ASR_06B.registry_hint,
-                    )
-                })?;
+            let wav_path = wav.ok_or_else(|| {
+                format!(
+                    "未指定 --wav：请用 `asr transcribe --wav <wav 文件>` 指定要转写的音频。\n若模型尚未安装，请先执行 {} 下载。",
+                    crate::audiocpp::asr_families::QWEN3_ASR_06B.registry_hint,
+                )
+            })?;
             crate::asr::run_offline(&cfg, &wav_path)
         }
         AsrCmd::Devices => {

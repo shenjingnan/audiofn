@@ -31,7 +31,7 @@ interface TtsTestDialogProps {
  * 测试语音合成对话框：当前模型 / 音色（默认 + 内置 + 已保存自定义）/ 语速 / 测试文本 /
  * 合成进度与结果。复用全局 `useRuntime().tts` 单实例 runtime，不创建第二套。
  *
- * 生命周期与 KWS/ASR TestDialog 保持一致：
+ * 生命周期与 ASR 转写弹窗保持一致：
  * - 「合成并播放」记录 `startedByDialog` 归属，合成完成自动播放；
  * - 关闭时仅停止「本对话框发起」且仍在合成的任务（fire-and-forget stop_tts，
  *   绝不暗示能即时中断推理）；正在播放的 `<audio>` 显式 pause + 清空 src，
@@ -123,7 +123,7 @@ export function TtsTestDialog({ open, onClose, onManageVoices, manageOpen }: Tts
   if (!mounted) return null;
 
   const modelName = modelNameFromDir(tts.config?.model_dir);
-  // 收录模型均为克隆族（zipvoice/omnivoice/voxcpm2/qwen3_tts），可选音色。
+  // 收录模型均为 Qwen3-TTS 克隆族（qwen3_tts_06 / qwen3_tts_17），可选音色。
   const modelKind = tts.config?.model_type ?? "";
   // 强制克隆族（qwen3_tts）：上游 Base 无 auto voice 兜底，无「默认音色」空值项
   const cloneRequired = isCloneRequiredTtsKind(modelKind);

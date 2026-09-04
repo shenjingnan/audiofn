@@ -1,12 +1,4 @@
-import {
-  CircleAlert,
-  Download,
-  FileAudio,
-  FolderOpen,
-  Mic,
-  Repeat2,
-  Settings2,
-} from "lucide-react";
+import { CircleAlert, Download, FileAudio, FolderOpen, Repeat2, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { DeviceSelect } from "@/components/DeviceSelect";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -16,27 +8,23 @@ import { useRuntime } from "@/providers/RuntimeContext";
 import { modelNameFromDir } from "./asrMeta";
 
 interface AsrBasicConfigProps {
-  onTestOpen: () => void;
   /** 打开「选择识别模型」弹窗（由 AsrPage 持有弹窗状态） */
   onSwitchOpen: () => void;
-  /** 打开「转写文件」弹窗（离线模型主入口；流式模型也可用） */
+  /** 打开「转写文件」弹窗（选择本地音频 → 整段转写；离线模型主入口，流式模型也可用） */
   onTranscribeOpen: () => void;
 }
 
 /**
  * 基础配置（macOS 设置行）：
  * 当前模型（名称 + 就绪/未下载 Badge + 切换模型 + 可展开完整路径）/ 麦克风来源（复用全局 DeviceSelect）+
- * 底部「选择模型 / 测试识别 / 转写文件」操作按钮。
+ * 底部「选择模型 / 转写文件」操作按钮。
  *
  * 模型缺失统一走「选择模型」弹窗（下载/切换同一入口）；不再保留 legacy
  * 一键「下载模型」——旧 sherpa 双语目录与 registry 默认模型不同目录，
  * 一键下载装的是 Qwen3-ASR，装完当前模型仍是缺失态。
+ * 收录模型为 raw 单 GGUF、不带示例音频，转写一律由用户选择音频文件。
  */
-export function AsrBasicConfig({
-  onTestOpen,
-  onSwitchOpen,
-  onTranscribeOpen,
-}: AsrBasicConfigProps) {
+export function AsrBasicConfig({ onSwitchOpen, onTranscribeOpen }: AsrBasicConfigProps) {
   const {
     asr,
     devices: { error: devicesError },
@@ -178,15 +166,6 @@ export function AsrBasicConfig({
             选择模型
           </Button>
         )}
-        <Button
-          variant="secondary"
-          className="shadow-none"
-          disabled={!modelsPresent}
-          onClick={onTestOpen}
-        >
-          <Mic className="h-4 w-4" />
-          测试识别
-        </Button>
         <Button
           variant="secondary"
           className="shadow-none"

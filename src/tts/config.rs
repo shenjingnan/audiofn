@@ -18,9 +18,13 @@ pub const DEFAULT_TOKENS: &str = "tokens.txt";
 pub const DEFAULT_LEXICON: &str = "lexicon.txt";
 /// espeak-ng 数据目录（相对模型目录）。
 pub const DEFAULT_DATA_DIR: &str = "espeak-ng-data";
-/// 默认参考音频（声音克隆的音色来源，相对模型目录）。
+/// 默认参考音频（旧 sherpa/ZipVoice 模型包的缺省值，相对模型目录）。
+///
+/// 收录的 audiocpp Qwen3-TTS 为 raw 单 GGUF、不带 `test_wavs/`，managed 安装下
+/// 该路径不存在；Base 版又强制要求显式音色（`resolve_voice_params` 在无音色来源
+/// 时直接报错），因此这里只是老配置 / 自带示例音频的本地模型包的兜底缺省值。
 pub const DEFAULT_REFERENCE_WAV: &str = "test_wavs/leijun-1.wav";
-/// 默认参考音频的逐字转写（来自模型包内 test_wavs/prompt.txt）。
+/// 默认参考音频的逐字转写（与 [`DEFAULT_REFERENCE_WAV`] 配套的遗留兜底值）。
 pub const DEFAULT_REFERENCE_TEXT: &str = "那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.";
 
 /// TTS 模型类型（audio.cpp 后端收录的 Qwen3-TTS 尺寸）。
@@ -126,10 +130,8 @@ pub struct ResolvedTtsConfig {
     pub data_dir: PathBuf,
     pub reference_wav: PathBuf,
     pub reference_text: String,
-    /// 默认音色 id（模型包内置参考音色 / 自定义音色库 id）。
+    /// 默认音色 id（自定义音色库 id）。
     pub voice: Option<String>,
-    /// 扩散解码步数（质量/速度权衡）
-    pub num_steps: i32,
     /// 语速
     pub speed: f32,
     pub provider: String,
@@ -158,7 +160,6 @@ impl Default for ResolvedTtsConfig {
             model_dir,
             reference_text: DEFAULT_REFERENCE_TEXT.to_string(),
             voice: None,
-            num_steps: 4,
             speed: 1.0,
             provider: "cpu".to_string(),
             num_threads: 2,
@@ -354,7 +355,6 @@ pub fn resolve(
         .and_then(|s| s.reference_text.clone())
         .unwrap_or_else(|| DEFAULT_REFERENCE_TEXT.to_string());
     cfg.voice = s.and_then(|s| s.voice.clone());
-    cfg.num_steps = s.and_then(|s| s.num_steps).unwrap_or(4);
     cfg.speed = s.and_then(|s| s.speed).unwrap_or(1.0);
     cfg.num_threads = s.and_then(|s| s.num_threads).unwrap_or(2);
     cfg.debug = s.and_then(|s| s.debug).unwrap_or(false);
@@ -394,8 +394,6 @@ pub fn resolve(
 /// 引擎在每次合成时新建（`synthesize_tts` → `TtsEngine::new`），因此保存后**下一次合成即生效**，无需重启。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TtsParamsPatch {
-    /// 扩散解码步数（质量/速度权衡）
-    pub num_steps: Option<i32>,
     /// 默认语速（单次合成可经 `synthesize_tts.speed` 覆盖）
     pub speed: Option<f32>,
     /// 推理线程数
@@ -407,11 +405,6 @@ pub struct TtsParamsPatch {
 impl TtsParamsPatch {
     /// 先整体校验（任一越界立即 Err），再逐项写入 `TtsSettings`，保证出错时不部分修改。
     pub fn apply_to(&self, tts: &mut TtsSettings) -> Result<(), String> {
-        if let Some(v) = self.num_steps
-            && !(1..=32).contains(&v)
-        {
-            return Err(format!("扩散步数需在 1~32，当前 {v}"));
-        }
         if let Some(v) = self.speed
             && !(0.5..=2.0).contains(&v)
         {
@@ -423,9 +416,6 @@ impl TtsParamsPatch {
             return Err(format!("线程数需在 1~32，当前 {v}"));
         }
 
-        if let Some(v) = self.num_steps {
-            tts.num_steps = Some(v);
-        }
         if let Some(v) = self.speed {
             tts.speed = Some(v);
         }
@@ -537,7 +527,6 @@ mod tests {
         assert_eq!(cfg.data_dir.file_name().unwrap(), DEFAULT_DATA_DIR);
         assert_eq!(cfg.reference_wav.file_name().unwrap(), "leijun-1.wav");
         assert_eq!(cfg.reference_text, DEFAULT_REFERENCE_TEXT);
-        assert_eq!(cfg.num_steps, 4);
         assert_eq!(cfg.speed, 1.0);
         assert_eq!(cfg.provider, "cpu");
     }
@@ -651,7 +640,6 @@ mod tests {
     fn test_resolve_settings_overrides_numeric_and_text() {
         let settings = TtsSettings {
             num_threads: Some(4),
-            num_steps: Some(6),
             speed: Some(1.5),
             reference_text: Some("自定义参考文本".to_string()),
             debug: Some(true),
@@ -659,7 +647,6 @@ mod tests {
         };
         let cfg = resolve(Some(&settings), None).unwrap();
         assert_eq!(cfg.num_threads, 4);
-        assert_eq!(cfg.num_steps, 6);
         assert_eq!(cfg.speed, 1.5);
         assert_eq!(cfg.reference_text, "自定义参考文本");
         assert!(cfg.debug);
@@ -754,13 +741,11 @@ model_type = "qwen3_tts_17"
     fn test_params_patch_applies_all_fields() {
         let mut tts = TtsSettings::default();
         let patch = TtsParamsPatch {
-            num_steps: Some(8),
             speed: Some(1.2),
             num_threads: Some(4),
             debug: Some(true),
         };
         patch.apply_to(&mut tts).unwrap();
-        assert_eq!(tts.num_steps, Some(8));
         assert_eq!(tts.speed, Some(1.2));
         assert_eq!(tts.num_threads, Some(4));
         assert_eq!(tts.debug, Some(true));
@@ -770,27 +755,19 @@ model_type = "qwen3_tts_17"
     fn test_params_patch_validates_before_writing() {
         // 任一字段越界即整体失败，且不部分修改其它字段
         let mut tts = TtsSettings {
-            num_steps: Some(4),
+            speed: Some(1.0),
             ..TtsSettings::default()
         };
         let err = TtsParamsPatch {
-            num_steps: Some(100),
+            speed: Some(3.0),
             num_threads: Some(4),
             ..TtsParamsPatch::default()
         }
         .apply_to(&mut tts)
         .unwrap_err();
-        assert!(err.contains("扩散步数"), "err: {err}");
-        assert_eq!(tts.num_threads, None, "校验失败时不应写入其它字段");
-        assert_eq!(tts.num_steps, Some(4));
-
-        let err = TtsParamsPatch {
-            speed: Some(3.0),
-            ..TtsParamsPatch::default()
-        }
-        .apply_to(&mut TtsSettings::default())
-        .unwrap_err();
         assert!(err.contains("语速"), "err: {err}");
+        assert_eq!(tts.num_threads, None, "校验失败时不应写入其它字段");
+        assert_eq!(tts.speed, Some(1.0));
 
         let err = TtsParamsPatch {
             num_threads: Some(64),
@@ -811,6 +788,7 @@ model_type = "qwen3_tts_17"
             ..TtsSettings::default()
         };
         TtsParamsPatch::default().apply_to(&mut tts).unwrap();
+        // num_steps 已下线透传（Qwen3-TTS 无扩散解码），残留值仅随老配置原样保留
         assert_eq!(tts.num_steps, Some(6));
         assert_eq!(tts.speed, Some(1.5));
         assert_eq!(tts.num_threads, Some(8));

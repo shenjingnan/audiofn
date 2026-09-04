@@ -14,7 +14,7 @@ pub mod dictate;
 pub mod offline;
 
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// 一次识别结果（owned 结构，不把后端类型泄漏到公开 API）。
 ///
@@ -71,56 +71,9 @@ pub fn transcribe_wav(cfg: &config::ResolvedAsrConfig, wav: &Path) -> Result<Str
 
 /// 离线转写 wav 文件并打印结果（不依赖麦克风）。
 ///
-/// 用于验证模型与整条链路：对模型自带 `test_wavs/*.wav` 应输出对应文本。
+/// 用于验证模型与整条链路：对指定的 wav 文件输出识别文本。
 pub fn run_offline(cfg: &config::ResolvedAsrConfig, wav: &Path) -> Result<(), String> {
     let text = transcribe_wav(cfg, wav)?;
     println!("[识别] {text}");
     Ok(())
-}
-
-/// 模型目录内默认测试音频：`test_wavs/0.wav` → `1.wav` → `zh.wav` → 字母序第一个 wav。
-///
-/// 供 CLI `asr transcribe` 与 GUI「测试识别」在未指定 wav 时自动挑一条示例音频。
-pub fn default_test_wav(model_dir: &Path) -> Option<PathBuf> {
-    let test_dir = model_dir.join("test_wavs");
-    let Ok(entries) = std::fs::read_dir(&test_dir) else {
-        return None;
-    };
-    let mut wavs: Vec<String> = entries
-        .flatten()
-        .filter(|e| e.path().is_file())
-        .filter_map(|e| e.file_name().to_str().map(str::to_string))
-        .filter(|n| n.ends_with(".wav"))
-        .collect();
-    wavs.sort();
-    for preferred in ["0.wav", "1.wav", "zh.wav"] {
-        if wavs.iter().any(|n| n == preferred) {
-            return Some(test_dir.join(preferred));
-        }
-    }
-    wavs.into_iter().next().map(|n| test_dir.join(n))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_test_wav_prefers_preferred() {
-        let dir = tempfile::tempdir().unwrap();
-        let test_dir = dir.path().join("test_wavs");
-        std::fs::create_dir_all(&test_dir).unwrap();
-        // 无示例音频 → None
-        assert_eq!(default_test_wav(dir.path()), None);
-        // 只有 en/ja → 字母序第一个
-        std::fs::write(test_dir.join("ja.wav"), b"x").unwrap();
-        std::fs::write(test_dir.join("en.wav"), b"x").unwrap();
-        assert_eq!(default_test_wav(dir.path()), Some(test_dir.join("en.wav")));
-        // 有 zh → 优先 zh（SenseVoice 中文示例）
-        std::fs::write(test_dir.join("zh.wav"), b"x").unwrap();
-        assert_eq!(default_test_wav(dir.path()), Some(test_dir.join("zh.wav")));
-        // 有 0.wav → 优先 0.wav（zipformer/whisper 包）
-        std::fs::write(test_dir.join("0.wav"), b"x").unwrap();
-        assert_eq!(default_test_wav(dir.path()), Some(test_dir.join("0.wav")));
-    }
 }

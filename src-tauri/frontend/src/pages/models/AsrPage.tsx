@@ -13,20 +13,13 @@ import { Switch } from "@/components/ui/switch";
 import { useRuntime } from "@/providers/RuntimeContext";
 
 /**
- * 语音识别（ASR）配置页：标题行含听写开关与状态 + 启用偏好 + 基础配置 + 模型信息 + 测试识别弹窗。
+ * 语音识别（ASR）配置页：标题行含听写开关与状态 + 启用偏好 + 基础配置 + 模型信息 + 转写文件弹窗。
  */
 export function AsrPage() {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [transcribeOpen, setTranscribeOpen] = useState(false);
-  const [transcribeAuto, setTranscribeAuto] = useState(false);
   const { asr } = useRuntime();
   const asrEnabled = asr.config.config?.enabled ?? false;
-
-  // 测试识别：转写弹窗自动跑模型自带示例音频（wavPath = null）
-  const handleTestOpen = () => {
-    setTranscribeAuto(true);
-    setTranscribeOpen(true);
-  };
 
   return (
     <div className="space-y-4">
@@ -59,12 +52,8 @@ export function AsrPage() {
       </section>
 
       <AsrBasicConfig
-        onTestOpen={handleTestOpen}
         onSwitchOpen={() => setSwitchOpen(true)}
-        onTranscribeOpen={() => {
-          setTranscribeAuto(false);
-          setTranscribeOpen(true);
-        }}
+        onTranscribeOpen={() => setTranscribeOpen(true)}
       />
 
       {!isStreamingAsr(asr.config.config?.model_type) && <AsrDictatePanel />}
@@ -75,11 +64,7 @@ export function AsrPage() {
 
       <AsrModelDialog open={switchOpen} onClose={() => setSwitchOpen(false)} />
 
-      <AsrTranscribeDialog
-        open={transcribeOpen}
-        onClose={() => setTranscribeOpen(false)}
-        autoRun={transcribeAuto}
-      />
+      <AsrTranscribeDialog open={transcribeOpen} onClose={() => setTranscribeOpen(false)} />
     </div>
   );
 }

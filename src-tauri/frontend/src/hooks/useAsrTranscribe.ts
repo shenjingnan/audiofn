@@ -4,16 +4,16 @@ import { api } from "@/lib/tauri";
 import type { TranscribeResult } from "@/types/tauri";
 
 /**
- * 一键离线转写：选择 wav → `transcribe_audio`（后端按 model_type 分发在线/离线引擎）。
+ * 文件转写：选择 wav → `transcribe_audio`（后端整段转写当前识别模型）。
  * 状态：转写中 / 结果 / 错误；供「转写文件」弹窗使用。
- * `runDefaultTest` 传 null 路径，转写模型自带 test_wavs 示例（离线「测试识别」）。
+ * 收录模型为 raw 单 GGUF、不带示例音频，转写必须由用户选择音频文件。
  */
 export function useAsrTranscribe() {
   const [transcribing, setTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<TranscribeResult | null>(null);
 
-  const transcribe = async (wavPath: string | null) => {
+  const transcribe = async (wavPath: string) => {
     setTranscribing(true);
     setError(null);
     setResult(null);
@@ -36,12 +36,10 @@ export function useAsrTranscribe() {
     await transcribe(path);
   };
 
-  const runDefaultTest = () => transcribe(null);
-
   const clear = () => {
     setResult(null);
     setError(null);
   };
 
-  return { pickAndTranscribe, runDefaultTest, transcribing, error, result, clear };
+  return { pickAndTranscribe, transcribing, error, result, clear };
 }

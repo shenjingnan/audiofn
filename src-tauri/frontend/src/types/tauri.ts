@@ -70,9 +70,9 @@ export interface AsrResult {
 
 /** `get_tts_config` 返回 */
 export interface TtsConfigInfo {
-  /** 模型类型（zipvoice/omnivoice/...），前端据此切换音色语义 */
+  /** 模型类型（qwen3_tts_06/qwen3_tts_17），前端据此切换音色语义 */
   model_type: string;
-  /** 推理后端（sherpa/audiocpp），前端据此显示引擎徽标 */
+  /** 推理后端（audiocpp；`sherpa` 仅老配置可达），前端据此显示引擎徽标 */
   backend: string;
   model_dir: string;
   provider: string;
@@ -81,19 +81,16 @@ export interface TtsConfigInfo {
   models_present: boolean;
   model_downloading: boolean;
   settings_path: string;
-  /** 扩散解码步数（质量/速度权衡），可经 `set_tts_params` 修改 */
-  num_steps: number;
   /** 默认语速，可经 `set_tts_params` 修改 */
   speed: number;
   /** 调试输出，可经 `set_tts_params` 修改 */
   debug: boolean;
-  /** 默认音色 id（`null` = 引擎内置音色），可经 `set_tts_voice` 修改 */
+  /** 默认音色 id（`null` = 未设置），可经 `set_tts_voice` 修改 */
   voice: string | null;
 }
 
 /** `set_tts_params` 载荷：可调整的 TTS 合成参数（snake_case 直传，缺省项不修改）。 */
 export interface TtsParamsPatch {
-  num_steps?: number;
   speed?: number;
   num_threads?: number;
   debug?: boolean;

@@ -1,7 +1,8 @@
 /// TTS 音色（参考音色）列表。
 ///
 /// Qwen3-TTS Base 走参考音频克隆：音色 = 参考音频 + 参考文本。内置音色来自
-/// 模型包内 `test_wavs/prompt.txt`（每行 `<wav文件名> <转写文本>`），运行时解析；
+/// 模型包内 `test_wavs/prompt.txt`（每行 `<wav文件名> <转写文本>`），运行时解析
+/// （仅自带示例音频的本地模型包有，managed 安装的单 GGUF 没有）；
 /// 用户自定义音色存音色库（`voice_store`）。
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -78,8 +79,11 @@ pub fn find_voice<'a>(voices: &'a [TtsVoice], id: &str) -> Option<&'a TtsVoice> 
 /// 解析最终参考音色：自定义 wav > 自定义音色（id/名称）> 内置音色 id > 配置默认。
 ///
 /// 音色 id 优先级：显式传入的 `voice_id` 优先于配置默认音色（`cfg.voice`，即
-/// `[tts].voice`），再回退 `cfg.reference_wav`（leijun）。因此设置「默认音色」后，
-/// 所有不显式指定音色的合成（测试语音 / 语音会话 / CLI tts run）都会统一使用该默认音色。
+/// `[tts].voice`）。因此设置「默认音色」后，所有不显式指定音色的合成（测试语音 /
+/// 语音会话 / CLI tts run）都会统一使用该默认音色。
+/// 末尾回退 `cfg.reference_wav`（缺省 `test_wavs/leijun-1.wav`）只对自带示例音频的
+/// 本地模型包有意义：managed 安装为 raw 单 GGUF、没有 `test_wavs/`，且调用方
+/// （`resolve_voice_params`）在无任何音色来源时已提前报错，该分支实际不会命中。
 pub fn resolve_reference(
     cfg: &ResolvedTtsConfig,
     voice_id: Option<&str>,

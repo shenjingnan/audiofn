@@ -384,16 +384,20 @@ pub struct TtsSettings {
     /// espeak-ng 数据目录名（缺省 espeak-ng-data）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
-    /// 参考音频 wav 路径（相对模型目录；缺省 test_wavs/leijun-1.wav）
+    /// 参考音频 wav 路径（相对模型目录；缺省为旧模型包的 test_wavs/leijun-1.wav，
+    /// managed 安装为单 GGUF、没有 test_wavs，该缺省不指向真实文件）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_wav: Option<String>,
     /// 参考音频的逐字转写文本
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_text: Option<String>,
-    /// 默认音色 id（如 `leijun-1` / 自定义音色 id；缺省 None = 用 reference_wav 即 leijun）
+    /// 默认音色 id（自定义音色库 id；缺省 None = 未设置，Qwen3-TTS Base 需显式选择克隆音色）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice: Option<String>,
-    /// 扩散解码步数（质量/速度权衡），缺省 4
+    /// 扩散解码步数（sherpa/ZipVoice 时代遗留字段）。
+    ///
+    /// 仅保留解析与回写（升级用户的老配置不丢、不被未知字段报错拦截）；
+    /// audiocpp Qwen3-TTS 没有扩散解码，该值不再被任何引擎/前端读取。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub num_steps: Option<i32>,
     /// 语速，缺省 1.0

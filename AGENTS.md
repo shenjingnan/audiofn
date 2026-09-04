@@ -41,14 +41,14 @@ cargo run -- completion bash        # 生成 shell 补全
 
 # ASR（Qwen3-ASR，离线转写）
 cargo run -- asr install-model      # 下载 ASR 模型（qwen3-asr-0.6b，约 1.1GB）
-cargo run -- asr transcribe         # 转写 wav（缺省用模型自带示例音频）
+cargo run -- asr transcribe --wav rec.wav   # 转写 wav 文件（语种自动识别）
 cargo run -- asr dictate            # 录音转写（回车 / Ctrl-C 停止）
 cargo run -- asr devices            # 列出输入设备
 
 # TTS（Qwen3-TTS，音色克隆）
 cargo run -- tts install-model      # 下载 TTS 模型（qwen3-tts-0.6b）
 cargo run -- tts run --text "你好" --reference-wav ref.wav --reference-text "参考文本" --output out.wav
-cargo run -- tts voices             # 音色库（模型包内置 + 自定义音色）
+cargo run -- tts voices             # 自定义音色库（Base 版需克隆音色）
 
 # 测试
 cargo test                          # 运行测试

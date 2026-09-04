@@ -1,5 +1,5 @@
 import { Check, CircleAlert, Copy, FileAudio, Loader2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -13,40 +13,31 @@ const EXIT_MS = 200;
 interface AsrTranscribeDialogProps {
   open: boolean;
   onClose: () => void;
-  /** 打开即自动转写模型自带 test_wavs 示例音频（离线模型「测试识别」） */
-  autoRun?: boolean;
 }
 
 /**
- * 转写文件对话框：选择 wav → 后端整段转写（SenseVoice / Whisper / zipformer 均可用）。
- * 离线模型（无实时识别）的主入口；结果含复制按钮。
+ * 转写文件对话框：选择 wav → 后端整段转写（Qwen3-ASR；结果含复制按钮）。
+ * 离线模型（无实时识别）的主入口；收录模型不带示例音频，一律由用户选择文件。
  */
-export function AsrTranscribeDialog({ open, onClose, autoRun }: AsrTranscribeDialogProps) {
+export function AsrTranscribeDialog({ open, onClose }: AsrTranscribeDialogProps) {
   const { asr } = useRuntime();
   const toast = useToast();
-  const { pickAndTranscribe, runDefaultTest, transcribing, error, result, clear } =
-    useAsrTranscribe();
+  const { pickAndTranscribe, transcribing, error, result, clear } = useAsrTranscribe();
   const [mounted, setMounted] = useState(open);
   const [closing, setClosing] = useState(false);
   const [copied, setCopied] = useState(false);
-  const autoRunHandled = useRef(false);
 
+  // 打开时挂载并清空上一次结果/错误（下次打开重新选择）。
+  // 不能放到「关闭时清空」：finishClose 里 setMounted(false) 与 onClose() 同批更新，
+  // 依赖 [open] 的 effect 此刻读到的 mounted 已是 false，clear() 永远不会执行。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 有意仅随「打开」触发，clear 标识变化不应额外清空
   useEffect(() => {
     if (open) {
       setMounted(true);
       setClosing(false);
-      autoRunHandled.current = false;
+      clear();
     }
   }, [open]);
-
-  // 离线「测试识别」：打开即自动转写模型自带示例音频（仅触发一次）
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 有意仅随「打开且模型就绪」触发一次，避免回调标识变化重复转写
-  useEffect(() => {
-    if (open && mounted && autoRun && !autoRunHandled.current) {
-      autoRunHandled.current = true;
-      void runDefaultTest();
-    }
-  }, [open, mounted, autoRun]);
 
   const finishClose = useCallback(() => {
     setMounted(false);
@@ -78,7 +69,7 @@ export function AsrTranscribeDialog({ open, onClose, autoRun }: AsrTranscribeDia
   if (!mounted) return null;
 
   const modelName = modelNameFromDir(asr.config.config?.model_dir);
-  const kind = asr.config.config?.model_type ?? "zipformer";
+  const kind = asr.config.config?.model_type ?? "";
 
   const handleCopy = async () => {
     if (!result) return;
