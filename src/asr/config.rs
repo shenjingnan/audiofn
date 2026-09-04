@@ -283,14 +283,14 @@ impl Default for ResolvedAsrConfig {
 
 /// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
-    crate::kws::model::asr_user_model_dir()
+    crate::model_library::asset::asr_user_model_dir()
 }
 
 /// 源码仓库中的模型目录（开发者 `./models/<模型名>`，仅作开发回退）。
 fn repo_models_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("models")
-        .join(&crate::kws::model::asr_asset().name)
+        .join(&crate::model_library::asset::asr_asset().name)
 }
 
 /// 默认模型目录选择：用户已安装 > 旧默认根存量（data_dir 切换后）> 源码仓库已下载（开发便利）> 用户默认。
@@ -312,7 +312,7 @@ fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> 
 pub fn default_model_dir() -> PathBuf {
     // legacy 与 user 层次对等：旧根下对应模型的子目录（user 是 `models/<模型名>`）
     let legacy = crate::config::settings::legacy_models_dir()
-        .map(|l| l.join(&crate::kws::model::asr_asset().name));
+        .map(|l| l.join(&crate::model_library::asset::asr_asset().name));
     choose_default_model_dir(
         &user_default_model_dir(),
         legacy.as_deref(),
@@ -322,7 +322,7 @@ pub fn default_model_dir() -> PathBuf {
 
 /// 标点模型默认目录：用户目录（`~/.zapmomo/models/<标点名>`）优先，旧根存量兜底。
 fn punctuation_default_dir() -> PathBuf {
-    let new = crate::kws::model::punctuation_user_model_dir();
+    let new = crate::model_library::asset::punctuation_user_model_dir();
     if new.join(DEFAULT_PUNCT_MODEL).is_file() {
         return new;
     }
@@ -945,7 +945,7 @@ mod tests {
     fn test_punctuation_default_dir_dual_root_fallback() {
         run_with_temp_home(|home| {
             crate::test_util::set_custom_data_dir(home);
-            let new_punct = crate::kws::model::punctuation_user_model_dir();
+            let new_punct = crate::model_library::asset::punctuation_user_model_dir();
             let legacy_punct = home
                 .join(".zapmomo")
                 .join("models")
@@ -975,7 +975,7 @@ mod tests {
             cfg.model_dir
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string()),
-            Some(crate::kws::model::asr_asset().name.clone())
+            Some(crate::model_library::asset::asr_asset().name.clone())
         );
         assert_eq!(cfg.encoder.file_name().unwrap(), DEFAULT_ENCODER);
         assert_eq!(cfg.decoder.file_name().unwrap(), DEFAULT_DECODER);
@@ -994,7 +994,7 @@ mod tests {
             assert_eq!(
                 dir,
                 home.join(".zapmomo/models")
-                    .join(crate::kws::model::asr_asset().name.as_str())
+                    .join(crate::model_library::asset::asr_asset().name.as_str())
             );
         });
     }
@@ -1114,7 +1114,7 @@ mod tests {
         assert!(cfg.enable_punctuation);
         assert_eq!(
             cfg.punctuation_model,
-            crate::kws::model::punctuation_user_model_dir().join(DEFAULT_PUNCT_MODEL)
+            crate::model_library::asset::punctuation_user_model_dir().join(DEFAULT_PUNCT_MODEL)
         );
     }
 

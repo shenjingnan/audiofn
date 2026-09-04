@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 use crate::asr::config::AsrModelKind;
-use crate::kws::model::{ModelAsset, asset_by_role};
+use crate::model_library::asset::{ModelAsset, asset_by_role};
 use crate::tts::config::TtsModelKind;
 
 /// 能力类型。
@@ -203,7 +203,7 @@ pub fn asset_for(model: &RegistryModel) -> Option<&'static ModelAsset> {
 /// 避免出现「安装要求 A+B、完整性只查 A」的不一致。
 pub fn required_files_for_role(role: &str) -> &'static [&'static str] {
     match role {
-        "wake-word" => &crate::kws::model::KWS_REQUIRED_FILES,
+        "wake-word" => &crate::model_library::asset::KWS_REQUIRED_FILES,
         // 离线 ASR：精确 role 必须在 asr-* 通配之前，否则被通配吞掉返回错误 4 件套
         "asr-sensevoice" => &crate::asr::config::SENSEVOICE_REQUIRED_FILES,
         "asr-whisper-tiny" => &crate::asr::config::WHISPER_TINY_REQUIRED_FILES,
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn test_default_asset_stays_zh_en() {
         // manifest 中第一个 role=="wake-word" 资产必须保持 zh-en（default_asset 语义）。
-        let d = crate::kws::model::default_asset();
+        let d = crate::model_library::asset::default_asset();
         assert_eq!(d.role, "wake-word");
         assert_eq!(d.name, "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20");
     }

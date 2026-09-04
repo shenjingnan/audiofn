@@ -21,7 +21,7 @@ mod recognizer;
 
 use std::path::PathBuf;
 
-use crate::kws::model::{DownloadProgress, install_raw_file_to, speaker_asset};
+use crate::model_library::asset::{DownloadProgress, install_raw_file_to, speaker_asset};
 
 pub use config::ResolvedSpeakerConfig;
 pub use recognizer::{

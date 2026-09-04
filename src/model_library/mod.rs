@@ -10,6 +10,7 @@
 //! 模型完整性判断、`set_selected_model`/`restore_selected_model`、下载安装编排。
 //! 模型加载/引擎生命周期由各能力模块与 Tauri 层负责，本模块**不复制任何 runtime**。
 
+pub mod asset;
 pub mod catalog;
 pub mod install;
 pub mod registry;
@@ -24,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::config::settings::{self, AppConfig, LocalModel, ModelLibrarySettings};
-use crate::kws::model::{DownloadProgress, ModelError, ProgressFn, has_required_files};
+use crate::model_library::asset::{DownloadProgress, ModelError, ProgressFn, has_required_files};
 use registry::{ModelType, RegistryModel};
 
 // ---------------------------------------------------------------------------
@@ -616,7 +617,7 @@ fn build_installed_model(
         }
     } else {
         let ok = match mt {
-            ModelType::Kws => crate::kws::config::kws_files_present(dir),
+            ModelType::Kws => crate::model_library::asset::kws_files_present(dir),
             ModelType::Asr => crate::asr::is_installed(dir),
             ModelType::Tts => crate::tts::is_installed(dir),
             ModelType::Llm => false,
@@ -873,7 +874,7 @@ fn build_local_model(lm: &LocalModel, sel: &Selections) -> LibraryModel {
                 }
             }
             ModelType::Kws => {
-                if crate::kws::config::kws_files_present(&path) {
+                if crate::model_library::asset::kws_files_present(&path) {
                     InstallState::Installed
                 } else {
                     InstallState::Invalid
@@ -1080,17 +1081,17 @@ pub fn install_managed_model(
     // optional assets best-effort（独立目录，失败仅 warn，不回滚主模型）
     let mut progress = on_progress;
     for role in &model.optional_assets {
-        let asset = match crate::kws::model::asset_by_role(role) {
+        let asset = match crate::model_library::asset::asset_by_role(role) {
             Some(a) => a,
             None => continue,
         };
         let dest = if role == "punctuation" {
-            crate::kws::model::punctuation_user_model_dir()
+            crate::model_library::asset::punctuation_user_model_dir()
         } else {
             final_dir.clone()
         };
         let required = registry::required_files_for_role(role);
-        if let Err(e) = crate::kws::model::install_asset_to_cancellable(
+        if let Err(e) = crate::model_library::asset::install_asset_to_cancellable(
             asset,
             &dest,
             false,
@@ -1107,7 +1108,7 @@ pub fn install_managed_model(
 
 /// staging 安装清单条目：（资产, 安装完成所需文件名清单）。
 type StagedAsset = (
-    &'static crate::kws::model::ModelAsset,
+    &'static crate::model_library::asset::ModelAsset,
     &'static [&'static str],
 );
 
@@ -1126,7 +1127,7 @@ fn staged_assets(model: &RegistryModel) -> Result<(Vec<StagedAsset>, u64), Model
         .iter()
         .chain(model.optional_assets.iter())
     {
-        let asset = crate::kws::model::asset_by_role(role)
+        let asset = crate::model_library::asset::asset_by_role(role)
             .ok_or_else(|| ModelError::Download(format!("未知资产 role：{role}")))?;
         total_bytes += asset.size_bytes;
         if model.required_assets.contains(role) {
@@ -1139,7 +1140,7 @@ fn staged_assets(model: &RegistryModel) -> Result<(Vec<StagedAsset>, u64), Model
 /// staging + 整体校验 + commit 的可测试核心：给定具体资产（可注入本地测试服务器）。
 fn stage_and_commit<'a>(
     model: &RegistryModel,
-    assets: &[(&'a crate::kws::model::ModelAsset, &'a [&'a str])],
+    assets: &[(&'a crate::model_library::asset::ModelAsset, &'a [&'a str])],
     total_bytes: u64,
     on_progress: &mut ProgressFn,
     cancel: Option<&AtomicBool>,
@@ -1178,7 +1179,7 @@ fn stage_and_commit<'a>(
         for (asset, required) in assets {
             if asset.is_raw() {
                 let dest = staging_model.join(&asset.archive);
-                crate::kws::model::install_raw_file_to_cancellable(
+                crate::model_library::asset::install_raw_file_to_cancellable(
                     asset,
                     &dest,
                     false,
@@ -1186,7 +1187,7 @@ fn stage_and_commit<'a>(
                     cancel,
                 )?;
             } else {
-                crate::kws::model::install_asset_to_cancellable(
+                crate::model_library::asset::install_asset_to_cancellable(
                     asset,
                     &staging_model,
                     false,
@@ -1815,8 +1816,10 @@ mod tests {
         let (assets, total) = staged_assets(asr).unwrap();
         assert_eq!(assets.len(), 1, "punctuation 不得进 staging 清单");
         assert_eq!(assets[0].0.role, "asr");
-        let req = crate::kws::model::asset_by_role("asr").unwrap().size_bytes;
-        let opt = crate::kws::model::asset_by_role("punctuation")
+        let req = crate::model_library::asset::asset_by_role("asr")
+            .unwrap()
+            .size_bytes;
+        let opt = crate::model_library::asset::asset_by_role("punctuation")
             .unwrap()
             .size_bytes;
         assert_eq!(total, req + opt, "optional 只计字节（进度总量）");
@@ -1860,12 +1863,12 @@ mod tests {
     /// `download_llm_model` 的幂等预检（managed_install_dir + file_name）依赖该布局。
     #[test]
     fn test_install_llm_raw_layout() {
-        use crate::kws::model::tests::{serve_many, sha256_hex};
+        use crate::model_library::asset::tests::{serve_many, sha256_hex};
 
         run_with_temp_home(|_| {
             // 与真实预设同构：registry.name = 安装目录名，file_name = manifest archive 文件名
             let bytes = b"GGUF-test-payload".to_vec();
-            let asset = crate::kws::model::ModelAsset {
+            let asset = crate::model_library::asset::ModelAsset {
                 name: "Qwen3-0.6B".into(),
                 role: "llm-test-raw".into(),
                 version: "test".into(),
@@ -1904,8 +1907,8 @@ mod tests {
     /// staging 保证：任一 required asset 失败，正式模型目录不得出现半安装状态。
     #[test]
     fn test_install_staging_failure_leaves_no_partial() {
-        use crate::kws::model::tests::{mini_tarbz2, serve_many, sha256_hex};
-        use crate::kws::model::{KWS_REQUIRED_FILES, ModelAsset, is_installed};
+        use crate::model_library::asset::tests::{mini_tarbz2, serve_many, sha256_hex};
+        use crate::model_library::asset::{KWS_REQUIRED_FILES, ModelAsset, is_installed};
 
         run_with_temp_home(|_| {
             let bytes = mini_tarbz2("test-kws-model");

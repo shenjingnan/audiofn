@@ -417,7 +417,7 @@ async fn cmd_kws(cmd: KwsCmd) -> Result<(), String> {
             Ok(())
         }
         KwsCmd::InstallModel { model_dir, force } => {
-            use crate::kws::model::{
+            use crate::model_library::asset::{
                 DownloadProgress, DownloadStage, install_model_to, user_model_dir,
             };
             let dest = model_dir.unwrap_or_else(user_model_dir);
@@ -548,7 +548,7 @@ async fn cmd_speaker(cmd: SpeakerCmd) -> Result<(), String> {
             Ok(())
         }
         SpeakerCmd::InstallModel { model_dir, force } => {
-            use crate::kws::model::{
+            use crate::model_library::asset::{
                 DownloadProgress, DownloadStage, install_raw_file_to, speaker_asset,
                 speaker_user_model_path,
             };

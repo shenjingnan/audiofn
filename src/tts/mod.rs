@@ -20,7 +20,7 @@ use sherpa_onnx::{
 };
 use std::path::{Path, PathBuf};
 
-pub use crate::kws::model::{DownloadProgress, DownloadStage, ModelError, ProgressFn};
+pub use crate::model_library::asset::{DownloadProgress, DownloadStage, ModelError, ProgressFn};
 pub use voice::TtsVoice;
 
 /// 合成时的「说话人/音色」参数：`Sid`（固定说话人模型）、
@@ -439,7 +439,7 @@ pub(crate) fn apply_speed_to_samples(
 
 /// TTS 模型安装目录：`~/.zapmomo/models/<name>`。
 pub fn user_model_dir() -> PathBuf {
-    crate::kws::model::tts_user_model_dir()
+    crate::model_library::asset::tts_user_model_dir()
 }
 
 /// 生成唯一的 TTS 输出 wav 路径：`~/.zapmomo/tts/tts-<毫秒时间戳>.wav`
@@ -453,7 +453,7 @@ pub fn default_output_path() -> PathBuf {
 
 /// 目标目录是否已装好 TTS 主模型。
 pub fn is_installed(dir: &Path) -> bool {
-    crate::kws::model::has_required_files(dir, &config::REQUIRED_FILES)
+    crate::model_library::asset::has_required_files(dir, &config::REQUIRED_FILES)
 }
 
 /// 安装 TTS 主模型到 `dest_dir`（默认 `~/.zapmomo/models/<name>`）。
@@ -464,8 +464,8 @@ pub fn install_model_to(
     force: bool,
     on_progress: &mut ProgressFn,
 ) -> Result<(), ModelError> {
-    crate::kws::model::install_asset_to(
-        crate::kws::model::tts_asset(),
+    crate::model_library::asset::install_asset_to(
+        crate::model_library::asset::tts_asset(),
         dest_dir,
         force,
         on_progress,
@@ -481,8 +481,8 @@ pub fn install_vocoder_to(
     force: bool,
     on_progress: &mut ProgressFn,
 ) -> Result<(), ModelError> {
-    crate::kws::model::install_raw_file_to(
-        crate::kws::model::tts_vocoder_asset(),
+    crate::model_library::asset::install_raw_file_to(
+        crate::model_library::asset::tts_vocoder_asset(),
         &dest_dir.join(config::DEFAULT_VOCODER),
         force,
         on_progress,

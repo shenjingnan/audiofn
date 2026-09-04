@@ -128,7 +128,7 @@ mod tests {
     #[test]
     #[ignore = "需要先运行 cargo run -- speaker install-model 下载模型"]
     fn test_compute_with_real_model() {
-        let model_path = crate::kws::model::speaker_user_model_path();
+        let model_path = crate::model_library::asset::speaker_user_model_path();
         if !model_path.is_file() {
             eprintln!("跳过：声纹模型未安装（{}）", model_path.display());
             return;

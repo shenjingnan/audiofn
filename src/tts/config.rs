@@ -304,14 +304,14 @@ pub fn models_present(cfg: &ResolvedTtsConfig) -> bool {
 
 /// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
-    crate::kws::model::tts_user_model_dir()
+    crate::model_library::asset::tts_user_model_dir()
 }
 
 /// 源码仓库中的模型目录（开发者 `./models/<模型名>`，仅作开发回退）。
 fn repo_models_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("models")
-        .join(&crate::kws::model::tts_asset().name)
+        .join(&crate::model_library::asset::tts_asset().name)
 }
 
 /// 默认模型目录选择：用户已安装 > 旧默认根存量（data_dir 切换后）> 源码仓库已下载（开发便利）> 用户默认。
@@ -333,7 +333,7 @@ fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> 
 pub fn default_model_dir() -> PathBuf {
     // legacy 与 user 层次对等：旧根下对应模型的子目录（user 是 `models/<模型名>`）
     let legacy = crate::config::settings::legacy_models_dir()
-        .map(|l| l.join(&crate::kws::model::tts_asset().name));
+        .map(|l| l.join(&crate::model_library::asset::tts_asset().name));
     choose_default_model_dir(
         &user_default_model_dir(),
         legacy.as_deref(),
@@ -554,7 +554,7 @@ mod tests {
             cfg.model_dir
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string()),
-            Some(crate::kws::model::tts_asset().name.clone())
+            Some(crate::model_library::asset::tts_asset().name.clone())
         );
         assert_eq!(cfg.encoder.file_name().unwrap(), DEFAULT_ENCODER);
         assert_eq!(cfg.decoder.file_name().unwrap(), DEFAULT_DECODER);
@@ -576,7 +576,7 @@ mod tests {
             assert_eq!(
                 dir,
                 home.join(".zapmomo/models")
-                    .join(crate::kws::model::tts_asset().name.as_str())
+                    .join(crate::model_library::asset::tts_asset().name.as_str())
             );
         });
     }

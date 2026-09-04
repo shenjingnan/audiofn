@@ -5,7 +5,9 @@
 use crate::asr::config::ResolvedAsrConfig;
 use crate::asr::offline::OfflineAsrEngine;
 use crate::asr::reaction::{AsrReaction, AsrResult};
-use crate::kws::model::{ProgressFn, asr_vad_asset, asr_vad_user_model_path, install_raw_file_to};
+use crate::model_library::asset::{
+    ProgressFn, asr_vad_asset, asr_vad_user_model_path, install_raw_file_to,
+};
 use sherpa_onnx::{SileroVadModelConfig, VadModelConfig, VoiceActivityDetector};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

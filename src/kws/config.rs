@@ -3,15 +3,14 @@
 /// 负责把 `settings.toml` 的 `[kws]` 表与 CLI flag 合并成一份已展开、已填默认值的
 /// `ResolvedKwsConfig`。优先级：CLI `--model-dir` > settings > 内置默认。
 use crate::config::settings::{KwsSettings, resolve_env_ref};
+use crate::model_library::asset::{detect_default_onnx, detect_keywords_rel};
 use std::path::{Path, PathBuf};
 
-/// 模型包内默认文件名（chunk-16 变体，与官方测试命令一致）。
-pub const DEFAULT_ENCODER: &str = "encoder-epoch-13-avg-2-chunk-16-left-64.onnx";
-pub const DEFAULT_DECODER: &str = "decoder-epoch-13-avg-2-chunk-16-left-64.onnx";
-pub const DEFAULT_JOINER: &str = "joiner-epoch-13-avg-2-chunk-16-left-64.onnx";
-pub const DEFAULT_TOKENS: &str = "tokens.txt";
-/// 模型包内自带的关键词文件（中英混合，开箱即用）。
-pub const DEFAULT_KEYWORDS_REL: &str = "test_wavs/keywords.txt";
+/// 模型包内默认文件名：定义在 [`crate::model_library::asset`]（与清单解析/安装共享），
+/// 此处 re-export 维持既有 `crate::kws::config::DEFAULT_*` 引用路径不变。
+pub use crate::model_library::asset::{
+    DEFAULT_DECODER, DEFAULT_ENCODER, DEFAULT_JOINER, DEFAULT_KEYWORDS_REL, DEFAULT_TOKENS,
+};
 
 /// 解析后的完整 KWS 配置。
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +58,7 @@ impl Default for ResolvedKwsConfig {
 
 /// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
-    crate::kws::model::user_model_dir()
+    crate::model_library::asset::user_model_dir()
 }
 
 /// 源码仓库中的模型目录（开发者 `./models/<模型名>`，仅作开发回退）。
@@ -69,7 +68,7 @@ pub fn user_default_model_dir() -> PathBuf {
 fn repo_models_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("models")
-        .join(&crate::kws::model::default_asset().name)
+        .join(&crate::model_library::asset::default_asset().name)
 }
 
 /// 默认模型目录选择：用户已安装 > 旧默认根存量（data_dir 切换后）> 源码仓库已下载（开发便利）> 用户默认。
@@ -91,7 +90,7 @@ fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> 
 pub fn default_model_dir() -> PathBuf {
     // legacy 与 user 层次对等：旧根下对应模型的子目录（user 是 `models/<模型名>`）
     let legacy = crate::config::settings::legacy_models_dir()
-        .map(|l| l.join(&crate::kws::model::default_asset().name));
+        .map(|l| l.join(&crate::model_library::asset::default_asset().name));
     choose_default_model_dir(
         &user_default_model_dir(),
         legacy.as_deref(),
@@ -120,55 +119,9 @@ fn resolve_file(
     }
 }
 
-/// onnx 默认文件名探测：settings 未显式配置某 onnx 文件时按模型目录内容选择。
-///
-/// 规则（确定性）：
-/// 1. 默认常量文件名存在 → 直接用（zh-en 已装用户零行为变化，混放两代文件时偏默认代）；
-/// 2. 否则扫目录中 `{prefix}-` 开头、`.onnx` 结尾、含 `chunk-16` 且非 `.int8` 的文件，
-///    排序取第一个（read_dir 顺序不确定，排序保证确定性；字母序下 epoch-12 优先于 epoch-99）；
-/// 3. 目录不存在或无匹配 → 回退默认常量名（后续预检报「缺少模型文件」，错误路径清晰）。
-fn detect_default_onnx(model_dir: &Path, prefix: &str, fallback: &str) -> String {
-    if model_dir.join(fallback).is_file() {
-        return fallback.to_string();
-    }
-    let Ok(entries) = std::fs::read_dir(model_dir) else {
-        return fallback.to_string();
-    };
-    let mut candidates: Vec<String> = entries
-        .flatten()
-        .filter(|e| e.path().is_file())
-        .filter_map(|e| e.file_name().to_str().map(str::to_string))
-        .filter(|n| {
-            n.starts_with(&format!("{prefix}-"))
-                && n.ends_with(".onnx")
-                && n.contains("chunk-16")
-                && !n.contains(".int8")
-        })
-        .collect();
-    candidates.sort();
-    candidates
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| fallback.to_string())
-}
-
-/// keywords 默认文件名探测：不同模型包自带的关键词文件名不同，按候选链取第一个存在的。
-fn detect_keywords_rel(model_dir: &Path) -> String {
-    /// 候选链（固定顺序）：zh-en 的 `test_wavs/keywords.txt` 在前（与 DEFAULT_KEYWORDS_REL
-    /// 一致），其余为其它 sherpa KWS 包（external/HF 导入）的常见布局兜底。
-    const CANDIDATES: [&str; 4] = [
-        DEFAULT_KEYWORDS_REL,
-        "test_wavs/test_keywords.txt",
-        "test_keywords.txt",
-        "keywords.txt",
-    ];
-    CANDIDATES
-        .iter()
-        .find(|c| model_dir.join(c).is_file())
-        .copied()
-        .unwrap_or(DEFAULT_KEYWORDS_REL)
-        .to_string()
-}
+// onnx / keywords 默认文件名探测（detect_default_onnx / detect_keywords_rel）与目录
+// 完整性判断（kws_files_present）已上移至 crate::model_library::asset，本模块只保留
+// 探测入口的组装。
 
 /// settings 未显式配置某文件字段时的默认名探测入口（tokens 各模型同名，不探测）。
 fn detect_default_name(field: &str, model_dir: &Path, fallback: &str) -> String {
@@ -179,19 +132,6 @@ fn detect_default_name(field: &str, model_dir: &Path, fallback: &str) -> String 
         "keywords_file" => detect_keywords_rel(model_dir),
         _ => fallback.to_string(),
     }
-}
-
-/// 目录内是否探测得到完整的一套 KWS 模型文件（模型无关，替代按 zh-en 文件名硬编码的
-/// [`crate::kws::model::is_installed`]，供模型库 external/HF 导入的完整性判断复用）。
-pub fn kws_files_present(model_dir: &Path) -> bool {
-    let files = [
-        detect_default_onnx(model_dir, "encoder", DEFAULT_ENCODER),
-        detect_default_onnx(model_dir, "decoder", DEFAULT_DECODER),
-        detect_default_onnx(model_dir, "joiner", DEFAULT_JOINER),
-        DEFAULT_TOKENS.to_string(),
-        detect_keywords_rel(model_dir),
-    ];
-    files.iter().all(|f| model_dir.join(f).is_file())
 }
 
 /// 解析模型目录：CLI > settings > 默认。
@@ -290,6 +230,7 @@ pub fn parse_keywords_file(path: &Path) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
     use crate::config::settings::KwsSettings;
+    use crate::model_library::asset::kws_files_present;
     use crate::test_util::run_with_temp_home;
     use std::io::Write;
 
@@ -334,7 +275,7 @@ mod tests {
             cfg.model_dir
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string()),
-            Some(crate::kws::model::default_asset().name.clone())
+            Some(crate::model_library::asset::default_asset().name.clone())
         );
         assert_eq!(cfg.encoder.file_name().unwrap(), DEFAULT_ENCODER);
         assert_eq!(cfg.decoder.file_name().unwrap(), DEFAULT_DECODER);
@@ -352,7 +293,7 @@ mod tests {
             assert_eq!(
                 dir,
                 home.join(".zapmomo/models")
-                    .join(crate::kws::model::default_asset().name.as_str())
+                    .join(crate::model_library::asset::default_asset().name.as_str())
             );
         });
     }
@@ -535,32 +476,11 @@ mod tests {
         assert!(parse_keywords_file(Path::new("/nonexistent/kw.txt")).is_err());
     }
 
-    /// 构造 KWS 模型目录（epoch 系列文件名 + tokens + 关键词文件）。
-    fn fake_model_dir(
-        encoder: &str,
-        decoder: &str,
-        joiner: &str,
-        keywords_rel: &str,
-        extra: &[&str],
-    ) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        for f in [encoder, decoder, joiner, "tokens.txt"] {
-            std::fs::write(dir.path().join(f), b"m").unwrap();
-        }
-        let kw = dir.path().join(keywords_rel);
-        std::fs::create_dir_all(kw.parent().unwrap()).unwrap();
-        std::fs::write(kw, "n ǐ h ǎo @你好").unwrap();
-        for f in extra {
-            std::fs::write(dir.path().join(f), b"m").unwrap();
-        }
-        dir
-    }
-
     #[test]
     fn test_resolve_detects_epoch_layout() {
         // 非默认布局（external/HF 导入的 sherpa KWS 包常见形态）：
         // epoch-12 三件套 + test_wavs/test_keywords.txt
-        let dir = fake_model_dir(
+        let dir = crate::test_util::fake_kws_model_dir(
             "encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
             "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
             "joiner-epoch-12-avg-2-chunk-16-left-64.onnx",
@@ -598,7 +518,7 @@ mod tests {
     #[test]
     fn test_resolve_default_layout_prefers_constant_names() {
         // zh-en 布局：默认常量名存在 → 全部命中常量（既有用户零行为变化）
-        let dir = fake_model_dir(
+        let dir = crate::test_util::fake_kws_model_dir(
             DEFAULT_ENCODER,
             DEFAULT_DECODER,
             DEFAULT_JOINER,
@@ -614,79 +534,5 @@ mod tests {
         assert_eq!(cfg.decoder, dir.path().join(DEFAULT_DECODER));
         assert_eq!(cfg.joiner, dir.path().join(DEFAULT_JOINER));
         assert_eq!(cfg.keywords_file, dir.path().join(DEFAULT_KEYWORDS_REL));
-    }
-
-    #[test]
-    fn test_detect_prefers_non_int8_and_earliest_epoch() {
-        // epoch-12 fp32 与 int8、epoch-99 fp32 并存 → 排序后取 epoch-12 fp32
-        let dir = fake_model_dir(
-            "encoder-epoch-99-avg-1-chunk-16-left-64.onnx",
-            DEFAULT_DECODER,
-            DEFAULT_JOINER,
-            DEFAULT_KEYWORDS_REL,
-            &[
-                "encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
-                "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
-                "encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
-            ],
-        );
-        let enc = detect_default_onnx(dir.path(), "encoder", DEFAULT_ENCODER);
-        assert_eq!(enc, "encoder-epoch-12-avg-2-chunk-16-left-64.onnx");
-    }
-
-    #[test]
-    fn test_detect_int8_only_falls_back_to_constant() {
-        // 目录里只有 int8 变体（非默认布局）→ 回退常量名
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path()
-                .join("encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"),
-            b"m",
-        )
-        .unwrap();
-        let enc = detect_default_onnx(dir.path(), "encoder", DEFAULT_ENCODER);
-        assert_eq!(enc, DEFAULT_ENCODER);
-    }
-
-    #[test]
-    fn test_detect_missing_dir_falls_back_to_constant() {
-        // 目录不存在 → 回退常量名（与 resolve 既有行为一致，报错路径清晰）
-        let enc = detect_default_onnx(Path::new("/nonexistent-kws"), "encoder", DEFAULT_ENCODER);
-        assert_eq!(enc, DEFAULT_ENCODER);
-        assert_eq!(
-            detect_keywords_rel(Path::new("/nonexistent-kws")),
-            DEFAULT_KEYWORDS_REL
-        );
-    }
-
-    #[test]
-    fn test_detect_keywords_candidate_chain() {
-        // 仅根目录 keywords.txt（部分模型包布局）→ 候选链兜底命中
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("keywords.txt"), b"k").unwrap();
-        assert_eq!(detect_keywords_rel(dir.path()), "keywords.txt");
-    }
-
-    #[test]
-    fn test_kws_files_present() {
-        // 完整 epoch 布局目录 → true；缺 encoder → false；空目录 → false
-        let dir = fake_model_dir(
-            "encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
-            "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
-            "joiner-epoch-12-avg-2-chunk-16-left-64.onnx",
-            "test_wavs/test_keywords.txt",
-            &[],
-        );
-        assert!(kws_files_present(dir.path()));
-        std::fs::remove_file(
-            dir.path()
-                .join("encoder-epoch-12-avg-2-chunk-16-left-64.onnx"),
-        )
-        .unwrap();
-        assert!(!kws_files_present(dir.path()));
-
-        let empty = tempfile::tempdir().unwrap();
-        assert!(!kws_files_present(empty.path()));
-        assert!(!kws_files_present(Path::new("/nonexistent-kws")));
     }
 }

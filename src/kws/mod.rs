@@ -4,7 +4,6 @@
 /// 离线对 wav 检测（`run_offline`）与实时麦克风监听（`run_realtime`）。
 pub mod config;
 pub mod english;
-pub mod model;
 pub mod reaction;
 pub mod token;
 

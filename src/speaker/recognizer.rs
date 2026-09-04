@@ -596,7 +596,7 @@ mod real_model_tests {
     #[test]
     #[ignore = "需要模型与网络：先 cargo run -- speaker install-model，样例 wav 测试时下载"]
     fn test_real_model_case1_to_case5() {
-        if !crate::kws::model::speaker_user_model_path().is_file() {
+        if !crate::model_library::asset::speaker_user_model_path().is_file() {
             eprintln!("跳过：声纹模型未安装（先运行 cargo run -- speaker install-model）");
             return;
         }

@@ -19,8 +19,8 @@ use sherpa_onnx::{
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub use crate::kws::model::{DownloadProgress, DownloadStage, ModelError, ProgressFn};
 pub use crate::kws::reaction::ReactionOutcome;
+pub use crate::model_library::asset::{DownloadProgress, DownloadStage, ModelError, ProgressFn};
 pub use reaction::{AsrReaction, AsrResult, CollectAsrReaction, ConsoleAsrReaction};
 
 /// 语音识别引擎。
@@ -257,7 +257,7 @@ pub(crate) fn build_online_recognizer_config(cfg: &ResolvedAsrConfig) -> OnlineR
 
 /// ASR 模型安装目录：`~/.zapmomo/models/<name>`。
 pub fn user_model_dir() -> PathBuf {
-    crate::kws::model::asr_user_model_dir()
+    crate::model_library::asset::asr_user_model_dir()
 }
 
 /// 目标目录是否已装好 ASR 模型（探测式：按目录内容探测四件套，模型无关）。
@@ -273,8 +273,8 @@ pub fn install_model_to(
     force: bool,
     on_progress: &mut ProgressFn,
 ) -> Result<(), ModelError> {
-    crate::kws::model::install_asset_to(
-        crate::kws::model::asr_asset(),
+    crate::model_library::asset::install_asset_to(
+        crate::model_library::asset::asr_asset(),
         dest_dir,
         force,
         on_progress,
@@ -284,7 +284,7 @@ pub fn install_model_to(
 
 /// 标点模型安装目录：`~/.zapmomo/models/<标点模型名>`。
 pub fn punctuation_user_model_dir() -> PathBuf {
-    crate::kws::model::punctuation_user_model_dir()
+    crate::model_library::asset::punctuation_user_model_dir()
 }
 
 /// 安装标点模型到 `dest_dir`（默认 `~/.zapmomo/models/<标点模型名>`）。
@@ -295,7 +295,7 @@ pub fn install_punctuation_model_to(
     force: bool,
     on_progress: &mut ProgressFn,
 ) -> Result<(), ModelError> {
-    crate::kws::model::install_punctuation_model_to(
+    crate::model_library::asset::install_punctuation_model_to(
         dest_dir,
         force,
         on_progress,

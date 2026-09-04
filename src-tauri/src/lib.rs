@@ -645,7 +645,7 @@ async fn download_speaker_model(
     let dest = match speaker_resolved_cfg() {
         Ok(cfg) => cfg
             .model_dir
-            .join(&zapmomo::kws::model::speaker_asset().archive),
+            .join(&zapmomo::model_library::asset::speaker_asset().archive),
         Err(e) => {
             flag.store(false, Ordering::SeqCst);
             return Err(e);
@@ -655,12 +655,12 @@ async fn download_speaker_model(
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let mut progress = |p: zapmomo::kws::model::DownloadProgress| {
+        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
-                zapmomo::kws::model::DownloadStage::Downloading => "downloading",
-                zapmomo::kws::model::DownloadStage::Verifying => "verifying",
-                zapmomo::kws::model::DownloadStage::Extracting => "extracting",
-                zapmomo::kws::model::DownloadStage::Done => "done",
+                zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
+                zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
+                zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
+                zapmomo::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
                 "speaker-model-download-progress",
@@ -671,8 +671,8 @@ async fn download_speaker_model(
                 },
             );
         };
-        let result = zapmomo::kws::model::install_raw_file_to(
-            zapmomo::kws::model::speaker_asset(),
+        let result = zapmomo::model_library::asset::install_raw_file_to(
+            zapmomo::model_library::asset::speaker_asset(),
             &dest,
             false,
             &mut progress,
@@ -1252,16 +1252,16 @@ async fn download_kws_model(app: AppHandle, state: State<'_, DownloadState>) -> 
     if flag.swap(true, Ordering::SeqCst) {
         return Err("模型下载已在进行中，请稍候".to_string());
     }
-    let dest = zapmomo::kws::model::user_model_dir();
+    let dest = zapmomo::model_library::asset::user_model_dir();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let mut progress = |p: zapmomo::kws::model::DownloadProgress| {
+        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
-                zapmomo::kws::model::DownloadStage::Downloading => "downloading",
-                zapmomo::kws::model::DownloadStage::Verifying => "verifying",
-                zapmomo::kws::model::DownloadStage::Extracting => "extracting",
-                zapmomo::kws::model::DownloadStage::Done => "done",
+                zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
+                zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
+                zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
+                zapmomo::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
                 "kws-model-download-progress",
@@ -1272,7 +1272,7 @@ async fn download_kws_model(app: AppHandle, state: State<'_, DownloadState>) -> 
                 },
             );
         };
-        zapmomo::kws::model::install_model_to(&dest, false, &mut progress)
+        zapmomo::model_library::asset::install_model_to(&dest, false, &mut progress)
             .map_err(|e| e.to_string())
     })
     .await
@@ -1636,12 +1636,12 @@ fn start_asr_dictate_impl(
 
         // 首次听写自动下载 Silero VAD 模型（~0.6MB，幂等）；失败则停止并报错
         let result = {
-            let mut progress = |p: zapmomo::kws::model::DownloadProgress| {
+            let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
                 let stage = match p.stage {
-                    zapmomo::kws::model::DownloadStage::Downloading => "downloading",
-                    zapmomo::kws::model::DownloadStage::Verifying => "verifying",
-                    zapmomo::kws::model::DownloadStage::Extracting => "extracting",
-                    zapmomo::kws::model::DownloadStage::Done => "done",
+                    zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
+                    zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
+                    zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
+                    zapmomo::model_library::asset::DownloadStage::Done => "done",
                 };
                 let _ = thread_app.emit(
                     "asr-vad-download-progress",
@@ -6667,8 +6667,8 @@ impl Drop for LibraryDownloadGuard {
     }
 }
 
-fn download_stage_str(stage: zapmomo::kws::model::DownloadStage) -> &'static str {
-    use zapmomo::kws::model::DownloadStage::*;
+fn download_stage_str(stage: zapmomo::model_library::asset::DownloadStage) -> &'static str {
+    use zapmomo::model_library::asset::DownloadStage::*;
     match stage {
         Downloading => "downloading",
         Verifying => "verifying",
@@ -6794,7 +6794,7 @@ async fn download_library_model(
             );
         };
         emit("preparing", 0.0, "准备下载…");
-        let mut progress = |p: zapmomo::kws::model::DownloadProgress| {
+        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
             let _ = app.emit(
                 "model-library-download-progress",
                 ModelLibraryProgressPayload {
@@ -6816,7 +6816,7 @@ async fn download_library_model(
                 emit("done", 100.0, "模型安装完成");
                 Ok(())
             }
-            Err(zapmomo::kws::model::ModelError::Cancelled) => {
+            Err(zapmomo::model_library::asset::ModelError::Cancelled) => {
                 emit("cancelled", 0.0, "已取消下载");
                 Ok(())
             }

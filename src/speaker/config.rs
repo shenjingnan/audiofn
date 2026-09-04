@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::settings::{SpeakerSettings, get_models_dir, resolve_env_ref};
-use crate::kws::model;
+use crate::model_library::asset;
 
 /// 声纹模型输入采样率（CAM++ 系列为 16k 单声道，输入会先重采样到此）。
 pub const SPEAKER_SAMPLE_RATE: i32 = 16_000;
@@ -77,7 +77,7 @@ impl ResolvedSpeakerConfig {
 
 /// 用户默认模型目录：`~/.zapmomo/models/<模型名>`。
 pub fn default_model_dir() -> PathBuf {
-    get_models_dir().join(&model::speaker_asset().name)
+    get_models_dir().join(&asset::speaker_asset().name)
 }
 
 /// onnx 默认文件名探测：settings 未显式配置时按模型目录内容选择。
