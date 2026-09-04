@@ -38,11 +38,8 @@ function storageInfo(overrides: Partial<StorageInfo> = {}): StorageInfo {
   return {
     dataDir: null,
     modelsDir: "/zap/.zapmomo/models",
-    companionsDir: "/zap/.zapmomo/companions",
     legacyModelsDir: "/zap/.zapmomo/models",
-    legacyCompanionsDir: null,
     legacyModelsBytes: 1024,
-    legacyCompanionsBytes: 0,
     migrationAvailable: true,
     migrating: false,
     sameVolume: true,
@@ -58,8 +55,6 @@ beforeEach(() => {
   listenHandlers.clear();
   invokeMock.mockImplementation((cmd: string) => {
     switch (cmd) {
-      case "get_hide_dock_icon":
-        return Promise.resolve(false);
       case "get_autostart":
         return Promise.resolve(false);
       case "get_shortcuts":
@@ -84,10 +79,10 @@ describe("SettingsPage 存储位置", () => {
   it("渲染数据目录与迁移行", async () => {
     renderPage();
     expect(await screen.findByText("存储位置")).toBeInTheDocument();
-    // 双路径各占独立文本节点（模型 / 伙伴）
     expect(await screen.findByText("/zap/.zapmomo/models")).toBeInTheDocument();
-    expect(await screen.findByText("/zap/.zapmomo/companions")).toBeInTheDocument();
-    expect(screen.getByText("数据目录（模型 / 伙伴）")).toBeInTheDocument();
+    expect(screen.getByText("数据目录（模型）")).toBeInTheDocument();
+    // 伙伴目录概念已随伴侣功能删除
+    expect(screen.queryByText(/伙伴/)).not.toBeInTheDocument();
     // 小文件不迁移的说明
     expect(screen.getByText(/仍保留在 ~\/.zapmomo/)).toBeInTheDocument();
     expect(await screen.findByText("开始迁移")).toBeInTheDocument();
@@ -194,8 +189,6 @@ describe("SettingsPage 开机自启动", () => {
       switch (cmd) {
         case "get_autostart":
           return Promise.resolve(true);
-        case "get_hide_dock_icon":
-          return Promise.resolve(false);
         case "get_storage_info":
           return Promise.resolve(storageInfo());
         default:
@@ -218,8 +211,6 @@ describe("SettingsPage 开机自启动", () => {
       switch (cmd) {
         case "set_autostart":
           return Promise.reject(new Error("写入系统启动项被拒"));
-        case "get_hide_dock_icon":
-          return Promise.resolve(false);
         case "get_autostart":
           return Promise.resolve(false);
         case "get_storage_info":

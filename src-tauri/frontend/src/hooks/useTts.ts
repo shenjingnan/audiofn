@@ -17,7 +17,7 @@ export interface TtsState {
   setParams: (patch: TtsParamsPatch) => Promise<void>;
   /** 音色列表（模型包内置 + 用户自定义音色库）。 */
   voices: TtsVoice[];
-  /** 当前音色 id（持久化到 `[tts].voice`，即全局默认音色；空 = 内置 leijun）。 */
+  /** 当前音色 id（持久化到 `[tts].voice`，即全局默认音色；空 = 引擎缺省音色）。 */
   selectedVoice: string;
   /** 设定音色并持久化为全局默认音色（写 `[tts].voice`）；失败经 `error` 暴露。 */
   setSelectedVoice: (id: string) => Promise<void>;
@@ -60,7 +60,7 @@ export function useTts(): TtsState {
       const cfg = await api.getTtsConfig();
       setConfig(cfg);
       setConfigError(null);
-      // 载入持久化的默认音色（[tts].voice；未设置则空 = 内置 leijun）
+      // 载入持久化的默认音色（[tts].voice；未设置则空 = 引擎缺省音色）
       setSelectedVoiceLocal(cfg.voice ?? "");
     } catch (e) {
       setConfigError(String(e));
@@ -113,7 +113,7 @@ export function useTts(): TtsState {
     };
   }, []);
 
-  // 设定音色并持久化为全局默认音色（[tts].voice），所有合成（测试/语音会话）生效。
+  // 设定音色并持久化为全局默认音色（[tts].voice），所有合成生效。
   const setSelectedVoice = useCallback(async (id: string) => {
     setSelectedVoiceLocal(id);
     try {
@@ -132,13 +132,12 @@ export function useTts(): TtsState {
       setProgress(null);
       setSynthesizing(true);
       // 收录模型均为参考音频克隆族：自定义音色 → 直接传其 wav+转写；
-      // 否则传音色 id（内置/默认音色，缺省走 auto voice/内置 leijun）
+      // 否则传音色 id（缺省走引擎缺省音色）
       const savedVoice = voices.find((v) => v.custom && v.id === selectedVoice);
       try {
         await api.synthesizeTts({
           text: trimmed,
           speed: opts?.speed ?? null,
-          sid: null,
           voice: savedVoice ? null : selectedVoice || null,
           referenceWav: savedVoice ? savedVoice.wav_path : null,
           referenceText: savedVoice ? savedVoice.reference_text : null,

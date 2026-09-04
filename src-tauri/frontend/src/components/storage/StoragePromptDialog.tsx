@@ -70,8 +70,7 @@ export function StoragePromptDialog({
       <div className="flex items-start gap-2.5">
         <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-text-secondary" />
         <p className="text-sm text-text-muted">
-          模型与角色文件将存放到以下目录。Windows 上默认位置在系统盘，若 C
-          盘空间紧张，建议选择其他磁盘。
+          模型将存放到以下目录。Windows 上默认位置在系统盘，若 C 盘空间紧张，建议选择其他磁盘。
         </p>
       </div>
       <dl className="space-y-3 rounded-lg border border-panel-border px-3.5 py-2.5">

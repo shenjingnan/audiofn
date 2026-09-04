@@ -6,28 +6,26 @@ function stubUserAgent(ua: string) {
 }
 
 describe("toAssetUrl", () => {
-  it("preserves POSIX path segments for relative Live2D resources on macOS", () => {
+  it("preserves POSIX path segments on macOS", () => {
     stubUserAgent(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
     );
-    expect(toAssetUrl("/Users/zap/model/cat.model3.json")).toBe(
-      "asset://localhost//Users/zap/model/cat.model3.json",
+    expect(toAssetUrl("/Users/zap/.zapmomo/tts/hello.wav")).toBe(
+      "asset://localhost//Users/zap/.zapmomo/tts/hello.wav",
     );
   });
 
   it("uses the http virtual-host form on Windows (WebView2 rejects custom schemes)", () => {
     stubUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-    expect(
-      toAssetUrl("C:\\Users\\Administrator\\.zapmomo\\companions\\companion-1\\cat.model3.json"),
-    ).toBe(
-      "http://asset.localhost/C%3A/Users/Administrator/.zapmomo/companions/companion-1/cat.model3.json",
+    expect(toAssetUrl("C:\\Users\\Administrator\\.zapmomo\\tts\\hello.wav")).toBe(
+      "http://asset.localhost/C%3A/Users/Administrator/.zapmomo/tts/hello.wav",
     );
   });
 
   it("normalizes Windows separators and encodes non-ASCII segments", () => {
     stubUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-    expect(toAssetUrl("C:\\Users\\Administrator\\白发天使 2\\曲奇小羊.model3.json")).toBe(
-      "http://asset.localhost/C%3A/Users/Administrator/%E7%99%BD%E5%8F%91%E5%A4%A9%E4%BD%BF%202/%E6%9B%B2%E5%A5%87%E5%B0%8F%E7%BE%8A.model3.json",
+    expect(toAssetUrl("C:\\Users\\Administrator\\我的录音 2\\你好 世界.wav")).toBe(
+      "http://asset.localhost/C%3A/Users/Administrator/%E6%88%91%E7%9A%84%E5%BD%95%E9%9F%B3%202/%E4%BD%A0%E5%A5%BD%20%E4%B8%96%E7%95%8C.wav",
     );
   });
 });

@@ -24,7 +24,7 @@ export const ASR_PRESETS = [
     tagline: "29 语言自动识别 · GPU 加速（macOS Metal / Windows CUDA）· 不支持热词 · 包体约 1.1GB",
     sizeBytes: 1_151_272_416,
     kind: "qwen3_asr",
-    platforms: ["darwin-aarch64", "windows-x86_64"] as const satisfies readonly PlatformId[],
+    platforms: ["darwin-aarch64"] as const satisfies readonly PlatformId[],
   },
 ] as const;
 
@@ -38,7 +38,7 @@ export interface AsrModelSwitchState {
   download: (id: string) => Promise<void>;
   downloadingId: string | null;
   progress: ModelLibraryProgress | null;
-  /** 设为当前模型；识别中切换后自动 stop → start 重启识别使新模型立即生效 */
+  /** 设为当前模型；听写中切换后自动 stop → start 重启听写使新模型立即生效 */
   setCurrent: (id: string) => Promise<void>;
   /** 卸载（managed 删文件；当前/运行中模型后端会拒绝） */
   remove: (id: string) => Promise<void>;
@@ -129,16 +129,16 @@ export function useAsrModelSwitch(): AsrModelSwitchState {
         return;
       }
       await Promise.allSettled([runtimeRef.current.asr.config.refresh(), refresh()]);
-      // 后端只写配置（restart_required）：识别中切换由前端重启识别使新模型立即生效
+      // 后端只写配置（restart_required）：听写中切换由前端重启听写使新模型立即生效
       // （与高级参数保存后的重启同款模式）
       const asr = runtimeRef.current.asr;
-      if (res.runtimeAction === "restart_required" && asr.listening.isListening) {
-        await asr.listening.stop();
-        await asr.listening.start(runtimeRef.current.device || null);
-        if (asr.listening.error) {
-          toast.error(`模型已切换，但重启识别失败：${asr.listening.error}`);
+      if (res.runtimeAction === "restart_required" && asr.dictate.isDictating) {
+        await asr.dictate.stop();
+        await asr.dictate.start(runtimeRef.current.device || null);
+        if (asr.dictate.error) {
+          toast.error(`模型已切换，但重启听写失败：${asr.dictate.error}`);
         } else {
-          toast.success("已切换模型并重启识别");
+          toast.success("已切换模型并重启听写");
         }
       } else {
         toast.success(res.message);

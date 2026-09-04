@@ -29,8 +29,8 @@ function capabilityIssue(
 ): GuideIssue | null {
   switch (capability) {
     case "asr": {
-      const { config, listening } = runtime.asr;
-      if (config.error || listening.error) return { capability, name, kind: "error", href };
+      const { config, dictate } = runtime.asr;
+      if (config.error || dictate.error) return { capability, name, kind: "error", href };
       // config 未加载完成（null）时不判断未配置，避免首帧闪「未配置」卡。
       if (config.config && !config.config.models_present) {
         return { capability, name, kind: "unconfigured", href };

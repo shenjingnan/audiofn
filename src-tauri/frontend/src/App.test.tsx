@@ -94,10 +94,10 @@ beforeEach(() => {
         case "set_asr_enabled":
           asrConfig = { ...asrConfig, enabled: args?.enabled ?? false };
           return Promise.resolve(undefined);
-        case "start_asr_listen":
-        case "stop_asr_listen":
-        case "is_asr_listening":
-          return cmd === "is_asr_listening" ? Promise.resolve(false) : Promise.resolve(undefined);
+        case "start_asr_dictate":
+        case "stop_asr_dictate":
+        case "is_asr_dictating":
+          return cmd === "is_asr_dictating" ? Promise.resolve(false) : Promise.resolve(undefined);
         case "get_tts_config":
           return Promise.resolve({ ...ttsConfig });
         case "set_tts_enabled":
@@ -109,8 +109,6 @@ beforeEach(() => {
           return Promise.resolve([]);
         case "get_shortcuts":
           return Promise.resolve({});
-        case "get_hide_dock_icon":
-          return Promise.resolve(false);
         case "get_autostart":
           return Promise.resolve(false);
         case "get_storage_info":
@@ -155,7 +153,7 @@ describe("App（路由收敛：概览 / 模型 / 设置）", () => {
     expect(within(capabilities).queryByRole("link")).not.toBeInTheDocument();
   });
 
-  it("概览页 ASR 开关调用 start_asr_listen", async () => {
+  it("概览页 ASR 开关只持久化 enabled（听写由配置页控制）", async () => {
     asrConfig = { ...ASR_CONFIG, models_present: true };
     const user = userEvent.setup();
     renderApp("/models");
@@ -163,7 +161,7 @@ describe("App（路由收敛：概览 / 模型 / 设置）", () => {
     await user.click(await screen.findByRole("switch", { name: "语音识别（ASR）开关" }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("set_asr_enabled", { enabled: true });
     });
   });
 
@@ -227,20 +225,6 @@ describe("App（路由收敛：概览 / 模型 / 设置）", () => {
       expect(screen.queryByRole("heading")).not.toBeInTheDocument();
       unmount();
     }
-  });
-
-  it("设置页可切换是否隐藏 Dock / Cmd+Tab 图标", async () => {
-    const user = userEvent.setup();
-    renderApp("/settings");
-
-    const toggle = await screen.findByRole("switch", { name: "隐藏应用图标" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    await user.click(toggle);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("set_hide_dock_icon", { hide: true });
-    });
   });
 
   it("设置页可选择麦克风并持久化到后端", async () => {

@@ -85,32 +85,6 @@ const TTS_CONFIG = {
   voice: null as string | null,
 };
 
-const LLM_CONFIG = {
-  enabled: false,
-  provider: "local",
-  model_path: "/home/user/.zapmomo/models/qwen3-4b.gguf",
-  models_present: false,
-  ready: false,
-  enable_thinking: false,
-  auto_load: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
-  system_prompt: "你是 ZapMomo 的 AI 大脑。",
-  params: {
-    context_size: 8192,
-    batch_size: 512,
-    max_tokens: 512,
-    temperature: 0.7,
-    top_p: 0.8,
-    top_k: 20,
-    min_p: 0.05,
-    repeat_penalty: 1.05,
-    seed: 0,
-    threads: 8,
-    gpu_layers: 0,
-    enable_thinking: false,
-  },
-};
-
 /** 可变 TTS 配置：单个用例可翻转 models_present / enabled 等字段（贴近真实后端）。 */
 let ttsConfig: typeof TTS_CONFIG;
 
@@ -215,14 +189,6 @@ function defaultInvoke(
       return Promise.resolve("参考音频的逐字转写文本");
     case "get_microphone":
       return Promise.resolve("");
-    case "get_llm_config":
-      return Promise.resolve({ ...LLM_CONFIG });
-    case "is_listening":
-      return Promise.resolve(false);
-    case "is_asr_listening":
-      return Promise.resolve(false);
-    case "is_llm_ready":
-      return Promise.resolve(false);
     default:
       return Promise.resolve(undefined);
   }
@@ -511,7 +477,6 @@ describe("TtsPage（语音合成 TTS）", () => {
       expect(invokeMock).toHaveBeenCalledWith("synthesize_tts", {
         text: "你好世界",
         speed: 1,
-        sid: null,
         voice: "leijun-1",
         referenceWav: null,
         referenceText: null,
@@ -530,7 +495,7 @@ describe("TtsPage（语音合成 TTS）", () => {
     renderTtsPage();
     await screen.findByText("语音合成（TTS）配置");
 
-    // 克隆族入口：音色管理可见（区别于 sid 固定模型）
+    // 克隆族入口：音色管理可见
     expect(screen.getByRole("button", { name: "音色管理" })).toBeInTheDocument();
 
     // 音色下拉可选（非禁用占位），占位提示「必须选择克隆音色」（无 auto voice 兜底）
@@ -566,7 +531,7 @@ describe("TtsPage（语音合成 TTS）", () => {
     await user.click(await screen.findByRole("button", { name: "测试语音" }));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    // 克隆族：音色下拉不禁用（区别于 sid 固定占位）、管理音色入口可见
+    // 克隆族：音色下拉不禁用、管理音色入口可见
     expect(screen.getByRole("combobox", { name: "音色" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "管理音色" })).toBeInTheDocument();
 
@@ -661,7 +626,6 @@ describe("TtsPage（语音合成 TTS）", () => {
       expect(invokeMock).toHaveBeenCalledWith("synthesize_tts", {
         text: "用我的声音",
         speed: 1,
-        sid: null,
         voice: null,
         referenceWav: "/home/user/.zapmomo/voices/custom-1.wav",
         referenceText: "克隆参考文本",

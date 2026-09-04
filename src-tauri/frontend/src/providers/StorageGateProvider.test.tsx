@@ -73,7 +73,6 @@ function promptInfo(overrides: Partial<StoragePrompt> = {}): StoragePrompt {
     promptRecommended: true,
     defaultDir: "/home/u/.zapmomo",
     modelsDir: "/home/u/.zapmomo/models",
-    companionsDir: "/home/u/.zapmomo/companions",
     suggestedDir: "/data/ZapMomo",
     suggestedAvailable: 500 * 1024 * 1024 * 1024,
     defaultAvailable: 20 * 1024 * 1024 * 1024,

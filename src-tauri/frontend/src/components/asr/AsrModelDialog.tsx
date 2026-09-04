@@ -10,7 +10,6 @@ import { ASR_PRESETS, useAsrModelSwitch } from "@/hooks/useAsrModelSwitch";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import { visiblePresets } from "@/lib/modelPlatforms";
 import { formatBytes } from "@/lib/utils";
-import { useRuntime } from "@/providers/RuntimeContext";
 import type { LibraryModel } from "@/types/modelLibrary";
 import { asrModelKindLabel } from "./asrMeta";
 
@@ -20,13 +19,11 @@ interface AsrModelDialogProps {
 }
 
 /**
- * 选择识别模型弹窗（与 KWS/LLM 选择模型弹窗同款交互）：
- * 内置预设（未安装→下载；已安装→设为当前 / 卸载；当前→标记）。
- * 识别中切换由 useAsrModelSwitch 自动重启识别；语音会话运行中则下次会话生效。
+ * 选择识别模型弹窗：内置预设（未安装→下载；已安装→设为当前 / 卸载；当前→标记）。
+ * 听写中切换由 useAsrModelSwitch 自动重启听写使新模型立即生效。
  * 卸载确认框嵌套在此弹窗内。
  */
 export function AsrModelDialog({ open, onClose }: AsrModelDialogProps) {
-  const { voice } = useRuntime();
   const switcher = useAsrModelSwitch();
   const [confirmModel, setConfirmModel] = useState<LibraryModel | null>(null);
   /** 正在设为当前的预设 id；期间按钮转圈并禁用（识别中切换含重启识别耗时） */
@@ -51,15 +48,8 @@ export function AsrModelDialog({ open, onClose }: AsrModelDialogProps) {
   return (
     <ModelDialog open={open} onClose={onClose} title="选择识别模型" width="lg">
       <p className="text-xs text-text-muted">
-        内置识别模型：下载后即可设为当前；正在识别时切换会自动重启识别。
+        内置识别模型：下载后即可设为当前；听写中切换会自动重启听写。
       </p>
-
-      {voice.running && (
-        <Alert variant="warning">
-          <CircleAlert className="h-4 w-4" />
-          <AlertDescription>语音会话运行中：切换将在下次语音会话启动时生效。</AlertDescription>
-        </Alert>
-      )}
 
       <div className="space-y-2">
         {/* 后端列表未加载时不渲染任何预设（可见性以后端平台过滤为准） */}

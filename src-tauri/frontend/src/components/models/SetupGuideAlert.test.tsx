@@ -19,7 +19,7 @@ vi.mock("@/providers/RuntimeContext", () => ({
 function makeAsr(o?: {
   modelsPresent?: boolean;
   configError?: string | null;
-  listenError?: string | null;
+  dictateError?: string | null;
   configNull?: boolean;
 }) {
   return {
@@ -28,7 +28,7 @@ function makeAsr(o?: {
       refresh: vi.fn(),
       error: o?.configError ?? null,
     },
-    listening: { isListening: false, pending: false, error: o?.listenError ?? null },
+    dictate: { isDictating: false, pending: false, error: o?.dictateError ?? null },
   };
 }
 
@@ -103,8 +103,8 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
     );
   });
 
-  it("单项错误（listening 层）：直达对应配置页", () => {
-    state.runtime = makeRuntime({ asr: makeAsr({ listenError: "engine boom" }) });
+  it("单项错误（听写层）：直达对应配置页", () => {
+    state.runtime = makeRuntime({ asr: makeAsr({ dictateError: "engine boom" }) });
     renderGuide();
     expect(screen.getByText("语音识别（ASR）出现错误")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看语音识别（ASR）配置" })).toHaveAttribute(
@@ -121,7 +121,7 @@ describe("SetupGuideAlert 未配置/错误引导卡", () => {
 
   it("多项错误：每能力一个直达按钮", () => {
     state.runtime = makeRuntime({
-      asr: makeAsr({ listenError: "boom" }),
+      asr: makeAsr({ dictateError: "boom" }),
       tts: makeTts({ error: "boom" }),
     });
     renderGuide();

@@ -30,8 +30,8 @@ export interface OverviewInput {
   tts: TtsState;
 }
 
-/** 监听型能力 kind → 概览页文案（listening 态展示「识别中」）。 */
-function listenerLabel(kind: ListenerKind, active: "监听中" | "识别中"): string {
+/** 能力 kind → 概览页文案（listening 态展示运行中文案）。 */
+function listenerLabel(kind: ListenerKind, active: string): string {
   switch (kind) {
     case "error":
       return "异常";
@@ -48,16 +48,16 @@ function listenerLabel(kind: ListenerKind, active: "监听中" | "识别中"): s
   }
 }
 
-/** ASR 状态：错误 > 启动中 > 识别中 > 已就绪/未启用 > 未配置（读取持久化 enabled）。 */
+/** ASR 状态：错误 > 启动中 > 听写中 > 已就绪/未启用 > 未配置（读取持久化 enabled）。 */
 function asrStatus(asr: RuntimeState["asr"]): { label: string; tone: OverviewTone } {
   const st = deriveListenerStatus({
-    error: asr.listening.error,
-    pending: asr.listening.pending,
-    isListening: asr.listening.isListening,
+    error: asr.dictate.error,
+    pending: asr.dictate.pending,
+    isListening: asr.dictate.isDictating,
     enabled: asr.config.config?.enabled,
     modelsPresent: asr.config.config?.models_present,
   });
-  return { label: listenerLabel(st.kind, "识别中"), tone: st.tone };
+  return { label: listenerLabel(st.kind, "听写中"), tone: st.tone };
 }
 
 /** TTS 状态：配置错误 > 合成中 > 未配置 > 已关闭 > 已就绪（顺序沿用 ttsMeta：模型缺失优先于已关闭）。 */

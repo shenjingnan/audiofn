@@ -23,7 +23,6 @@ export function SettingsPage() {
     devices: { error: devicesError },
   } = useRuntime();
   const toast = useToast();
-  const [hideDockIcon, setHideDockIcon] = useState<boolean | null>(null);
   const [autostart, setAutostart] = useState(false);
 
   // 存储位置（数据目录）
@@ -42,13 +41,6 @@ export function SettingsPage() {
       setStorageLoading(false);
     }
   };
-
-  useEffect(() => {
-    void api
-      .getHideDockIcon()
-      .then(setHideDockIcon)
-      .catch(() => setHideDockIcon(false));
-  }, []);
 
   // 开机自启动：系统注册状态直读（读失败或旧后端未返回时回退关闭）
   useEffect(() => {
@@ -96,12 +88,6 @@ export function SettingsPage() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
-
-  // 立即应用并持久化；失败时回滚到原值。
-  const handleToggle = (hide: boolean) => {
-    setHideDockIcon(hide);
-    void api.setHideDockIcon({ hide }).catch(() => setHideDockIcon((prev) => !prev));
-  };
 
   // 同款乐观更新；写入系统启动项失败（如组策略禁写）时回滚
   const handleToggleAutostart = (enabled: boolean) => {
@@ -175,24 +161,8 @@ export function SettingsPage() {
 
           <div className="flex items-center justify-between gap-3.5 px-3.5 py-2.5">
             <div className="min-w-0">
-              <dt className="text-sm text-text-primary">隐藏应用图标</dt>
-              <dd className="mt-0.5 text-xs text-text-muted">
-                在 Dock / Cmd+Tab 中隐藏应用图标（仅 macOS）
-              </dd>
-            </div>
-            <Switch
-              aria-label="隐藏应用图标"
-              checked={hideDockIcon ?? false}
-              onCheckedChange={handleToggle}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-3.5 px-3.5 py-2.5">
-            <div className="min-w-0">
               <dt className="text-sm text-text-primary">开机自启动</dt>
-              <dd className="mt-0.5 text-xs text-text-muted">
-                登录系统后自动启动 ZapMomo，桌宠静默出现
-              </dd>
+              <dd className="mt-0.5 text-xs text-text-muted">登录系统后自动启动应用</dd>
             </div>
             <Switch
               aria-label="开机自启动"
@@ -230,7 +200,7 @@ export function SettingsPage() {
             <div>
               <h2 className="text-base font-semibold text-text-primary">存储位置</h2>
               <p className="mt-0.5 text-xs text-text-muted">
-                自定义模型与伙伴模型的存放目录；切换后新下载走新目录，已有模型保持可用。 settings
+                自定义模型的存放目录；切换后新下载走新目录，已有模型保持可用。 settings
                 与日志等小文件仍保留在 ~/.zapmomo
               </p>
             </div>
@@ -240,12 +210,11 @@ export function SettingsPage() {
         <dl className="divide-y divide-divider">
           <div className="flex items-center justify-between gap-3.5 px-3.5 py-2.5">
             <div className="min-w-0">
-              <dt className="text-sm text-text-primary">数据目录（模型 / 伙伴）</dt>
+              <dt className="text-sm text-text-primary">数据目录（模型）</dt>
               <dd className="mt-0.5 space-y-0.5 break-all text-xs text-text-muted">
                 <div>
                   {storageInfo?.modelsDir ?? (storageLoading ? "加载中…" : "~/.zapmomo/models")}
                 </div>
-                <div>{storageInfo?.companionsDir ?? "~/.zapmomo/companions"}</div>
               </dd>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -284,10 +253,7 @@ export function SettingsPage() {
               <div className="min-w-0">
                 <dt className="text-sm text-text-primary">迁移已有模型</dt>
                 <dd className="mt-0.5 text-xs text-text-muted">
-                  旧目录占用{" "}
-                  {formatBytes(
-                    (storageInfo.legacyModelsBytes ?? 0) + (storageInfo.legacyCompanionsBytes ?? 0),
-                  )}
+                  旧目录占用 {formatBytes(storageInfo.legacyModelsBytes ?? 0)}
                   ，迁移后释放空间（跨盘复制可能耗时较长）
                 </dd>
               </div>
@@ -354,7 +320,7 @@ export function SettingsPage() {
         }
       >
         <p className="text-sm text-text-muted">
-          切换后新的模型下载 / 导入将进入新目录，已有模型仍保持可用。
+          切换后新的模型下载将进入新目录，已有模型仍保持可用。
           如需释放旧目录空间，可稍后在「存储位置」执行迁移。 settings 与日志等小文件仍保留在
           ~/.zapmomo。
         </p>

@@ -14,10 +14,9 @@ import { useRuntime } from "@/providers/RuntimeContext";
 
 /**
  * 全局麦克风输入设备选择（Select + 刷新）：绑定 AppRuntimeProvider 的 device/setDevice。
- * 供「设置」页与 KWS 页等任意位置复用；选择结果全局生效（KWS/ASR 共享）并持久化到 backend settings.toml。
+ * 供「设置」页与 ASR 页等任意位置复用；选择结果全局生效并持久化到 backend settings.toml。
  *
- * 监听中也可直接切换设备：`set_microphone` 后端会用新设备自动重启正在运行的监听
- * （KWS / ASR / 语音会话），切换立即生效。
+ * 听写/录音中也可直接切换设备：`set_microphone` 后端会用新设备自动重启采集，切换立即生效。
  *
  * macOS 未授权麦克风时，系统会隐藏输入设备导致列表为空（开发模式下每次重编译授权会失效）；
  * 此时显示「授权麦克风」按钮触发系统授权弹窗，授权成功后重新拉取设备列表。

@@ -11,8 +11,8 @@ export interface AsrDictateState {
 }
 
 /**
- * 离线听写状态管理：镜像 `useAsrListening`，订阅独立的 `asr-dictate-started/stopped` 事件。
- * 仅离线模型（SenseVoice/Whisper）使用；流式模型下开关走 `useAsrListening`。
+ * 免提听写状态管理：初始化时回读后端状态，订阅 `asr-dictate-started/stopped` 事件；
+ * start/stop 包装对应 command 并同步 UI 状态与错误。
  */
 export function useAsrDictate(): AsrDictateState {
   const [isDictating, setIsDictating] = useState(false);

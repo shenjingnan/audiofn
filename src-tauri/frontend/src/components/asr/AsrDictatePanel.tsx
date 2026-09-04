@@ -1,40 +1,19 @@
 import { CircleAlert, Mic, Square } from "lucide-react";
-import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { onAsrVadDownloadProgress } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useRuntime } from "@/providers/RuntimeContext";
 import { ASR_STATUS_COLOR, asrDictateStatus } from "./asrMeta";
 
 /**
- * 免提连续听写面板（离线 SenseVoice/Whisper 模型专用）：
- * 开始/停止听写 + 逐句展示 VAD 分段整句转写结果（最新在上，最新段高亮）。
- * 首次听写自动下载 Silero VAD 模型（约 0.6MB）。
+ * 免提连续听写面板：开始/停止听写 + 逐句展示整句转写结果（最新在上，最新段高亮）。
  */
 export function AsrDictatePanel() {
   const { asr, device } = useRuntime();
   const { isDictating, pending, error, start, stop } = asr.dictate;
   const { segments } = asr.dictateResults;
-  const vadPresent = asr.config.config?.vad_present ?? false;
   const status = asrDictateStatus(asr.dictate);
   const newestId = segments[0]?.id;
-  const [vadProgress, setVadProgress] = useState<string | null>(null);
-
-  // 首次听写自动下载 VAD 模型：跟踪进度，完成后刷新配置（vad_present → true）
-  useEffect(() => {
-    const unlisten = onAsrVadDownloadProgress((p) => {
-      if (p.stage === "done") {
-        setVadProgress(null);
-        void asr.config.refresh();
-      } else {
-        setVadProgress(p.message);
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [asr.config]);
 
   const handleToggle = (on: boolean) => {
     if (on) void start(device || null);
@@ -63,18 +42,6 @@ export function AsrDictatePanel() {
       </div>
 
       <div className="space-y-2 px-3.5 py-3">
-        {vadProgress ? (
-          <Alert variant="warning">
-            <CircleAlert className="h-4 w-4" />
-            <AlertDescription>正在下载 VAD 模型：{vadProgress}</AlertDescription>
-          </Alert>
-        ) : !vadPresent ? (
-          <Alert variant="warning">
-            <CircleAlert className="h-4 w-4" />
-            <AlertDescription>首次听写将自动下载 Silero VAD 模型（约 0.6MB）。</AlertDescription>
-          </Alert>
-        ) : null}
-
         {error && (
           <Alert variant="destructive">
             <CircleAlert className="h-4 w-4" />
@@ -83,9 +50,7 @@ export function AsrDictatePanel() {
         )}
 
         {!isDictating && segments.length === 0 ? (
-          <p className="text-xs text-text-muted">
-            说一句话，停顿后自动转写整句并显示在这里（SenseVoice/Whisper 离线模型专用）。
-          </p>
+          <p className="text-xs text-text-muted">说一句话，停顿后自动转写整句并显示在这里。</p>
         ) : (
           <ul className="max-h-64 space-y-1 overflow-y-auto">
             {segments.map((s) => (

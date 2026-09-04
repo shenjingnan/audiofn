@@ -19,16 +19,14 @@ interface TtsModelDialogProps {
 }
 
 /**
- * 选择合成模型弹窗（与 KWS/ASR/LLM 选择模型弹窗同款交互）：
- * 内置预设（未安装→下载；已安装→设为当前 / 卸载；当前→标记）。
- * TTS 每次合成现场建引擎：切换立即生效（下次合成使用新模型）；
- * 语音会话运行中切换会预构造新引擎做句间热切换（耗时数秒，期间按钮
- * 转圈并禁用），下一句起生效，不打断当前句。卸载确认框嵌套在此弹窗内。
+ * 选择合成模型弹窗：内置预设（未安装→下载；已安装→设为当前 / 卸载；当前→标记）。
+ * TTS 每次合成现场建引擎：切换立即生效（下次合成使用新模型，现场构造引擎耗时数秒，
+ * 期间按钮转圈并禁用）。卸载确认框嵌套在此弹窗内。
  */
 export function TtsModelDialog({ open, onClose }: TtsModelDialogProps) {
   const switcher = useTtsModelSwitch();
   const [confirmModel, setConfirmModel] = useState<LibraryModel | null>(null);
-  /** 正在设为当前的预设 id；期间按钮转圈并禁用（会话运行中含现场构造引擎耗时） */
+  /** 正在设为当前的预设 id；期间按钮转圈并禁用（下次合成需现场构造引擎） */
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const { downloadingId, progress } = switcher;
 
@@ -50,7 +48,7 @@ export function TtsModelDialog({ open, onClose }: TtsModelDialogProps) {
   return (
     <ModelDialog open={open} onClose={onClose} title="选择合成模型" width="lg">
       <p className="text-xs text-text-muted">
-        内置语音合成模型：下载后即可设为当前；语音会话运行中切换需现场构造引擎（数秒），下一句起生效。
+        内置语音合成模型：下载后即可设为当前；切换立即生效（下次合成使用新模型）。
       </p>
 
       <div className="space-y-2">

@@ -1,6 +1,6 @@
 /** 模型库（Model Library）类型定义，与 Rust `model_library` 的 camelCase 序列化一一对应。 */
 
-export type ModelType = "kws" | "asr" | "llm" | "tts";
+export type ModelType = "asr" | "tts";
 export type ModelSource = "registry" | "local";
 export type StorageOwnership = "managed" | "external";
 export type InstallState = "not_installed" | "downloading" | "installed" | "invalid";
@@ -59,11 +59,8 @@ export interface StorageInfo {
   /** 已解析的 data_dir（null = 使用默认 ~/.zapmomo） */
   dataDir: string | null;
   modelsDir: string;
-  companionsDir: string;
   legacyModelsDir: string | null;
-  legacyCompanionsDir: string | null;
   legacyModelsBytes: number;
-  legacyCompanionsBytes: number;
   migrationAvailable: boolean;
   migrating: boolean;
   sameVolume: boolean;
@@ -83,7 +80,6 @@ export interface StoragePrompt {
   /** 默认数据根展示值（~/.zapmomo 展开后的绝对路径） */
   defaultDir: string;
   modelsDir: string;
-  companionsDir: string;
   /** 建议目录（非默认卷中剩余空间最大的固定盘；单盘机器 = null） */
   suggestedDir: string | null;
   /** 建议卷可用字节 */
@@ -117,7 +113,6 @@ export type LibraryProgressStage =
   | "preparing"
   | "downloading"
   | "verifying"
-  | "extracting"
   | "done"
   | "cancelled"
   | "failed";

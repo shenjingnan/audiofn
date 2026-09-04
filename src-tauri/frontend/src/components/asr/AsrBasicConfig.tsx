@@ -1,4 +1,12 @@
-import { CircleAlert, Download, FileAudio, FolderOpen, Mic, Repeat2, Settings2 } from "lucide-react";
+import {
+  CircleAlert,
+  Download,
+  FileAudio,
+  FolderOpen,
+  Mic,
+  Repeat2,
+  Settings2,
+} from "lucide-react";
 import { useState } from "react";
 import { DeviceSelect } from "@/components/DeviceSelect";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -31,7 +39,7 @@ export function AsrBasicConfig({
     devices: { error: devicesError },
   } = useRuntime();
   const { config, error } = asr.config;
-  const { error: listeningError } = asr.listening;
+  const { error: dictateError } = asr.dictate;
   const { downloading, progress, error: downloadError, download } = asr.download;
   const [showPath, setShowPath] = useState(false);
 
@@ -69,11 +77,11 @@ export function AsrBasicConfig({
         </div>
       )}
 
-      {listeningError && (
+      {dictateError && (
         <div className="px-3.5 pb-2">
           <Alert variant="destructive">
             <CircleAlert className="h-4 w-4" />
-            <AlertDescription className="whitespace-pre-wrap">{listeningError}</AlertDescription>
+            <AlertDescription className="whitespace-pre-wrap">{dictateError}</AlertDescription>
           </Alert>
         </div>
       )}

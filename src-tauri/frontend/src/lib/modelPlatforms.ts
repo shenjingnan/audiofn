@@ -7,8 +7,8 @@
  * 出现的 id = 当前平台可见；平台受限的预设只在该 id 出现于后端列表时渲染。
  */
 
-/** 与 registry `platforms` 字段取值对齐的三元组简写。 */
-export type PlatformId = "darwin-aarch64" | "darwin-x86_64" | "linux-x86_64" | "windows-x86_64";
+/** 与 registry `platforms` 字段取值对齐的三元组简写（Windows 构建已随一期裁剪移除）。 */
+export type PlatformId = "darwin-aarch64" | "darwin-x86_64" | "linux-x86_64";
 
 /** 带平台约束的预设条目（`platforms` 缺省 = 全平台可见）。 */
 export interface PresetWithPlatforms {

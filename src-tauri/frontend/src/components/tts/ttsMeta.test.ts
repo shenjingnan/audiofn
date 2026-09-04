@@ -84,7 +84,7 @@ describe("TTS_PRESETS", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("audiocpp 预设 platforms 与 registry 解锁范围一致（darwin-aarch64 + windows-x86_64）", () => {
+  it("audiocpp 预设 platforms 与 registry 解锁范围一致（darwin-aarch64）", () => {
     const audiocppIds = [
       "tts-omnivoice-q8-audiocpp",
       "tts-voxcpm2-q8-audiocpp",
@@ -96,7 +96,7 @@ describe("TTS_PRESETS", () => {
       // 直接访问 p?.platforms 会因属性不全而编译失败
       const p: PresetWithPlatforms | undefined = TTS_PRESETS.find((x) => x.id === id);
       expect(p, id).toBeDefined();
-      expect(p?.platforms, id).toEqual(["darwin-aarch64", "windows-x86_64"]);
+      expect(p?.platforms, id).toEqual(["darwin-aarch64"]);
     }
     // sherpa 族无平台约束
     const zipvoice: PresetWithPlatforms | undefined = TTS_PRESETS.find(
@@ -109,7 +109,7 @@ describe("TTS_PRESETS", () => {
 describe("visiblePresets", () => {
   const presets = [
     { id: "free", name: "free" },
-    { id: "gpu", name: "gpu", platforms: ["darwin-aarch64", "windows-x86_64"] as const },
+    { id: "gpu", name: "gpu", platforms: ["darwin-aarch64", "linux-x86_64"] as const },
   ];
 
   it("后端列表未加载（null）→ 空数组（防闪现不可用预设）", () => {

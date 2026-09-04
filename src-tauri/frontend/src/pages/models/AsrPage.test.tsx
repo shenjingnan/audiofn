@@ -34,23 +34,6 @@ vi.mock("@tauri-apps/api/window", () => ({
   })),
 }));
 
-const KWS_CONFIG = {
-  enabled: false,
-  custom_keywords: "",
-  model_dir: "/home/user/.zapmomo/models/sherpa-onnx-kws-zipformer-zh-en-3M",
-  provider: "cpu",
-  num_threads: 4,
-  sample_rate: 16000,
-  chunk_size: 3200,
-  keywords_score: 1.0,
-  keywords_threshold: 0.25,
-  debug: false,
-  keywords: ["文森特卡索"],
-  models_present: false,
-  model_downloading: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
-};
-
 const ASR_CONFIG: AsrConfigInfo = {
   enabled: false,
   model_type: "zipformer",
@@ -72,7 +55,6 @@ const ASR_CONFIG: AsrConfigInfo = {
   debug: false,
   models_present: false,
   punctuation_present: false,
-  vad_present: false,
   model_downloading: false,
   settings_path: "/home/user/.zapmomo/settings.toml",
 };
@@ -87,37 +69,8 @@ const TTS_CONFIG = {
   settings_path: "/home/user/.zapmomo/settings.toml",
 };
 
-const LLM_CONFIG = {
-  enabled: false,
-  provider: "local",
-  model_path: "/home/user/.zapmomo/models/qwen3-4b.gguf",
-  models_present: false,
-  ready: false,
-  enable_thinking: false,
-  auto_load: false,
-  settings_path: "/home/user/.zapmomo/settings.toml",
-  system_prompt: "你是 ZapMomo 的 AI 大脑。",
-  params: {
-    context_size: 8192,
-    batch_size: 512,
-    max_tokens: 512,
-    temperature: 0.7,
-    top_p: 0.8,
-    top_k: 20,
-    min_p: 0.05,
-    repeat_penalty: 1.05,
-    seed: 0,
-    threads: 8,
-    gpu_layers: 0,
-    enable_thinking: false,
-  },
-};
-
 /** 可变 ASR 配置：单个用例可翻转 models_present 等字段（贴近真实后端）。 */
 let asrConfig: typeof ASR_CONFIG;
-
-/** 模拟后端正在识别的运行时标志（is_asr_listening）。 */
-let asrListening = false;
 
 /** 模拟后端正在听写的运行时标志（is_asr_dictating）。 */
 let asrDictating = false;
@@ -176,25 +129,13 @@ function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
       return Promise.resolve({ version: "0.1.4", product_name: "ZapMomo" });
     case "list_devices":
       return Promise.resolve(["内置麦克风", "USB 麦克风"]);
-    case "get_kws_config":
-      return Promise.resolve({ ...KWS_CONFIG });
     case "get_microphone":
       return Promise.resolve(mic);
     case "set_microphone":
       mic = String(args?.mic ?? "");
       return Promise.resolve(undefined);
-    case "is_listening":
-      return Promise.resolve(false);
     case "get_asr_config":
       return Promise.resolve({ ...asrConfig });
-    case "is_asr_listening":
-      return Promise.resolve(asrListening);
-    case "start_asr_listen":
-      asrListening = true;
-      return Promise.resolve(undefined);
-    case "stop_asr_listen":
-      asrListening = false;
-      return Promise.resolve(undefined);
     case "is_asr_dictating":
       return Promise.resolve(asrDictating);
     case "start_asr_dictate":
@@ -230,10 +171,6 @@ function defaultInvoke(cmd: string, args?: Record<string, unknown>) {
       return Promise.resolve({ ...TTS_CONFIG });
     case "list_tts_voices":
       return Promise.resolve([]);
-    case "get_llm_config":
-      return Promise.resolve({ ...LLM_CONFIG });
-    case "is_llm_ready":
-      return Promise.resolve(false);
     default:
       return Promise.resolve(undefined);
   }
@@ -251,7 +188,6 @@ beforeEach(() => {
   invokeMock.mockReset();
   listeners.clear();
   asrConfig = { ...ASR_CONFIG };
-  asrListening = false;
   asrDictating = false;
   mic = "";
   modelLibrary = defaultAsrModelLibrary();
@@ -275,10 +211,10 @@ describe("AsrPage（语音识别配置）", () => {
   it("模型缺失：Switch 禁用、未下载 Badge、下载按钮可用、测试禁用、警告提示", async () => {
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
-    expect(screen.getByText("未识别")).toBeInTheDocument();
+    expect(screen.getByText("未听写")).toBeInTheDocument();
     expect(screen.getByText("未下载")).toBeInTheDocument();
 
-    const runSwitch = screen.getByRole("switch", { name: "语音识别开关" });
+    const runSwitch = screen.getByRole("switch", { name: "离线听写开关" });
     expect(runSwitch).toBeDisabled();
     expect(runSwitch).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("button", { name: "下载模型" })).toBeEnabled();
@@ -291,7 +227,7 @@ describe("AsrPage（语音识别配置）", () => {
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("已就绪")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "语音识别开关" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "离线听写开关" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "下载模型" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "测试识别" })).toBeEnabled();
   });
@@ -301,9 +237,7 @@ describe("AsrPage（语音识别配置）", () => {
     renderAsrPage();
     await screen.findByText("语音识别（ASR）配置");
     expect(screen.getByText("已就绪")).toBeInTheDocument();
-    // 离线模型下顶部是「离线听写开关」（可开启听写），不再是「语音识别开关」
     expect(screen.getByRole("switch", { name: "离线听写开关" })).toBeEnabled();
-    expect(screen.queryByRole("switch", { name: "语音识别开关" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "测试识别" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "转写文件" })).toBeEnabled();
   });
@@ -362,16 +296,16 @@ describe("AsrPage（语音识别配置）", () => {
     expect(screen.getByRole("button", { name: "复制" })).toBeInTheDocument();
   });
 
-  it("顶部开关 ON 调用 start_asr_listen（默认 null 设备）", async () => {
+  it("顶部开关 ON 调用 start_asr_dictate（默认 null 设备）", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: null });
     });
   });
 
@@ -379,15 +313,15 @@ describe("AsrPage（语音识别配置）", () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     await user.click(screen.getByRole("combobox", { name: "麦克风来源" }));
     await user.click(await screen.findByRole("option", { name: "内置麦克风" }));
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: "内置麦克风" });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: "内置麦克风" });
     });
   });
 
@@ -396,30 +330,30 @@ describe("AsrPage（语音识别配置）", () => {
     mic = "内置麦克风";
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: "内置麦克风" });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: "内置麦克风" });
     });
   });
 
-  it("顶部开关 OFF 调用 stop_asr_listen", async () => {
+  it("顶部开关 OFF 调用 stop_asr_dictate", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: null });
     });
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_asr_listen");
+      expect(invokeMock).toHaveBeenCalledWith("stop_asr_dictate");
     });
   });
 
@@ -427,73 +361,73 @@ describe("AsrPage（语音识别配置）", () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     let resolveStart!: () => void;
     const deferred = new Promise<void>((res) => {
       resolveStart = res;
     });
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
-      cmd === "start_asr_listen" ? deferred : defaultInvoke(cmd, args),
+      cmd === "start_asr_dictate" ? deferred : defaultInvoke(cmd, args),
     );
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
 
-    // 在途：isListening 未落盘，但开关禁用防重复
-    expect(screen.getByRole("switch", { name: "语音识别开关" })).toBeDisabled();
+    // 在途：isDictating 未落盘，但开关禁用防重复
+    expect(screen.getByRole("switch", { name: "离线听写开关" })).toBeDisabled();
 
     await act(async () => {
       resolveStart();
     });
     await waitFor(() => {
-      const sw = screen.getByRole("switch", { name: "语音识别开关" });
+      const sw = screen.getByRole("switch", { name: "离线听写开关" });
       expect(sw).toHaveAttribute("aria-checked", "true");
       expect(sw).toBeEnabled();
     });
   });
 
-  it("asr-stopped 事件使开关回落 OFF", async () => {
+  it("asr-dictate-stopped 事件使开关回落 OFF", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
     await waitFor(() => {
-      expect(screen.getByRole("switch", { name: "语音识别开关" })).toHaveAttribute(
+      expect(screen.getByRole("switch", { name: "离线听写开关" })).toHaveAttribute(
         "aria-checked",
         "true",
       );
     });
 
     act(() => {
-      listeners.get("asr-stopped")?.({ payload: { error: null } });
+      listeners.get("asr-dictate-stopped")?.({ payload: { error: null } });
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("switch", { name: "语音识别开关" })).toHaveAttribute(
+      expect(screen.getByRole("switch", { name: "离线听写开关" })).toHaveAttribute(
         "aria-checked",
         "false",
       );
     });
   });
 
-  it("start_asr_listen 报错：状态「错误」并显示错误详情", async () => {
+  it("start_asr_dictate 报错：状态「错误」并显示错误详情", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
-      cmd === "start_asr_listen"
-        ? Promise.reject("缺少模型文件: encoder-epoch-99-avg-1.int8.onnx")
+      cmd === "start_asr_dictate"
+        ? Promise.reject("缺少模型文件: encoder.onnx")
         : defaultInvoke(cmd, args),
     );
 
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
 
     expect(await screen.findByText("错误")).toBeInTheDocument();
-    expect(screen.getByText("缺少模型文件: encoder-epoch-99-avg-1.int8.onnx")).toBeInTheDocument();
+    expect(screen.getByText("缺少模型文件: encoder.onnx")).toBeInTheDocument();
   });
 
   it("麦克风选择持久化到后端（set_microphone）", async () => {
@@ -557,139 +491,49 @@ describe("AsrPage（语音识别配置）", () => {
     expect(screen.queryByRole("button", { name: /下载模型/ })).not.toBeInTheDocument();
   });
 
-  it("测试对话框：打开显示标题与关闭提示", async () => {
-    asrConfig = { ...asrConfig, models_present: true };
+  it("测试识别（流式模型族）：同样走转写弹窗并自动转写示例音频", async () => {
+    asrConfig = { ...asrConfig, models_present: true, model_type: "zipformer" };
     const user = userEvent.setup();
     renderAsrPage();
+    await screen.findByText("语音识别（ASR）配置");
 
     await user.click(await screen.findByRole("button", { name: /测试识别/ }));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "测试语音识别" })).toBeInTheDocument();
-    expect(screen.getByText("在本窗口内开启的识别，关闭时自动停止。")).toBeInTheDocument();
-  });
-
-  it("测试对话框：未在识别时打开自动开始识别", async () => {
-    asrConfig = { ...asrConfig, models_present: true };
-    const user = userEvent.setup();
-    renderAsrPage();
-
-    await user.click(await screen.findByRole("button", { name: /测试识别/ }));
+    expect(await screen.findByText("转写音频文件")).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("transcribe_audio", { wavPath: null });
     });
-    expect(await screen.findByText("正在识别")).toBeInTheDocument();
-  });
+    expect(await screen.findByText("你好，世界")).toBeInTheDocument();
 
-  it("asr-result 部分结果显示为临时文本，最终结果显示为段", async () => {
-    asrConfig = { ...asrConfig, models_present: true };
-    const user = userEvent.setup();
-    renderAsrPage();
-
-    await user.click(await screen.findByRole("button", { name: /测试识别/ }));
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
-    });
-
-    act(() => {
-      listeners.get("asr-result")?.({
-        payload: {
-          text: "你好",
-          tokens: [],
-          timestamps: null,
-          start_time: null,
-          is_final: false,
-        },
-      });
-    });
-    expect(await screen.findByText("你好")).toBeInTheDocument();
-
-    act(() => {
-      listeners.get("asr-result")?.({
-        payload: {
-          text: "你好，世界。",
-          tokens: [],
-          timestamps: null,
-          start_time: null,
-          is_final: true,
-        },
-      });
-    });
-    expect(await screen.findByText("你好，世界。")).toBeInTheDocument();
-  });
-
-  it("对话框自动启动的识别：关闭时自动停止（startedByDialog）", async () => {
-    asrConfig = { ...asrConfig, models_present: true };
-    const user = userEvent.setup();
-    renderAsrPage();
-
-    await user.click(await screen.findByRole("button", { name: /测试识别/ }));
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
-    });
-
-    await user.keyboard("{Escape}");
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_asr_listen");
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-  });
-
-  it("打开前已在识别：不重复 start、关闭不停止", async () => {
-    asrConfig = { ...asrConfig, models_present: true };
-    const user = userEvent.setup();
-    renderAsrPage();
-    await screen.findByText("未识别");
-
-    // 顶部开关开启识别
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
-    });
-    invokeMock.mockClear();
-
-    // 打开对话框：正在识别，且不重复 start
-    await user.click(screen.getByRole("button", { name: /测试识别/ }));
-    expect(await screen.findByText("正在识别")).toBeInTheDocument();
-    expect(invokeMock).not.toHaveBeenCalledWith("start_asr_listen", expect.anything());
-
-    // 关闭对话框：绝不停止（识别由顶部开关发起）
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
-    expect(invokeMock).not.toHaveBeenCalledWith("stop_asr_listen");
+    // 关闭不再触发第二次转写
+    const calls = invokeMock.mock.calls.filter((c) => c[0] === "transcribe_audio");
+    expect(calls.length).toBe(1);
   });
 
-  it("关闭后重新打开对话框：再次仅一次 start_asr_listen（复用同一 runtime）", async () => {
-    asrConfig = { ...asrConfig, models_present: true };
+  it("测试识别重新打开：再次自动转写一次", async () => {
+    asrConfig = { ...asrConfig, models_present: true, model_type: "qwen3_asr" };
     const user = userEvent.setup();
     renderAsrPage();
+    await screen.findByText("语音识别（ASR）配置");
 
     await user.click(await screen.findByRole("button", { name: /测试识别/ }));
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
-    });
+    expect(await screen.findByText("你好，世界")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_asr_listen");
-    });
-    await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
-    invokeMock.mockClear();
 
     await user.click(screen.getByRole("button", { name: /测试识别/ }));
-
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      const calls = invokeMock.mock.calls.filter((c) => c[0] === "transcribe_audio");
+      expect(calls.length).toBe(2);
     });
-    const startCalls = invokeMock.mock.calls.filter((c) => c[0] === "start_asr_listen");
-    expect(startCalls.length).toBe(1);
+    expect(await screen.findByText("转写音频文件")).toBeInTheDocument();
   });
 
   it("模型信息默认展开显示只读字段", async () => {
@@ -808,16 +652,16 @@ describe("AsrPage（语音识别配置）", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("set_asr_params", expect.anything());
   });
 
-  it("保存参数时正在识别会重启识别使改动生效", async () => {
+  it("保存参数时正在听写会重启听写使改动生效", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
-    // 顶部开关开启识别
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    // 顶部开关开启听写
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: null });
     });
     invokeMock.mockClear();
 
@@ -835,10 +679,10 @@ describe("AsrPage（语音识别配置）", () => {
       expect(invokeMock).toHaveBeenCalledWith("set_asr_params", expect.anything());
     });
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_asr_listen");
+      expect(invokeMock).toHaveBeenCalledWith("stop_asr_dictate");
     });
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: null });
     });
   });
 
@@ -919,7 +763,7 @@ describe("AsrPage（语音识别配置）", () => {
     mic = "内置麦克风";
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     // 切到概览页
     await user.click(screen.getByRole("link", { name: /模型与能力/ }));
@@ -935,7 +779,7 @@ describe("AsrPage（语音识别配置）", () => {
     asrConfig = { ...asrConfig, models_present: true };
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     await user.click(screen.getByRole("button", { name: "切换识别模型" }));
     expect(await screen.findByText("选择识别模型")).toBeInTheDocument();
@@ -951,7 +795,7 @@ describe("AsrPage（语音识别配置）", () => {
     ).toBeInTheDocument();
   });
 
-  it("正在识别时切换模型：set_current_model 后自动重启识别（stop → start）", async () => {
+  it("正在听写时切换模型：set_current_model 后自动重启听写（stop → start）", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     // qwen3 已安装，可设为当前
     modelLibrary = defaultAsrModelLibrary().map((m) =>
@@ -959,20 +803,19 @@ describe("AsrPage（语音识别配置）", () => {
         ? {
             ...m,
             installState: "installed",
-            localPath:
-              "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
+            localPath: "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
             installId: m.id,
           }
         : m,
     );
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
-    // 开启识别
-    await user.click(screen.getByRole("switch", { name: "语音识别开关" }));
+    // 开启听写
+    await user.click(screen.getByRole("switch", { name: "离线听写开关" }));
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: null });
     });
     invokeMock.mockClear();
 
@@ -985,31 +828,30 @@ describe("AsrPage（语音识别配置）", () => {
         id: "asr-qwen3-0.6b-audiocpp",
       });
     });
-    // 后端返回 restart_required → 前端重启识别使新模型立即生效（只带 device，无 keywords）
+    // 后端返回 restart_required → 前端重启听写使新模型立即生效
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("stop_asr_listen");
+      expect(invokeMock).toHaveBeenCalledWith("stop_asr_dictate");
     });
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("start_asr_listen", { device: null });
+      expect(invokeMock).toHaveBeenCalledWith("start_asr_dictate", { device: null });
     });
   });
 
-  it("未识别时切换模型：只写配置，不重启识别", async () => {
+  it("未听写时切换模型：只写配置，不重启听写", async () => {
     asrConfig = { ...asrConfig, models_present: true };
     modelLibrary = defaultAsrModelLibrary().map((m) =>
       m.id === "asr-qwen3-0.6b-audiocpp"
         ? {
             ...m,
             installState: "installed",
-            localPath:
-              "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
+            localPath: "/home/user/.zapmomo/models/qwen3-asr-0.6b-audiocpp",
             installId: m.id,
           }
         : m,
     );
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     await user.click(screen.getByRole("button", { name: "切换识别模型" }));
     await user.click(await screen.findByRole("button", { name: "设为当前" }));
@@ -1019,8 +861,8 @@ describe("AsrPage（语音识别配置）", () => {
         id: "asr-qwen3-0.6b-audiocpp",
       });
     });
-    expect(invokeMock).not.toHaveBeenCalledWith("stop_asr_listen");
-    expect(invokeMock).not.toHaveBeenCalledWith("start_asr_listen");
+    expect(invokeMock).not.toHaveBeenCalledWith("stop_asr_dictate");
+    expect(invokeMock).not.toHaveBeenCalledWith("start_asr_dictate");
   });
 
   it("模型族切换后高级参数草稿按新键集重建，不崩溃（qwen3→zipformer 回归）", async () => {
@@ -1039,7 +881,7 @@ describe("AsrPage（语音识别配置）", () => {
     });
     const user = userEvent.setup();
     renderAsrPage();
-    await screen.findByText("未识别");
+    await screen.findByText("未听写");
 
     await user.click(screen.getByRole("button", { name: "切换识别模型" }));
     await user.click(await screen.findByRole("button", { name: "设为当前" }));

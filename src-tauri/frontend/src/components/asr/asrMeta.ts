@@ -49,29 +49,14 @@ export function modelNameFromDir(dir: string | null | undefined): string | null 
   return dir.split(/[\\/]/).pop() ?? dir;
 }
 
-/** 默认（legacy 一键下载所装的）双语 ASR 模型目录名前缀（不同版本安装布局的日期后缀可能不同）。 */
-const DEFAULT_ASR_DIR_PREFIX = "sherpa-onnx-streaming-zipformer-bilingual-zh-en";
+/** 旧版（sherpa 时代）默认双语 ASR 模型目录名前缀（安装布局的日期后缀可能不同）。 */
+const LEGACY_ASR_DIR_PREFIX = "sherpa-onnx-streaming-zipformer-bilingual-zh-en";
 
 /**
- * 当前模型目录是否为默认双语模型：决定模型缺失时展示 legacy「下载模型」
- * （固定下载双语 + 标点）还是「选择模型」弹窗（可下载/切换其他 ASR 模型）。
+ * 当前模型目录是否为旧版默认模型：命中时模型缺失展示 legacy「下载模型」一键下载
+ * （固定装 registry 默认模型）；否则走「选择模型」弹窗（可下载/切换其他 ASR 模型）。
  */
 export function isDefaultAsrModelDir(dir: string | null | undefined): boolean {
   const name = modelNameFromDir(dir);
-  return !!name && name.startsWith(DEFAULT_ASR_DIR_PREFIX);
-}
-
-/**
- * ASR 运行状态机（判断顺序：错误 > 启动中 > 识别中 > 未识别）。
- * 顶部 Switch 文字用此 label 反映真实识别状态。
- * `configError`（get_asr_config 失败）不进入此状态机，由调用方单独展示。
- */
-export function asrStatus(st: { isListening: boolean; pending: boolean; error: string | null }): {
-  tone: AsrStatusTone;
-  label: string;
-} {
-  if (st.error) return { tone: "error", label: "错误" };
-  if (st.pending) return { tone: "loading", label: "启动中" };
-  if (st.isListening) return { tone: "good", label: "识别中" };
-  return { tone: "idle", label: "未识别" };
+  return !!name && name.startsWith(LEGACY_ASR_DIR_PREFIX);
 }

@@ -29,7 +29,7 @@ vi.mock("@/components/tts/TtsModelDialog", () => ({
 function makeAsr(o?: {
   enabled?: boolean;
   modelsPresent?: boolean;
-  isListening?: boolean;
+  isDictating?: boolean;
   pending?: boolean;
   error?: string | null;
 }) {
@@ -44,12 +44,10 @@ function makeAsr(o?: {
       setEnabled: vi.fn(),
       error: null,
     },
-    listening: {
-      isListening: o?.isListening ?? false,
+    dictate: {
+      isDictating: o?.isDictating ?? false,
       pending: o?.pending ?? false,
       error: o?.error ?? null,
-      start: vi.fn(),
-      stop: vi.fn(),
     },
   };
 }
@@ -108,7 +106,7 @@ beforeEach(() => {
 });
 
 describe("ModelSummary 模型摘要状态", () => {
-  it("ASR：监听出错 → 错误", () => {
+  it("ASR：听写出错 → 错误", () => {
     state.runtime = makeRuntime({
       asr: makeAsr({ modelsPresent: true, enabled: true, error: "engine boom" }),
     });
@@ -124,12 +122,12 @@ describe("ModelSummary 模型摘要状态", () => {
     expectRowStatus(rowFor("asr"), "启动中", "text-blue-600");
   });
 
-  it("ASR：正在识别 → 识别中", () => {
+  it("ASR：听写中 → 听写中", () => {
     state.runtime = makeRuntime({
-      asr: makeAsr({ modelsPresent: true, enabled: true, isListening: true }),
+      asr: makeAsr({ modelsPresent: true, enabled: true, isDictating: true }),
     });
     renderSummary();
-    expectRowStatus(rowFor("asr"), "识别中");
+    expectRowStatus(rowFor("asr"), "听写中");
   });
 
   it("ASR：enabled 且模型在但未识别 → 已就绪（回归：此前误显示未启用）", () => {
@@ -172,7 +170,7 @@ describe("ModelSummary 模型摘要状态", () => {
 });
 
 describe("ModelSummary 摘要行开关", () => {
-  it("ASR：开启 → 持久化 enabled + 立即开始识别", async () => {
+  it("ASR：开启 → 持久化 enabled（听写由配置页运行开关控制）", async () => {
     const user = userEvent.setup();
     const asr = makeAsr({ modelsPresent: true, enabled: false });
     state.runtime = makeRuntime({ asr });
@@ -181,18 +179,16 @@ describe("ModelSummary 摘要行开关", () => {
     await user.click(screen.getByRole("switch", { name: "语音识别（ASR）开关" }));
 
     expect(asr.config.setEnabled).toHaveBeenCalledWith(true);
-    expect(asr.listening.start).toHaveBeenCalledWith(null);
   });
 
-  it("ASR：关闭 → 停止识别 + 持久化 disabled", async () => {
+  it("ASR：关闭 → 持久化 disabled", async () => {
     const user = userEvent.setup();
-    const asr = makeAsr({ modelsPresent: true, enabled: true, isListening: true });
+    const asr = makeAsr({ modelsPresent: true, enabled: true });
     state.runtime = makeRuntime({ asr });
     renderSummary();
 
     await user.click(screen.getByRole("switch", { name: "语音识别（ASR）开关" }));
 
-    expect(asr.listening.stop).toHaveBeenCalled();
     expect(asr.config.setEnabled).toHaveBeenCalledWith(false);
   });
 

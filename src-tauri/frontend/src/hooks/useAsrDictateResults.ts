@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { onAsrDictateResult } from "@/lib/tauri";
 import type { AsrResult } from "@/types/tauri";
-import type { AsrSegment } from "./useAsrResults";
+
+/** 一段已完成的转写结果（听写段无 partial，恒 final）。 */
+export interface AsrSegment {
+  id: number;
+  text: string;
+  at: string;
+}
 
 export interface AsrDictateResultsState {
   /** 听写已产出的整句段（最新在前；听写段无 partial，恒 final） */
@@ -11,8 +17,7 @@ export interface AsrDictateResultsState {
 }
 
 /**
- * 订阅独立的 `asr-dictate-result` 事件（与流式 `asr-result` 完全隔离）。
- * 听写每段整句转写完成后是最终结果，直接入段。
+ * 订阅 `asr-dictate-result` 事件：听写每段整句转写完成后是最终结果，直接入段。
  */
 export function useAsrDictateResults(): AsrDictateResultsState {
   const [segments, setSegments] = useState<AsrSegment[]>([]);

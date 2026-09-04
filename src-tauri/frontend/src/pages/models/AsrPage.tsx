@@ -3,35 +3,29 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AsrAdvancedParams } from "@/components/asr/AsrAdvancedParams";
 import { AsrBasicConfig } from "@/components/asr/AsrBasicConfig";
-import { AsrModelDialog } from "@/components/asr/AsrModelDialog";
 import { AsrDictatePanel } from "@/components/asr/AsrDictatePanel";
+import { AsrModelDialog } from "@/components/asr/AsrModelDialog";
 import { AsrRunControl } from "@/components/asr/AsrRunControl";
 import { AsrTechnicalInfo } from "@/components/asr/AsrTechnicalInfo";
-import { AsrTestDialog } from "@/components/asr/AsrTestDialog";
 import { AsrTranscribeDialog } from "@/components/asr/AsrTranscribeDialog";
 import { isStreamingAsr } from "@/components/asr/asrMeta";
 import { Switch } from "@/components/ui/switch";
 import { useRuntime } from "@/providers/RuntimeContext";
 
 /**
- * 语音识别（ASR）配置页：标题行含识别开关与状态 + 启用偏好 + 基础配置 + 模型信息 + 测试识别对话框。
+ * 语音识别（ASR）配置页：标题行含听写开关与状态 + 启用偏好 + 基础配置 + 模型信息 + 测试识别弹窗。
  */
 export function AsrPage() {
-  const [testOpen, setTestOpen] = useState(false);
   const [switchOpen, setSwitchOpen] = useState(false);
   const [transcribeOpen, setTranscribeOpen] = useState(false);
   const [transcribeAuto, setTranscribeAuto] = useState(false);
   const { asr } = useRuntime();
   const asrEnabled = asr.config.config?.enabled ?? false;
 
-  // 测试识别：流式走实时麦克风弹窗；离线（SenseVoice/Whisper）走转写弹窗自动测试自带示例音频
+  // 测试识别：转写弹窗自动跑模型自带示例音频（wavPath = null）
   const handleTestOpen = () => {
-    if (isStreamingAsr(asr.config.config?.model_type)) {
-      setTestOpen(true);
-    } else {
-      setTranscribeAuto(true);
-      setTranscribeOpen(true);
-    }
+    setTranscribeAuto(true);
+    setTranscribeOpen(true);
   };
 
   return (
@@ -54,9 +48,7 @@ export function AsrPage() {
       <section className="flex items-center justify-between gap-3 rounded-[16px] border border-panel-border bg-panel-background px-5 py-4">
         <div>
           <p className="text-sm font-medium text-text-primary">启用语音识别</p>
-          <p className="mt-0.5 text-xs text-text-muted">
-            语音会话「能识别」的前提；关闭后对话记录不可用
-          </p>
+          <p className="mt-0.5 text-xs text-text-muted">关闭后听写与音频转写均不可用</p>
         </div>
         <Switch
           checked={asrEnabled}
@@ -82,8 +74,6 @@ export function AsrPage() {
       <AsrAdvancedParams />
 
       <AsrModelDialog open={switchOpen} onClose={() => setSwitchOpen(false)} />
-
-      <AsrTestDialog open={testOpen} onClose={() => setTestOpen(false)} />
 
       <AsrTranscribeDialog
         open={transcribeOpen}

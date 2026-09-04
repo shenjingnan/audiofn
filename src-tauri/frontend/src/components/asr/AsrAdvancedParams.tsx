@@ -156,7 +156,7 @@ function NumericRow({ key_, value, onChange }: NumericRowProps) {
 /**
  * 高级参数：线程数 / 采样块大小 / 端点检测（尾随静音 1、2 / 最大句长）/ 空白符惩罚 /
  * 热词增强 / 自动标点 / 调试输出（批保存）。
- * 引擎参数在识别启动时固化：保存后若正在识别会自动重启识别使改动生效。
+ * 引擎参数在听写启动时固化：保存后若正在听写会自动重启听写使改动生效。
  */
 export function AsrAdvancedParams() {
   const { asr, device } = useRuntime();
@@ -252,10 +252,10 @@ export function AsrAdvancedParams() {
     setSaveError(null);
     try {
       await asr.config.setParams(patch);
-      // 引擎参数固化于识别启动时：若正在识别，重启使改动生效
-      if (asr.listening.isListening) {
-        await asr.listening.stop();
-        await asr.listening.start(device || null);
+      // 引擎参数固化于听写启动时：若正在听写，重启使改动生效
+      if (asr.dictate.isDictating) {
+        await asr.dictate.stop();
+        await asr.dictate.start(device || null);
       }
     } catch (e) {
       setSaveError(String(e));

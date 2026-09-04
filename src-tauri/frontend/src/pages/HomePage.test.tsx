@@ -2,7 +2,6 @@ import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import type { RuntimeState } from "@/providers/RuntimeContext";
-import type { VoiceSessionPhase } from "@/types/tauri";
 import { HomePage } from "./HomePage";
 
 const { state } = vi.hoisted(() => ({
@@ -20,7 +19,7 @@ vi.mock("@/providers/RuntimeContext", () => ({
 function makeAsr(o?: {
   enabled?: boolean;
   modelsPresent?: boolean;
-  isListening?: boolean;
+  isDictating?: boolean;
   pending?: boolean;
   error?: string | null;
 }) {
@@ -29,8 +28,8 @@ function makeAsr(o?: {
       config: { enabled: o?.enabled ?? false, models_present: o?.modelsPresent ?? false },
       error: null,
     },
-    listening: {
-      isListening: o?.isListening ?? false,
+    dictate: {
+      isDictating: o?.isDictating ?? false,
       pending: o?.pending ?? false,
       error: o?.error ?? null,
     },
@@ -59,8 +58,6 @@ function makeRuntime(
   return {
     asr: overrides?.asr ?? makeAsr(),
     tts: overrides?.tts ?? makeTts(),
-    // 概览页不再读取以下切片；仅为通过 RuntimeState 断言兜底。
-    voice: { running: false, phase: "idle" as VoiceSessionPhase, enabled: true, error: null },
   } as unknown as RuntimeState;
 }
 
@@ -95,14 +92,14 @@ describe("HomePage 概览", () => {
     expect(await within(capabilities).findByText("已就绪")).toBeInTheDocument();
   });
 
-  it("ASR：识别中 → 识别中（loading 蓝）", async () => {
+  it("ASR：听写中 → 听写中（loading 蓝）", async () => {
     state.runtime = makeRuntime({
-      asr: makeAsr({ enabled: true, modelsPresent: true, isListening: true }),
+      asr: makeAsr({ enabled: true, modelsPresent: true, isDictating: true }),
     });
     renderHome();
 
     const capabilities = await screen.findByLabelText("AI 能力");
-    expect(await within(capabilities).findByText("识别中")).toBeInTheDocument();
+    expect(await within(capabilities).findByText("听写中")).toBeInTheDocument();
   });
 
   it("ASR：模型在但未启用 → 未启用", async () => {

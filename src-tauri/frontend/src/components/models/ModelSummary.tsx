@@ -26,18 +26,15 @@ const STATUS_COLOR: Record<StatusTone, string> = {
 const LISTENER_TEXT: Record<ListenerKind, string> = {
   error: "错误",
   starting: "启动中",
-  listening: "",
+  listening: "听写中",
   ready: "已就绪",
   disabled: "未启用",
   not_configured: "未配置模型",
 };
 
 /** 把共享推导结果映射为本页的行状态。 */
-function listenerRow(st: ListenerStatus, activeLabel: string): { text: string; tone: StatusTone } {
-  return {
-    text: st.kind === "listening" ? activeLabel : LISTENER_TEXT[st.kind],
-    tone: st.tone,
-  };
+function listenerRow(st: ListenerStatus): { text: string; tone: StatusTone } {
+  return { text: LISTENER_TEXT[st.kind], tone: st.tone };
 }
 
 interface SummaryRowData {
@@ -121,7 +118,7 @@ function SummaryRow({ row }: { row: SummaryRowData }) {
 
 /** 模型摘要：分组 List（macOS Settings 风格），非 DataTable。 */
 export function ModelSummary() {
-  const { asr, tts, device } = useRuntime();
+  const { asr, tts } = useRuntime();
   const [refreshing, setRefreshing] = useState(false);
 
   const refreshAll = async () => {
@@ -140,27 +137,15 @@ export function ModelSummary() {
   // ASR 开关绑定**持久化 enabled**（模型与能力页启用/禁用能力，重启保持）
   const asrOn = asr.config?.config?.enabled ?? false;
 
-  /** ASR 开关：持久化「启用」+ 立即开始/停止识别（与配置页一致）。 */
-  const handleAsrToggle = () => {
-    if (asrOn) {
-      if (asr.listening.isListening) void asr.listening.stop();
-      void asr.config.setEnabled(false);
-    } else {
-      void asr.config.setEnabled(true);
-      void asr.listening.start(device || null);
-    }
-  };
-
-  // ASR 行状态：共享推导读取持久化 enabled（启用→已就绪，关闭→未启用）。
+  // ASR 行状态：共享推导读取持久化 enabled 与听写运行态（启用→已就绪，关闭→未启用）。
   const asrSummary = listenerRow(
     deriveListenerStatus({
-      error: asr.listening.error,
-      pending: asr.listening.pending,
-      isListening: asr.listening.isListening,
+      error: asr.dictate.error,
+      pending: asr.dictate.pending,
+      isListening: asr.dictate.isDictating,
       enabled: asr.config?.config?.enabled,
       modelsPresent: asrConfigured,
     }),
-    "识别中",
   );
 
   const rows: SummaryRowData[] = [
@@ -173,7 +158,7 @@ export function ModelSummary() {
       statusTone: asrSummary.tone,
       gearHref: "/models/asr",
       toggled: asrOn,
-      onToggle: handleAsrToggle,
+      onToggle: () => void asr.config.setEnabled(!asrOn),
     },
     {
       accent: "bg-amber-100 text-amber-600",

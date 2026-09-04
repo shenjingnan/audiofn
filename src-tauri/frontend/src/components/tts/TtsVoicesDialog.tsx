@@ -229,7 +229,7 @@ export function TtsVoicesDialog({ open, onClose }: TtsVoicesDialogProps) {
                   </Button>
                 </div>
                 {anyListening && !recording && (
-                  <p className="text-xs text-text-muted">KWS/ASR 正在监听，录音暂不可用。</p>
+                  <p className="text-xs text-text-muted">语音识别正在运行，录音暂不可用。</p>
                 )}
                 {wavPath && (
                   <p className="truncate font-mono text-xs text-text-muted" title={wavPath}>
