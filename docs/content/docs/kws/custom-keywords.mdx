@@ -1,0 +1,33 @@
+---
+title: 自定义唤醒词
+description: 中文直接输入自动转 ppinyin，或使用精确 token 格式
+---
+
+# 自定义唤醒词
+
+**直接输入中文即可**：`--keywords 你好小智` 会由内置的拼音转换（`src/kws/token.rs`）自动把汉字拆成模型
+可编码的 ppinyin token（`你好小智` → `n ǐ h ǎo x iǎo zh ì`），无需任何外部工具；多个关键词用 `/` 或换行分隔。
+
+keywords 文件（默认 `<model_dir>/test_wavs/keywords.txt`，可用 `[kws] keywords_file` 覆盖）每行一个关键词，
+同样支持直接写中文，也支持精确的「token + `@显示词`」格式：
+
+```
+你好小智 @你好小智                      # 中文：直接写，自动转 ppinyin
+w én s ēn t è k ǎ s uǒ @文森特卡索     # 中文：精确 token（声母+带调韵母）
+L AY1 T AH1 P @LIGHT_UP                  # 英文：ARPAbet 音素
+```
+
+## gigaspeech（纯英文）模型
+
+切换到 gigaspeech 模型后，英文唤醒词由包内 `bpe.model`（`src/kws/bpe.rs` 内置的最小
+unigram 分词器）自动切分子词，大小写无关：
+
+```
+HEY MOMO        # 自动切分为 ▁HE Y ▁MO MO，显示词 HEY_MOMO
+alexa           # 小写输入同样得到规范切分 ▁A LE X A
+```
+
+该模型仅支持英文唤醒词；输入中文会得到明确的报错提示（中文请切换到 zh-en 或
+wenetspeech 模型）。
+
+v1 默认使用模型自带的中英混合关键词集（见 `test_wavs/keywords.txt`）。

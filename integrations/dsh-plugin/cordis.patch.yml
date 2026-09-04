@@ -1,0 +1,6 @@
+# zapmomo-bridge bundle patch：把本插件作为一行插入 dsh 的 loader 树。
+# 该文件被 package.json 的 dsh.bundle.patch 引用，`dsh plugin --profile web add`
+# 会将本包注册为 profile 的 bundle 层并在启动时自动应用此 patch。
+- insert:
+    - id: zapmomo-bridge
+      name: '@zapmomo-ai/dsh-plugin'

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "model_id": "kws-zipformer-zh-en-3m",
+      "provider": null,
+      "repo_id": null,
+      "model_type": "kws",
+      "architecture": "sherpa-kws-streaming-zipformer",
+      "compatibility_notes": "内置唤醒词模型，sherpa-onnx KeywordSpotter 验证可用（中英 3M）。"
+    },
+    {
+      "model_id": "asr-streaming-bilingual-zh-en",
+      "provider": null,
+      "repo_id": null,
+      "model_type": "asr",
+      "architecture": "sherpa-asr-streaming-zipformer",
+      "compatibility_notes": "内置流式 ASR（中英双语），sherpa-onnx OnlineRecognizer 验证可用。"
+    },
+    {
+      "model_id": "tts-zipvoice-distill-int8",
+      "provider": null,
+      "repo_id": null,
+      "model_type": "tts",
+      "architecture": "sherpa-tts-zipvoice",
+      "compatibility_notes": "内置 TTS（ZipVoice），sherpa-onnx OfflineTts 验证可用。"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+[files]
+extend-exclude = ["src-tauri/frontend/public/live2dcubismcore.min.js"]
+
+[default.extend-words]
+sherpa = "sherpa"
+onnx = "onnx"
+cpal = "cpal"
+kws = "kws"
+zipformer = "zipformer"
+wenetspeech = "wenetspeech"
+ppinyin = "ppinyin"
+arpabet = "arpabet"
+onnxruntime = "onnxruntime"
+zapmomo = "zapmomo"
+# deflate-flate2（zip crate 特性名）/ flate2 crate 的词干
+flate = "flate"

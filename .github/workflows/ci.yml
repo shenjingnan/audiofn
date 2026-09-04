@@ -1,0 +1,286 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['Cargo.toml', 'Cargo.lock', 'src/**/*.rs', 'tests/**', 'src-tauri/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/**']
+  pull_request:
+    branches: [main]
+    paths: ['Cargo.toml', 'Cargo.lock', 'src/**/*.rs', 'tests/**', 'src-tauri/**', 'package.json', 'pnpm-lock.yaml', '.github/workflows/**']
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux audio deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt, clippy
+
+      - name: Ensure components for project toolchain
+        run: rustup component add rustfmt clippy
+
+      - name: Cache cargo build artifacts
+        # 缓存 ~/.cargo（registry）+ target/，替代原 sherpa-onnx 专用缓存：
+        # target/sherpa-onnx-prebuilt 解压目录名含版本号（sherpa-onnx-v1.13.x-...），
+        # 恢复旧缓存不会造成版本错配。key 由 rustc 版本 + Cargo.lock + .cargo/config.toml
+        # 生成；Cargo.lock 变化时自动回退恢复最近一份缓存，未变依赖仍命中。
+        # 保存前自动剔除 workspace 自身 crate 的产物，避免缓存随每次提交膨胀。
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache sherpa-onnx prebuilt libs
+        # rust-cache 保存前会把 target/ 下非 cargo 构建目录里的文件全部清空，
+        # 恢复出的 target/sherpa-onnx-prebuilt 只剩空目录；sherpa-onnx-sys 的
+        # build.rs 却只判断 lib/ 目录是否存在——存在即跳过下载，到链接阶段才报
+        # 「could not find native static library sherpa-onnx-c-api」。因此预编译
+        # 库不能只依赖 rust-cache 缓存 target/ 的副作用，单独缓存一份，并由
+        # 下一步校验文件是否真的存在。
+        uses: actions/cache@v6
+        with:
+          path: target/sherpa-onnx-prebuilt
+          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Rehydrate sherpa-onnx prebuilt libs
+        # rust-cache 恢复出空目录（目录在、文件全无）时整目录删除，强制
+        # build.rs 重新下载解压；上方缓存命中时本步骤为空操作。
+        shell: bash
+        run: |
+          if [ -d target/sherpa-onnx-prebuilt ] \
+            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
+            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
+            rm -rf target/sherpa-onnx-prebuilt
+          fi
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Lint check
+        run: cargo clippy -- -D warnings
+
+      - name: Install typos-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: typos-cli
+
+      - name: Spell check
+        run: typos .
+
+      # 不在本 job 跑 cargo test：test matrix job 已在 ubuntu/macOS/Windows
+      # 三平台覆盖同一命令；此处重复跑会因 dev-deps 的 feature 统一差异
+      # 触发第二次全量重建（实测多付约 2 分钟）。
+      - name: Build
+        run: cargo build
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux audio deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Cache cargo build artifacts
+        # tarpaulin 不能与 clippy/build 共用同一个 target/ 缓存：tarpaulin 默认
+        # cargo clean 后用插桩 RUSTFLAGS 全量重建，共 job 时 job 结束快照里只剩
+        # 插桩产物，下一 run 的 clippy/build 全部指纹失配，被迫每次从零编译。
+        # 拆成独立 job 后本 job 的 target/ 只有插桩这一种构建上下文，缓存自洽。
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache sherpa-onnx prebuilt libs
+        # 同 check job：rust-cache 会清空 target/ 下非构建目录的文件，预编译库
+        # 需单独缓存并在下一步校验（见 check job 注释）。
+        uses: actions/cache@v6
+        with:
+          path: target/sherpa-onnx-prebuilt
+          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Rehydrate sherpa-onnx prebuilt libs
+        shell: bash
+        run: |
+          if [ -d target/sherpa-onnx-prebuilt ] \
+            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
+            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
+            rm -rf target/sherpa-onnx-prebuilt
+          fi
+
+      - name: Install cargo-tarpaulin
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-tarpaulin
+
+      - name: Generate coverage report
+        # --skip-clean：跳过 cargo clean，让插桩产物跨 run 复用（tarpaulin 官方
+        # 文档推荐的减少重编译首选手段）。稳态下仅重编 workspace 自身 crate；
+        # 若覆盖率数字出现异常，再回退默认 clean 排查。
+        run: cargo tarpaulin --skip-clean --out lcov --output-dir coverage -- --test-threads=1
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  app-check:
+    # zapmomo-app 的平台门控代码（#[cfg(windows)] 等）只有本 job 用 -p 显式选中
+    # 才会编译（workspace default-members 只含根 CLI crate，test job 碰不到
+    # src-tauri）。v0.1.17 release 曾因 cfg(windows) 代码 E0308 在 windows-latest
+    # 首次编译即失败而 PR CI 全绿，故矩阵补 windows；macOS 由开发者本机日常
+    # 编译覆盖，不另开腿。
+    name: Tauri App Check (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    env:
+      # 同 test job：让 cmake 用静态 CRT（/MT）。check/clippy 不链接，目前用不上；
+      # 防止日后把本 job 升级为真实 build 时踩 MSVC 运行库坑。Linux 下 cmake 忽略该变量。
+      CMAKE_MSVC_RUNTIME_LIBRARY: "MultiThreaded"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy
+
+      - name: Ensure components for project toolchain
+        run: rustup component add clippy
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache sherpa-onnx prebuilt libs
+        # 同 check job：rust-cache 会清空 target/ 下非构建目录的文件，预编译库
+        # 需单独缓存并在下一步校验（见 check job 注释）。
+        uses: actions/cache@v6
+        with:
+          path: target/sherpa-onnx-prebuilt
+          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Rehydrate sherpa-onnx prebuilt libs
+        shell: bash
+        run: |
+          if [ -d target/sherpa-onnx-prebuilt ] \
+            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
+            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
+            rm -rf target/sherpa-onnx-prebuilt
+          fi
+
+      - name: Stub audio.cpp sidecar binary (externalBin presence)
+        # tauri 的 build.rs 在 check 阶段就校验 bundle.externalBin 文件存在
+        # （Windows 上额外要求 .exe 后缀）；本 job 只做静态检查不运行 sidecar，
+        # 放置空占位文件即可满足存在性（真实二进制由 release.yml 编译、
+        # 本地开发由 scripts/fetch-audiocpp-dev.sh）。
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
+          SUFFIX=""
+          case "$RUNNER_OS" in Windows) SUFFIX=".exe" ;; esac
+          touch "src-tauri/binaries/audiocpp_server-${TRIPLE}${SUFFIX}"
+          ls -la src-tauri/binaries/
+
+      - name: Lint (app crate)
+        run: cargo clippy -p zapmomo-app -- -D warnings
+
+      - name: Check (app crate)
+        run: cargo check -p zapmomo-app
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux audio deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Cache cargo build artifacts
+        # 按 OS 自动区分缓存线（key 含 rustc 版本与 job 标识）
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache sherpa-onnx prebuilt libs
+        # 同 check job：rust-cache 会清空 target/ 下非构建目录的文件，预编译库
+        # 需单独缓存并在下一步校验（见 check job 注释）。
+        uses: actions/cache@v6
+        with:
+          path: target/sherpa-onnx-prebuilt
+          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Rehydrate sherpa-onnx prebuilt libs
+        shell: bash
+        run: |
+          if [ -d target/sherpa-onnx-prebuilt ] \
+            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
+            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
+            rm -rf target/sherpa-onnx-prebuilt
+          fi
+
+      - name: Tests
+        shell: bash
+        env:
+          # 让 cmake 用静态 CRT（/MT）：MSBuild 不 respect CMAKE_CXX_FLAGS 里的 -MT，
+          # 需通过 CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded 让 vcxproj 的 RuntimeLibrary 设为 /MT。
+          CMAKE_MSVC_RUNTIME_LIBRARY: "MultiThreaded"
+        run: cargo test -- --test-threads=1
+
+  frontend:
+    name: Frontend Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # 版本由根 package.json 的 packageManager 字段决定（pnpm@10.18.2），
+      # 安装范围与 release.yml 完全一致（排除 docs workspace）。
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          # 版本单一来源 .node-version（本地 fnm 与 CI 读同一文件）
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install frontend deps
+        run: pnpm install --filter '!zapmomo-docs' --frozen-lockfile
+
+      - name: Type check (tsc -b)
+        # 与 release.yml tauri beforeBuildCommand 的第一步完全相同。此前前端
+        # 无任何类型检查门禁：vitest 不做类型检查，tsc 错误只在发布构建时
+        # 暴露（v0.1.23 曾因此 PR 全绿、四个平台打包全部失败）。
+        run: pnpm --dir src-tauri/frontend exec tsc -b
+
+      - name: Unit tests (vitest)
+        # test:run = vitest run（CI 必须单次运行，默认 watch 模式会挂住）
+        run: pnpm --dir src-tauri/frontend run test:run

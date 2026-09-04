@@ -1,0 +1,433 @@
+name: Release
+
+# 每次 release-plz 创建 vX.Y.Z tag（推送）后，在原生 runner 上构建
+# Windows / macOS（双架构）/ Linux 的安装包，合并到一个 GitHub Release。
+# 构建成功后自动发布为正式 Release。
+#
+# 发布走 PAT_TOKEN Secret（与 publish.yml 的 release-plz 共用同一 PAT，具备
+# Contents 读写权限）而非默认 GITHUB_TOKEN：GITHUB_TOKEN 产生的事件不触发其他
+# workflow（GitHub 防递归机制），upload-baidu-pan.yml 依赖 release: published
+# 事件自动上传百度网盘，用 GITHUB_TOKEN 发布会让它永远静默不触发（无失败记录）。
+# PAT 过期/失效时下方 Check release token 步骤会提前报错。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # audio.cpp 引擎版本。macOS/Linux 腿据此 tag 源码编译 sidecar；Windows 腿
+  # 据此 tag 下载上游官方预编译包（资产名 audio-<此值>-bin-…，v0.7.x 起 tag
+  # 带 v 前缀）。升级引擎只改这一行（与 tauri.conf.json 同步审查）。
+  AUDIOCPP_REF: v0.7.1
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            runner: macos-latest
+            # triple 供下方 Stage macOS bundles 步骤定位 bundle 产物目录
+            # （target/<triple>/release/bundle），不挪用语义专属的 audiocpp_triple
+            triple: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+            audiocpp_triple: aarch64-apple-darwin
+            # arm64 保留 Metal（大模型可走 GPU；小模型实测 CPU 更快，运行时按 [tts].provider 选择）
+            audiocpp_extra: '-DENGINE_ENABLE_METAL=ON -DENGINE_ENABLE_CUDA=OFF'
+          - platform: macos-latest
+            runner: macos-latest
+            triple: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+            audiocpp_triple: x86_64-apple-darwin
+            # ARM runner 上交叉编译 x86_64：Metal 关闭（Intel Mac 走 CPU）
+            audiocpp_extra: '-DENGINE_ENABLE_METAL=OFF -DENGINE_ENABLE_CUDA=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64'
+          - platform: ubuntu-22.04
+            runner: ubuntu-22.04
+            args: ''
+            audiocpp_triple: x86_64-unknown-linux-gnu
+            audiocpp_extra: '-DENGINE_ENABLE_CUDA=OFF'
+          - platform: windows-latest
+            # Windows 腿不编译引擎：直接消费上游官方预编译包（见下方 Fetch 步骤）。
+            # 历史上曾固定 windows-2022 以绕开 CUDA 12.4 × VS 2026 的 nvcc 前端
+            # 崩溃（run #33 实测 0xC0000005），源码编译整体退役后该约束消失，
+            # 回归滚动 latest。
+            runner: windows-latest
+            args: ''
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sync tauri version to tag
+        # tauri 打包版本取自 tauri.conf.json，需与 release-plz 打出的 vX.Y.Z tag 对齐。
+        # 用 node（各平台 runner 均预装）更新 JSON：Windows 默认 shell 是 PowerShell（bash 语法会报错），
+        # 且 windows runner 未预装 jq。
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          export VERSION
+          node - <<'EOF'
+          const fs = require('fs');
+          const p = 'src-tauri/tauri.conf.json';
+          const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+          j.version = process.env.VERSION;
+          fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+          EOF
+
+      - name: Install Linux deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libasound2-dev
+
+      - name: Setup pnpm
+        # 版本由根 package.json 的 packageManager 字段决定（pnpm@10.18.2）
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          # 版本单一来源 .node-version（本地 fnm 与 CI 读同一文件）
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install frontend deps
+        # 安装除 docs（Next.js）外的所有 workspace：根包（@tauri-apps/cli）+ frontend（React）
+        # 注意：--filter 按包名匹配，docs workspace 的包名为 zapmomo-docs
+        run: pnpm install --filter '!zapmomo-docs' --frozen-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Install macOS cross-compile targets
+        if: matrix.platform == 'macos-latest'
+        # 安装 macOS 交叉编译 target（aarch64 + x86_64）。
+        # dtolnay 装的工具链（1.97.1）与 rust-toolchain.toml 一致；
+        # rustup target add 运行于项目目录，遵循 override 装到激活的工具链上。
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache cargo build artifacts
+        # 缓存 ~/.cargo + target/。macOS 双 target 矩阵用 args 区分缓存线，
+        # 避免两个矩阵条目写同一 key 互相覆盖导致另一半永远冷缓存。
+        # 注意：rust-cache 保存前会清空 target/ 下非 cargo 构建目录里的文件，
+        # sherpa-onnx 预编译库会被清成空目录，因此需单独缓存并校验（下一步）。
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-${{ matrix.args }}
+          # 引擎获取/打包级失败重跑时避免 cargo 全量重编
+          cache-on-failure: true
+
+      - name: Cache sherpa-onnx prebuilt libs
+        # 同 ci.yml check job：rust-cache 恢复出的 sherpa-onnx-prebuilt 可能只剩
+        # 空目录，而 build.rs 只判断目录存在就跳过下载，链接时才报缺库。
+        # macOS 双 target 各自的解压目录名含 arch，共用一个 key 不会互相错配。
+        uses: actions/cache@v6
+        with:
+          path: target/sherpa-onnx-prebuilt
+          key: sherpa-onnx-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Rehydrate sherpa-onnx prebuilt libs
+        shell: bash
+        run: |
+          if [ -d target/sherpa-onnx-prebuilt ] \
+            && [ -z "$(find target/sherpa-onnx-prebuilt -type f -print -quit)" ]; then
+            echo '::warning::target/sherpa-onnx-prebuilt restored empty (rust-cache strips lib files), purging to force re-download'
+            rm -rf target/sherpa-onnx-prebuilt
+          fi
+
+      - name: Build audiocpp_server sidecar
+        if: matrix.platform != 'windows-latest'
+        # TTS/ASR 第二后端（audio.cpp，Apache-2.0）的 sidecar 进程：裁剪构建只编
+        # omnivoice + voxcpm2 + qwen3_tts + qwen3_asr 模型族。DEPLOYMENT_BUILD 把
+        # model specs 编进二进制（否则运行时依赖源码目录的 model_specs/）；
+        # NATIVE_CPU=OFF 保证产物可移植（默认 -march=native 只能在构建机级 CPU
+        # 上跑）。externalBin 要求带 target triple 后缀的文件名
+        # （tauri.conf.json bundle.externalBin）。Windows 腿不编译，改消费上游
+        # 官方预编译包（见下方 Fetch 步骤）。
+        # 引擎版本升级只改 AUDIOCPP_REF（与 tauri.conf.json 同步审查）。
+        shell: bash
+        env:
+          AUDIOCPP_TRIPLE: ${{ matrix.audiocpp_triple }}
+          AUDIOCPP_EXTRA: ${{ matrix.audiocpp_extra }}
+        run: |
+          # AUDIOCPP_REF 来自 workflow 级 env。
+          git clone --depth 1 --branch "$AUDIOCPP_REF" https://github.com/0xShug0/audio.cpp .audiocpp-src
+          # macOS：Apple Clang 不带 OpenMP。native（arm64）job 装 brew libomp 并以
+          # OpenMP_ROOT 定位（keg-only）；x86_64 交叉编译 job 无 x86_64 版 libomp
+          # 可用，关 OpenMP（与该 job METAL=OFF 同等的可移植性取舍）。
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [[ "$AUDIOCPP_EXTRA" == *CMAKE_OSX_ARCHITECTURES* ]]; then
+              export AUDIOCPP_EXTRA="$AUDIOCPP_EXTRA -DENGINE_ENABLE_OPENMP=OFF"
+            else
+              brew install libomp
+              export OpenMP_ROOT="$(brew --prefix libomp)"
+            fi
+          fi
+          # 各 entry 的 audiocpp_extra 显式带 ENGINE_ENABLE_CUDA（均 OFF）；
+          # VULKAN/HIP 两后端全平台关闭。
+          COMMON_FLAGS="-DAUDIOCPP_MODEL_SET=custom -DAUDIOCPP_MODELS=omnivoice,voxcpm2,qwen3_tts,qwen3_asr \
+            -DAUDIOCPP_DEPLOYMENT_BUILD=ON -DENGINE_ENABLE_NATIVE_CPU=OFF \
+            -DENGINE_ENABLE_VULKAN=OFF -DENGINE_ENABLE_HIP=OFF"
+          # shellcheck disable=SC2086
+          cmake -S .audiocpp-src -B .audiocpp-build $COMMON_FLAGS $AUDIOCPP_EXTRA -DCMAKE_BUILD_TYPE=Release
+          JOBS="${NUMBER_OF_PROCESSORS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+          cmake --build .audiocpp-build --target audiocpp_server --config Release --parallel "$JOBS"
+          # 产物名跨生成器有差异（Ninja 单配置落 bin/，VS 多配置落 bin/Release/），find 兜底
+          SRC_BIN=$(find .audiocpp-build -type f -name 'audiocpp_server*' ! -name '*.dSYM*' | head -1)
+          test -n "$SRC_BIN" || { echo '::error::audiocpp_server 产物未找到'; exit 1; }
+          # 防呆：本步骤假设引擎编为单体可执行（externalBin 只打包这一个文件）。
+          # 上游 0.7.x 引入了动态 ggml 后端（Windows 预编译即为 ggml-*.dll 集）；
+          # 若某天 mac/linux 构建也开始产出 dylib/so，单发 exe 会缺库无法启动，
+          # 在这里显式失败，提示扩展打包而不是发出坏包。
+          EXTRA_LIBS=$(find .audiocpp-build -type f \( -name '*.dylib' -o -name '*.so' \) | head -5)
+          if [ -n "$EXTRA_LIBS" ]; then
+            echo '::error::0.7.x 源码编译产出了动态库（动态 ggml 后端？），单 exe 打包会缺库：'
+            echo "$EXTRA_LIBS"
+            exit 1
+          fi
+          mkdir -p src-tauri/binaries
+          cp "$SRC_BIN" "src-tauri/binaries/audiocpp_server-${AUDIOCPP_TRIPLE}"
+          ls -lh src-tauri/binaries/
+
+      - name: Fetch audio.cpp prebuilt (Windows)
+        # Windows 引擎不本地编译，直接消费上游官方预编译包（同 tag、无补丁，
+        # 契约一致性由 src/audiocpp/server_config.rs 的快照单测与引擎冒烟兜底）：
+        #   bin 包    = audiocpp_server.exe + ggml 动态后端 DLL（ggml/ggml-base/
+        #               ggml-cuda/ggml-cpu-*）+ MSVC CRT 运行时
+        #   cudart 包 = CUDA 12.4 动态运行时（cudart/cublas/cublasLt/cufft）
+        # nvcuda.dll（NVIDIA 驱动库）只被 ggml-cuda.dll 硬导入、且 ggml 动态后端
+        # 加载失败即优雅跳过 CUDA——无驱动机器回退 CPU，进程仍能启动。因此
+        # runner 冒烟能过 = 引擎在任意 Windows 机器上都可加载。
+        # 选 cuda12.4 轨：minor version compatibility 下 12.x 运行时可跑在
+        # R527+ 的 12.x 驱动上，覆盖面比 13.x（需 R580+）广。
+        # 上游不发 sha256，信任锚 = 官方仓库 tag + HTTPS。
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          AUDIOCPP_TRIPLE: x86_64-pc-windows-msvc
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/0xShug0/audio.cpp/releases/download/${AUDIOCPP_REF}"
+          BIN_ZIP="audio-${AUDIOCPP_REF}-bin-windows-x64-cuda12.4.zip"
+          RT_ZIP="audio-${AUDIOCPP_REF}-cudart-windows-x64-cuda12.4.zip"
+          mkdir -p .audiocpp-prebuilt/bin .audiocpp-prebuilt/rt
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-connrefused \
+            "$BASE/$BIN_ZIP" -o ".audiocpp-prebuilt/$BIN_ZIP"
+          curl --proto '=https' --tlsv1.2 -fL --retry 3 --retry-connrefused \
+            "$BASE/$RT_ZIP" -o ".audiocpp-prebuilt/$RT_ZIP"
+          unzip -q -o ".audiocpp-prebuilt/$BIN_ZIP" -d .audiocpp-prebuilt/bin
+          unzip -q -o ".audiocpp-prebuilt/$RT_ZIP" -d .audiocpp-prebuilt/rt
+          EXE="src-tauri/binaries/audiocpp_server-${AUDIOCPP_TRIPLE}.exe"
+          RT_DIR="src-tauri/resources/audiocpp"
+          mkdir -p src-tauri/binaries "$RT_DIR"
+          cp .audiocpp-prebuilt/bin/audiocpp_server.exe "$EXE"
+          # 仅取 exe 旁的运行时 DLL（tools/、model_specs/ 是上游 WebUI 附属，不用）
+          find .audiocpp-prebuilt/bin -maxdepth 1 -name '*.dll' -exec cp -f {} "$RT_DIR"/ \;
+          find .audiocpp-prebuilt/rt  -maxdepth 1 -name '*.dll' -exec cp -f {} "$RT_DIR"/ \;
+          # 门禁 1：PE 实体（历史 v0.1.21~23 曾发过 12K 残片）
+          test -s "$EXE" || { echo '::error::引擎 exe 缺失'; exit 1; }
+          [ "$(head -c 2 "$EXE")" = "MZ" ] || { echo '::error::引擎 exe 缺 MZ 头（非 PE）'; exit 1; }
+          [ "$(wc -c <"$EXE")" -gt 5242880 ] || { echo '::error::引擎 exe 过小（残片）'; exit 1; }
+          # 门禁 2：关键 DLL 必须在（缺失时引擎加载报 0xC0000135 → bash 127）
+          for glob in ggml.dll ggml-base.dll ggml-cuda.dll \
+                      cudart64_*.dll cublas64_*.dll cublasLt64_*.dll cufft64_*.dll \
+                      msvcp140.dll vcruntime140.dll; do
+            ls "$RT_DIR"/$glob >/dev/null 2>&1 || {
+              echo "::error::$glob 未收集到（上游包结构变化？）"; exit 1;
+            }
+          done
+          ls -lh "$RT_DIR" | head -30
+          # 门禁 3：运行冒烟。--help 被引擎识别即退出（0）；若引擎直接开始服务
+          # 则由 timeout 杀掉（124），均视为通过。CUDA 运行时 DLL 在正式产物里
+          # 位于安装目录 audiocpp/ 子目录，由应用启动引擎时前置 PATH 解析
+          # （server.rs::augmented_child_path）；CI 里直跑裸 exe 无人前置，必须
+          # 手动加上。
+          export PATH="$(pwd)/$RT_DIR:$PATH"
+          set +e
+          timeout 60 "$EXE" --help >/dev/null 2>&1
+          smoke=$?
+          set -e
+          if [ "$smoke" -ne 0 ] && [ "$smoke" -ne 124 ]; then
+            echo "::error::引擎冒烟失败（exit=$smoke；127/3221225781 = DLL 加载失败）"
+            # 诊断：列出导入 DLL，便于定位缺哪个
+            objdump -p "$EXE" 2>/dev/null | grep "DLL Name" || true
+            exit 1
+          fi
+          echo "smoke exit=$smoke（0/124 视为通过）"
+
+      - uses: tauri-apps/tauri-action@v1
+        with:
+          args: ${{ matrix.args }}
+          # macOS 关闭 action 上传、改为下方手动上传：dmg 需先经
+          # scripts/patch-dmg-gatekeeper.sh 注入「首次打开修复.command」
+          # （未签名应用被 Gatekeeper 报「已损坏」，双击脚本即自动安装 + 修复），
+          # 注入必须发生在产物落盘之后、上传之前，action 的上传时机插不进自定义步骤。
+          uploadWorkflowArtifacts: ${{ runner.os != 'macOS' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 配置证书后由 tauri-action 自动签名/公证 macOS 产物
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Stage macOS bundles and inject Gatekeeper fixer
+        # 产物先拷到 staged/ 扁平目录再上传：upload-artifact 以多行 path 的公共
+        # 祖先为根保留目录结构，直接传 bundle/ 会带出 dmg/、macos/ 子目录，
+        # release job 下载合并后 `for f in *` 就扫不到文件了。
+        # 注意是仓库根 target/ 而非 src-tauri/target/：根 Cargo.toml 定义了
+        # workspace，cargo 把产物统一放在 workspace 根 target/ 下按 triple 分目录。
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          BUNDLE="target/${{ matrix.triple }}/release/bundle"
+          shopt -s nullglob
+          DMGS=("$BUNDLE"/dmg/*.dmg)
+          # 空 glob 防呆：路径写错/布局变化时立刻失败并打出目录树，而不是发布出
+          # 一个没有 dmg 的 Release。只校验 dmg：本仓库未启用 updater，
+          # 不产出 .app.tar.gz（已核实历史 Release 资产）。
+          if [ ${#DMGS[@]} -eq 0 ]; then
+            echo "::error::未找到 dmg 产物: $BUNDLE/dmg/"
+            ls -R "$BUNDLE" || true
+            exit 1
+          fi
+          mkdir -p staged
+          cp "${DMGS[@]}" staged/
+          for dmg in staged/*.dmg; do
+            # tauri bundle_dmg 刚 detach 过同卷名（ZapMomo）镜像，diskarbitration
+            # 释放有延迟，patch 脚本里的 hdiutil attach 偶发 Mount failed
+            # （exit 16；run #34 x64 腿实测，与成功的 arm64 腿只差几秒）。
+            # 脚本 set -e 即刻中止且 WORK 目录每次全新，外层等待后重试即可。
+            for attempt in 1 2 3; do
+              if ./scripts/patch-dmg-gatekeeper.sh "$dmg"; then
+                break
+              elif [ "$attempt" -eq 3 ]; then
+                echo "::error::dmg patch 三次均失败: $dmg"
+                exit 1
+              fi
+              echo "::warning::dmg patch 第 ${attempt} 次失败（疑似卷释放竞态），10 秒后重试"
+              sleep 10
+            done
+          done
+          ls -l staged
+
+      - name: Upload macOS bundles
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v6
+        with:
+          # 双架构同为 macos-latest，platform 无法区分，按 triple 命名；
+          # release job 的 download-artifact 用 pattern '*' 合并，名字只需唯一
+          name: bundle-${{ matrix.triple }}
+          path: staged/*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Guard: only publish from v* tags"
+        # 本 workflow 也可 workflow_dispatch 手动触发（验证构建用），但下方
+        # softprops 会以 github.ref_name（分支名）为 tag 建公开 Release 并触发
+        # upload-baidu-pan.yml，必须硬拦：仅 v* tag 允许走到发布。
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          echo "::error::release job 仅支持 v* tag 触发；workflow_dispatch 只用于验证构建，不发布。"
+          exit 1
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: '*'
+          merge-multiple: true
+
+      - name: Rename installers to user-friendly asset names
+        # Tauri 产物默认名对普通用户不友好：平台术语混杂
+        # （x64-setup / aarch64 / amd64 / x86_64）；
+        # Windows 双安装包、macOS 双架构无选择指引。统一重命名为
+        # <产品>_<平台>_<架构>.<后缀>，Release 资产列表按平台自动分组排序。
+        # 刻意不注入版本号：资产名跨版本保持不变，README 的
+        # releases/latest/download/<文件名> 直链因此永远指向最新版，
+        # 用户无需访问 Release 页即可一键下载。代价是下载到本地的文件名不含
+        # 版本号（0.1.x 阶段可接受）；未来启用 Tauri updater 时需恢复版本化资产。
+        # 未启用 updater（无 .sig 签名文件），重命名不影响任何校验。
+        # 注意：aarch64.dmg 分支必须在 x64.dmg 之前（前者同样匹配 *x64.dmg）。
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in *; do
+            case "$f" in
+              *x64-setup.exe)  mv "$f" "ZapMomo_Windows_x64.exe" ;;
+              *_en-US.msi)     mv "$f" "ZapMomo_Windows_x64.msi" ;;
+              *aarch64.dmg)    mv "$f" "ZapMomo_macOS_arm64.dmg" ;;
+              *x64.dmg)        mv "$f" "ZapMomo_macOS_x64.dmg" ;;
+              *amd64.deb)      mv "$f" "ZapMomo_Linux_amd64.deb" ;;
+              *x86_64.rpm)     mv "$f" "ZapMomo_Linux_x86_64.rpm" ;;
+              *amd64.AppImage) mv "$f" "ZapMomo_Linux_amd64.AppImage" ;;
+            esac
+          done
+          ls -1
+
+      - name: Generate release body (download guide)
+        # 生成带「平台选择表格 + 下载按钮」的正文。资产名不含版本号（见上方
+        # rename step），故链接用 <tag>/<固定文件名> 指向本次发布的具体资产。
+        # generate_release_notes 的自动变更日志会追加在 body 之后（表格在上、changelog 在下）。
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          cat > release_body.md <<EOF
+          ## 📦 下载
+
+          | 系统 | 芯片 / 架构 | 下载 | 说明 |
+          | --- | --- | --- | --- |
+          | **Windows 10 / 11** | x64 | [![Windows](https://img.shields.io/badge/download-Setup.exe-0078D6?logo=windows)](${BASE}/ZapMomo_Windows_x64.exe) | 双击安装；企业批量部署可选 [MSI 版](${BASE}/ZapMomo_Windows_x64.msi) |
+          | **macOS 13+** | Apple Silicon（M1/M2/M3/M4） | [![macOS](https://img.shields.io/badge/download-arm64.dmg-8E8E93?logo=apple)](${BASE}/ZapMomo_macOS_arm64.dmg) | 不确定芯片？见下方说明 |
+          | **macOS 13+** | Intel | [![macOS](https://img.shields.io/badge/download-x64.dmg-8E8E93?logo=apple)](${BASE}/ZapMomo_macOS_x64.dmg) | — |
+          | **Ubuntu / Debian** | amd64 | [![deb](https://img.shields.io/badge/download-amd64.deb-A80030?logo=debian&logoColor=white)](${BASE}/ZapMomo_Linux_amd64.deb) | 或 [AppImage](${BASE}/ZapMomo_Linux_amd64.AppImage) 免安装运行 |
+          | **Fedora / RHEL** | x86_64 | [![rpm](https://img.shields.io/badge/download-x86_64.rpm-294172?logo=fedora&logoColor=white)](${BASE}/ZapMomo_Linux_x86_64.rpm) | 或 [AppImage](${BASE}/ZapMomo_Linux_amd64.AppImage) 免安装运行 |
+
+          > 🍎 **Mac 用户看这里：**
+          > 1. 不确定选哪个？点按左上角  菜单 →「关于本机」：显示「芯片：Apple M…」下载 **arm64** 版；显示「处理器：Intel Core…」下载 **x64** 版。
+          > 2. 首次打开若提示「"ZapMomo" 已损坏，无法打开」，并非真的损坏（应用未做 Apple 签名公证，被 Gatekeeper 拦截）：**双击 dmg 窗口里的「首次打开修复.command」**，自动安装到「应用程序」、清除隔离属性并启动；也可手动执行终端命令 \`xattr -cr /Applications/ZapMomo.app\`。详见 README「macOS 首次打开」一节。
+          EOF
+          cat release_body.md
+
+      - name: Check release token
+        # 发布前确认 PAT_TOKEN 可用，缺失/过期时在这里报清晰错误，避免发布 job
+        # 跑到最后一步才失败（见文件头注释，为何不能用 GITHUB_TOKEN）。该 Secret
+        # 与 publish.yml 的 release-plz 共用，正常不会缺失；报错多半意味着 PAT
+        # 已过期——需换新后同步更新 Secret，否则 release-plz 同样会失败。
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          if [ -z "$PAT_TOKEN" ]; then
+            echo "::error::缺少 PAT_TOKEN Secret（publish.yml 的 release-plz 也在使用，正常不应缺失，请检查是否被误删）。"
+            exit 1
+          fi
+
+      - name: Attach installers to draft release
+        uses: softprops/action-gh-release@v3
+        with:
+          # 显式传 PAT：用 GITHUB_TOKEN 发布的 release 事件不会触发
+          # upload-baidu-pan.yml（GitHub 防递归机制，事件被静默丢弃）
+          token: ${{ secrets.PAT_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body_path: release_body.md
+          generate_release_notes: true
+          files: |
+            *.dmg
+            *.app.tar.gz
+            *.deb
+            *.rpm
+            *.AppImage
+            *.msi
+            *.exe

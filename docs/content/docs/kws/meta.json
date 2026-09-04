@@ -1,0 +1,12 @@
+{
+  "title": "关键词唤醒词（KWS）",
+  "pages": [
+    "index",
+    "quick-start",
+    "model",
+    "commands",
+    "configuration",
+    "custom-keywords",
+    "testing"
+  ]
+}

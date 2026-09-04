@@ -1,0 +1,30 @@
+---
+title: 桌面应用（Tauri 2）
+description: KWS 控制面板的桌面 GUI，三平台安装包
+---
+
+# 桌面应用（Tauri 2）
+
+复用同一套 KWS / 音频 / 配置逻辑的桌面 GUI：KWS 控制面板（选择麦克风、开始/停止监听、附加关键词直接输中文、实时显示检测结果、查看模型配置与缺失提示）。代码在 `src-tauri/`，前端为原生 HTML/CSS/JS（无构建链）。
+
+```bash
+# 安装 Tauri CLI（首次）
+pnpm install
+
+# 开发模式（热重载，需已下载模型：cargo run -- kws install-model）
+pnpm tauri dev
+
+# 构建当前平台的安装包（macOS 产出 .app/.dmg）
+pnpm tauri build
+```
+
+> 打包版内置「下载模型」按钮：首次监听时若缺模型，在「配置」面板点击即可自动
+> 下载到 `~/.zapmomo/models/<模型名>`（也可用 `zapmomo kws install-model`）。
+> macOS 未签名 dmg 首次打开若被 Gatekeeper 拦截（提示「已损坏，无法打开」）：
+> Release 产物已内置「首次打开修复.command」，双击即可自动安装并修复（见 README
+> 「macOS 首次打开」）；本地 `pnpm tauri build` 出的 dmg 未经注入，需右键 →「打开」，
+> 或执行 `xattr -dr com.apple.quarantine <应用路径>`。
+
+## 相关页面
+
+- [deepseek-harness 集成（dsh 桥）](/docs/desktop-app/dsh-bridge) — 桌宠实时感知 dsh 任务状态，气泡 + 语音播报

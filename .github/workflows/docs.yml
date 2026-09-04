@@ -1,0 +1,43 @@
+name: Docs
+
+# 构建验证 Fumadocs 文档站（静态导出）。
+# 实际部署由 Cloudflare Pages Git 集成完成（仓库关联 zapmomo-docs 项目），
+# 此处保留 PR 构建校验作为 GitHub 侧快速反馈。
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        # 版本由根 package.json 的 packageManager 字段决定（pnpm@10.18.2）
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test docs (platform detection)
+        run: pnpm --filter zapmomo-docs test
+
+      - name: Build docs (static export)
+        run: pnpm --filter zapmomo-docs build

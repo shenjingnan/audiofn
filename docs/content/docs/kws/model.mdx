@@ -1,0 +1,26 @@
+---
+title: 模型来源与校验
+description: 模型不随代码分发，按 manifest.json 清单下载并校验
+---
+
+# 模型来源与校验
+
+模型**不随代码分发**，由 CLI 内置的 `kws install-model` 命令（或 `scripts/download-kws-model.sh`）按 `models/manifest.json` 清单下载：
+
+- **清单** `models/manifest.json`（随仓库）记录每个模型的 `name / version / source / sha256 / license`
+- **校验**：下载后对整包计算 sha256 与清单比对，**不匹配即删除报错**；解压先到临时目录再原子移动，避免留下损坏的半截模型
+- **幂等**：模型已存在且完整则跳过
+- **合规**：第三方来源与许可见 `models/THIRD_PARTY_NOTICES.md`
+- 后续 ASR / TTS 等模型（可能超过 100MB）将沿用同一套清单机制，按需下载
+
+## 可用模型
+
+桌面端「模型与能力 → 唤醒词（KWS）」行内可一键下载并在多个模型间切换（正在监听时切换会自动重启监听）；也可在「模型库」页下载：
+
+| 模型 | 语言 | 说明 |
+| --- | --- | --- |
+| `sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20` | 中英混合 | 默认模型，支持中英文唤醒词（中文转拼音、英文转音素） |
+| `sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01` | 纯中文 | WenetSpeech 1 万小时训练的轻量模型；英文唤醒词不可用 |
+| `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01` | 纯英文 | GigaSpeech 1 万小时训练的轻量模型（17MB）；英文唤醒词经包内 `bpe.model` 切分子词，中文唤醒词不可用 |
+
+三个模型的包内文件名不同（zh-en 为 `encoder-epoch-13-...` 系列、自带 `test_wavs/keywords.txt`；wenetspeech 与 gigaspeech 为 `encoder-epoch-12-...` 系列、自带 `test_wavs/test_keywords.txt`，gigaspeech 另含 `bpe.model`）。**未在 `[kws]` 段显式配置文件名时，程序会按模型目录内容自动探测**，切换模型无需手改 `encoder` / `keywords_file` 等配置。

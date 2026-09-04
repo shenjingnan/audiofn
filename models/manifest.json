@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "name": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
+      "role": "wake-word",
+      "version": "2025-12-20",
+      "archive": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+      "sha256": "68447f4fbc67e70eee3a93961f36e81e98f47aef73ce7e7ca00885c6cd3616a6",
+      "size_bytes": 32885699,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
+      "role": "asr",
+      "version": "2023-02-20",
+      "archive": "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
+      "sha256": "27ffbd9ee24ad186d99acc2f6354d7992b27bcab490812510665fa8f9389c5f8",
+      "size_bytes": 511274346,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12",
+      "role": "punctuation",
+      "version": "2024-04-12",
+      "archive": "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2",
+      "sha256": "50f73f8cccffc2303999fda28b785ffcffbd7ea442c47385c30b9d045ee6afc3",
+      "size_bytes": 279028058,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+      "role": "tts",
+      "version": "distill-int8",
+      "kind": "archive",
+      "archive": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
+      "sha256": "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
+      "size_bytes": 109162785,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+      "role": "tts-vocoder",
+      "version": "distill-int8",
+      "kind": "raw",
+      "archive": "vocos_24khz.onnx",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "sha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+      "size_bytes": 54157409,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "silero-vad",
+      "role": "asr-vad",
+      "version": "v5",
+      "kind": "raw",
+      "archive": "silero_vad.onnx",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+      "size_bytes": 643854,
+      "license": "MIT"
+    },
+    {
+      "name": "omnivoice-audiocpp",
+      "role": "tts-audiocpp-omnivoice",
+      "version": "q8_0",
+      "kind": "raw",
+      "archive": "omnivoice-q8_0.gguf",
+      "source": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/OmniVoice-GGUF/omnivoice-q8_0.gguf",
+      "sha256": "2f4be637278043c6842de5b85d681532030e9eb6ffe0f8b0e320f68238e3da8b",
+      "size_bytes": 1350288416,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "voxcpm2-audiocpp",
+      "role": "tts-audiocpp-voxcpm2",
+      "version": "q8_0",
+      "kind": "raw",
+      "archive": "voxcpm2-q8_0.gguf",
+      "source": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/VoxCPM2-GGUF/voxcpm2-q8_0.gguf",
+      "sha256": "c8e01ab4416011e12a28f24ede298a1aa5ce64b43f8e8aaad53b1e2fe7c96432",
+      "size_bytes": 2955000480,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "qwen3-tts-06b-base-audiocpp",
+      "role": "tts-audiocpp-qwen3-06b",
+      "version": "q8_0",
+      "kind": "raw",
+      "archive": "qwen3-tts-12hz-0.6b-base-q8_0.gguf",
+      "source": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-TTS-12Hz-0.6B-Base-GGUF/qwen3-tts-12hz-0.6b-base-q8_0.gguf",
+      "sha256": "771420bd20ff5f35407b4fa9cf9c5461e153800d3d772ef51c9febc0a520855d",
+      "size_bytes": 1991211136,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "qwen3-tts-17b-base-audiocpp",
+      "role": "tts-audiocpp-qwen3-17b",
+      "version": "q8_0_v2",
+      "kind": "raw",
+      "archive": "qwen3-tts-12hz-1.7b-base-q8_0_v2.gguf",
+      "source": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-TTS-12Hz-1.7B-Base-GGUF/qwen3-tts-12hz-1.7b-base-q8_0_v2.gguf",
+      "sha256": "b55e06c7890d43c208d15aed8b4ed3f18215f295e47d5960e061b15bff338ab0",
+      "size_bytes": 2695175104,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "qwen3-asr-0.6b-audiocpp",
+      "role": "asr-audiocpp-qwen3-06b",
+      "version": "q8_0",
+      "kind": "raw",
+      "archive": "qwen3-asr-0.6b-q8_0.gguf",
+      "source": "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-ASR-0.6B-GGUF/qwen3-asr-0.6b-q8_0.gguf",
+      "sha256": "6c44ec2fb4cee513892d7863c1fcc3ea6b699ffa4d899b0ef4ab19956d9544f7",
+      "size_bytes": 1151272416,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "3dspeaker-speech-campplus-sv-zh-cn-16k-common",
+      "role": "speaker-embedding",
+      "version": "2023-12-08",
+      "kind": "raw",
+      "archive": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+      "sha256": "f682b514c05d947ee3fa91cd6ec6c5c7543479a128373fa29b1faedccd21fd11",
+      "size_bytes": 28281138,
+      "license": "Apache-2.0"
+    }
+  ]
+}

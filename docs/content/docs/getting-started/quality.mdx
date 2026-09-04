@@ -1,0 +1,24 @@
+---
+title: 测试与代码质量
+description: 测试、格式化、Lint 与覆盖率工具链
+---
+
+# 测试与代码质量
+
+项目接入了一站式代码质量工具链：`cargo fmt` / `clippy` / `typos` / `tarpaulin` / codecov。
+
+```bash
+# 运行测试
+cargo test                          # 运行测试
+cargo test -- --test-threads=1      # 单线程测试（避免 env 竞争）
+
+# 格式与 Lint
+cargo fmt --check                   # 格式检查
+cargo clippy -- -D warnings         # 严格 Lint 检查
+
+# 完整检查（CI 同款）
+cargo fmt --check && cargo clippy -- -D warnings && cargo test
+
+# 覆盖率
+cargo tarpaulin                     # 生成覆盖率报告
+```

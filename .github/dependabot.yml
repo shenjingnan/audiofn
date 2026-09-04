@@ -1,0 +1,53 @@
+version: 2
+updates:
+  - package-ecosystem: 'cargo'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 10
+    labels:
+      - 'dependencies'
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    ignore:
+      # windows crate 0.62 与 tauri 2.x 生态（tao/muda/tray-icon 仍依赖 windows 0.61）
+      # 不兼容：升级后依赖图并存两个版本，window.hwnd() 返回的 0.61 HWND 无法传入
+      # 0.62 的 SetWindowPos，src-tauri 在 Windows 上编译失败（#167）。
+      # 待 tauri 上游跟进 windows 0.62 后移除本 ignore 一并升级。
+      - dependency-name: 'windows'
+        update-types: ['version-update:semver-minor', 'version-update:semver-major']
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 5
+    labels:
+      - 'ci'
+      - 'dependencies'
+    commit-message:
+      prefix: 'ci'
+      include: 'scope'
+
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 10
+    labels:
+      - 'dependencies'
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    ignore:
+      # pixi.js 8 与 pixi-live2d-display 0.4.0（依赖 PIXI v6/v7 API）不兼容，
+      # 升级会导致 Live2D 初始化失败、角色不渲染（#83 / #174 两次踩坑）。
+      - dependency-name: 'pixi.js'
+        update-types: ['version-update:semver-major']

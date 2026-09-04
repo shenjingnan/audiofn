@@ -1,0 +1,14 @@
+---
+title: 测试
+description: 常规测试与模型相关测试
+---
+
+# 测试
+
+```bash
+# 常规测试（不依赖模型）
+cargo test -- --test-threads=1
+
+# 模型相关测试（需先下载模型）
+./scripts/run-kws-model-tests.sh
+```

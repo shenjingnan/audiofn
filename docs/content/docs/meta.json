@@ -1,0 +1,13 @@
+{
+  "pages": [
+    "index",
+    "---指南---",
+    "getting-started",
+    "kws",
+    "desktop-app",
+    "---开发---",
+    "development",
+    "contributing",
+    "license"
+  ]
+}

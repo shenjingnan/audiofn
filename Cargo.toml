@@ -1,0 +1,123 @@
+[workspace]
+members = ["src-tauri"]
+default-members = ["."]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.28"
+edition = "2024"
+# 统一使用固定工具链 1.97.1（见 rust-toolchain.toml）；最低支持版本 1.97
+rust-version = "1.97"
+description = "An open-source, real-time desktop AI companion with voice, memory, and a customizable virtual character."
+license = "GPL-3.0-only"
+
+[package]
+name = "zapmomo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+
+# 显式命名：默认 bin 名 = 包名 `zapmomo`，与 src-tauri 的 bin `ZapMomo` 仅大小写
+# 不同——Windows 的 target 目录大小写不敏感，二者会互相覆盖（GUI / CLI 变成
+# 对方的二进制，`tauri dev` 启动后打印 CLI 帮助即此症）。
+[[bin]]
+name = "zapmomo-cli"
+path = "src/main.rs"
+
+[dependencies]
+# CLI 框架
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+
+# 音频采集（麦克风）
+cpal = "0.18"
+
+# 音频播放（TTS 输出到扬声器，语音会话用）
+# default-features=false 只启用 playback（cpal 输出后端），不编 mp3/flac/vorbis 解码器
+# （会话直接喂 f32 SamplesBuffer，无需解码器）
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
+
+# 关键词检测（KWS），默认 static 特性：构建时下载预编译库
+sherpa-onnx = "1.13"
+
+# wav 解码（audio.cpp sidecar 返回 wav bytes → f32 样本；纯 Rust 零传递依赖）
+hound = "3.5"
+
+# base64 解码（audio.cpp SSE 流式 delta 载荷；纯 Rust 零传递依赖）
+base64 = "0.23"
+
+# HTTP 客户端（OpenAI 兼容 Responses / llama.cpp-server / audio.cpp sidecar；
+# multipart 供 ASR 转写上传 wav）
+reqwest = { version = "0.13", features = ["blocking", "json", "multipart"] }
+
+# 远程 LLM（OpenAI 兼容 Chat Completions：智谱 GLM / DeepSeek / OpenRouter / llama-server 等）
+# 0.41 起 API 域按 feature 拆分，default 仅 rustls；只需 chat-completion
+async-openai = { version = "0.41", features = ["chat-completion"] }
+
+# Anthropic 原生 Messages API provider（消息/流式/tool use 原语；agent 编排为自研，
+# 只用 genai 的传输层能力，不用其 agent 抽象）
+genai = "0.6"
+
+# 汉字 → 带声调拼音（把用户输入的原始中文关键词转成模型可编码的 ppinyin token）
+pinyin = "0.11"
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# 系统资源检测（audio.cpp sidecar 残留进程按 pid 存活检查与清理）
+sysinfo = "0.39"
+
+# dsh 桥：loopback HTTP 接收 deepseek-harness 插件推送的任务事件
+tiny_http = "0.12"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1"
+
+# 错误处理
+thiserror = "2"
+anyhow = "1"
+
+# Ctrl-C 信号处理（语音会话 `voice run` 优雅退出）
+ctrlc = "3"
+
+# 时间处理
+chrono = "0.4"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+
+# 模型下载安装（HTTP + sha256 校验 + tar.bz2 解压）
+# platform-verifier：用系统证书存储校验 TLS——国内用户常开杀软/代理的 HTTPS
+# 解密（CA 只装在系统存储），ureq 默认的打包根证书（WebPki）会验证失败。
+ureq = { version = "3", features = ["socks-proxy", "platform-verifier"] }
+sha2 = "0.11"
+hex = "0.4"
+tar = { version = "0.4", default-features = false }
+bzip2 = "0.6"
+
+# 角色包分享（导出/导入 .zip）：仅 deflate 读写，不开 aes/lzma/zstd 等重特性
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+
+# --- 可选依赖（按需取消注释） ---
+# url = "2"                                              # URL 解析
+futures-util = "0.3"                                     # 异步流处理（async-openai SSE 流）
+
+# macOS 麦克风权限请求（AVCaptureDevice requestAccess，弹系统授权窗）。
+# 仅 macOS target 编译：cpal 枚举输入设备在未授权时为空，需显式请求权限后恢复。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# 发布构建：减小编译产物/安装包体积
+[profile.release]
+lto = "thin"
+strip = "symbols"

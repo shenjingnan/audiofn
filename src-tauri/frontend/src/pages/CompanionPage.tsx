@@ -1,0 +1,1079 @@
+import { open, save } from "@tauri-apps/plugin-dialog";
+import {
+  CircleAlert,
+  CircleHelp,
+  FileArchive,
+  FolderOpen,
+  Image as ImageIcon,
+  Pencil,
+  Share2,
+  Sparkles,
+  Star,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { CompanionVoiceUploadDialog } from "@/components/companions/CompanionVoiceUploadDialog";
+import { KwsTestDialog } from "@/components/kws/KwsTestDialog";
+import type { Live2dCatalog } from "@/components/live2d/previewManager";
+import type { SharedLive2dStageHandle } from "@/components/live2d/SharedLive2dStage";
+import { SharedLive2dStage } from "@/components/live2d/SharedLive2dStage";
+import { ModelDialog } from "@/components/models/ModelDialog";
+import { isCloneTtsKind } from "@/components/tts/ttsMeta";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCompanionLibrary } from "@/hooks/useCompanionLibrary";
+import { isCharacterFormat, isStaticImageFormat } from "@/lib/companionFormat";
+import { api, toAssetUrl } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
+import type { CompanionModelInfo } from "@/types/tauri";
+
+/**
+ * 把 Live2D 渲染画布截取为缩小的 PNG 字节数组（供保存为封面）。
+ * 等比缩小到最长边 maxSize，避免封面文件过大。
+ */
+function canvasToPngBytes(canvas: HTMLCanvasElement, maxSize = 256): number[] {
+  const scale = Math.min(1, maxSize / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * scale));
+  const h = Math.max(1, Math.round(canvas.height * scale));
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext("2d");
+  if (!ctx) return [];
+  ctx.drawImage(canvas, 0, 0, w, h);
+  const base64 = out.toDataURL("image/png").split(",")[1];
+  if (!base64) return [];
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return Array.from(bytes);
+}
+
+/** 左侧列表项：placeholder 缩略图 + 名称 + 打开资产/重命名/移除 + active Badge + selected 高亮。 */
+function CompanionListItem({
+  model,
+  selected,
+  isActive,
+  exporting,
+  onSelect,
+  onRename,
+  onRequestRemove,
+  onOpenAssets,
+  onExport,
+}: {
+  model: CompanionModelInfo;
+  selected: boolean;
+  isActive: boolean;
+  /** 该伙伴的 .zip 导出进行中（按钮转 spinner 并禁用）。 */
+  exporting: boolean;
+  onSelect: () => void;
+  onRename: (id: string, name: string) => void;
+  onRequestRemove: (model: CompanionModelInfo) => void;
+  onOpenAssets: (id: string) => void;
+  onExport: (model: CompanionModelInfo) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(model.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** 防止 Enter 提交与 onBlur 提交重复触发（blur 在 setEditing 后可能还会跑一次）。 */
+  const doneRef = useRef(false);
+
+  // 进入编辑态：选中全部文本，方便直接覆盖。
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const startEdit = useCallback(
+    (e: ReactMouseEvent) => {
+      e.stopPropagation();
+      setDraft(model.name);
+      doneRef.current = false;
+      setEditing(true);
+    },
+    [model.name],
+  );
+
+  const commitEdit = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    const trimmed = draft.trim();
+    setEditing(false);
+    if (trimmed && trimmed !== model.name) {
+      onRename(model.id, trimmed);
+    }
+  }, [draft, model.id, model.name, onRename]);
+
+  const cancelEdit = useCallback(() => {
+    doneRef.current = true;
+    setEditing(false);
+  }, []);
+
+  return (
+    <div
+      data-testid={`companion-item-${model.id}`}
+      className={cn(
+        "group relative flex items-center gap-1 rounded-lg border px-3 py-2 transition-colors",
+        selected ? "border-primary/60 bg-primary/5" : "border-transparent hover:bg-muted/60",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+      >
+        {/* 缩略图：优先模型封面图，无则占位图标（封面加载失败时隐藏，露出占位） */}
+        <span
+          className={cn(
+            "relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted",
+            selected ? "text-primary" : "text-muted-foreground",
+          )}
+        >
+          <Sparkles className="h-5 w-5" />
+          {model.cover_image && (
+            <img
+              src={toAssetUrl(model.cover_image)}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium text-text-primary">{model.name}</span>
+            {isActive && (
+              <Badge
+                variant="outline"
+                className="shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700"
+              >
+                使用中
+              </Badge>
+            )}
+          </span>
+          {!model.valid && <span className="block text-xs text-destructive">模型不可用</span>}
+          {/* 能力标记：人设（character.md）/ 音色（目录自带或绑定生效；绑定失效单独标红） */}
+          {(model.has_persona || model.has_voice || model.voice_id != null) && (
+            <span className="mt-0.5 flex gap-1">
+              {model.has_persona && (
+                <Badge variant="outline" className="px-1 py-0 text-[10px] text-muted-foreground">
+                  人设
+                </Badge>
+              )}
+              {model.voice_id != null && !model.has_voice ? (
+                <Badge
+                  variant="outline"
+                  className="border-destructive/30 px-1 py-0 text-[10px] text-destructive"
+                  title="绑定的音色已被删除，已回退全局默认音色"
+                >
+                  音色已失效
+                </Badge>
+              ) : model.has_voice ? (
+                <Badge variant="outline" className="px-1 py-0 text-[10px] text-muted-foreground">
+                  音色
+                </Badge>
+              ) : null}
+            </span>
+          )}
+        </span>
+      </button>
+
+      {!editing && (
+        <button
+          type="button"
+          aria-label={`导出分享「${model.name}」`}
+          title={
+            isCharacterFormat(model.format)
+              ? exporting
+                ? "正在打包…"
+                : "打包为 .zip 分享给他人导入（含唤醒词/欢迎语预设）"
+              : "仅角色包伙伴支持导出分享（Live2D 含版权模型，GIF 为单文件）"
+          }
+          disabled={!isCharacterFormat(model.format) || exporting}
+          onClick={(e) => {
+            e.stopPropagation();
+            onExport(model);
+          }}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 hover:text-text-primary focus:opacity-100 disabled:pointer-events-none disabled:opacity-30"
+        >
+          {exporting ? (
+            <span className="block h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
+          ) : (
+            <Share2 className="h-3.5 w-3.5" />
+          )}
+        </button>
+      )}
+
+      {!editing && (
+        <button
+          type="button"
+          aria-label={`打开「${model.name}」的资产文件夹`}
+          title="在文件管理器中打开资产目录，可自行替换音色参考等文件"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenAssets(model.id);
+          }}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 hover:text-text-primary focus:opacity-100"
+        >
+          <FolderOpen className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {!editing && (
+        <button
+          type="button"
+          aria-label={`重命名「${model.name}」`}
+          onClick={startEdit}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 hover:text-text-primary focus:opacity-100"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {!editing && (
+        <button
+          type="button"
+          aria-label={`移除「${model.name}」`}
+          onClick={() => onRequestRemove(model)}
+          disabled={isActive}
+          title={isActive ? "请先切换其他伙伴为使用中再移除" : undefined}
+          className={cn(
+            "shrink-0 rounded p-1 transition-opacity",
+            isActive
+              ? "cursor-not-allowed text-muted-foreground/40 opacity-40"
+              : "text-muted-foreground opacity-60 group-hover:opacity-100 hover:text-red-600 focus:opacity-100",
+          )}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {/* 编辑态覆盖整行：避免嵌套可交互元素 */}
+      {editing && (
+        <div className="absolute inset-0 z-10 flex items-center rounded-lg border border-primary/60 bg-panel-background px-3">
+          <Input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitEdit();
+              else if (e.key === "Escape") cancelEdit();
+            }}
+            onBlur={commitEdit}
+            autoFocus
+            className="h-8 min-w-0 flex-1"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 动作/表情预览面板：手写下划线 Tab（对齐 ModelDetailPane 先例，不引 Tabs 依赖）。 */
+function MotionCatalogPanel({
+  catalog,
+  onPlayMotion,
+  onApplyExpression,
+  onResetExpression,
+}: {
+  catalog: Live2dCatalog;
+  onPlayMotion: (group: string, index: number) => void;
+  onApplyExpression: (index: number) => void;
+  onResetExpression: () => void;
+}) {
+  const [tab, setTab] = useState<"motions" | "expressions">("motions");
+  const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const [appliedExpression, setAppliedExpression] = useState<number | null>(null);
+
+  const hasMotions = catalog.motionGroups.length > 0;
+  const hasExpressions = catalog.expressions.length > 0;
+  const activeTab = tab === "motions" && !hasMotions ? "expressions" : tab;
+
+  const handlePlay = (group: string, index: number) => {
+    setPlayingKey(`${group}/${index}`);
+    // 播放结束（或失败）后恢复按钮；首次播放含懒加载延迟。
+    void Promise.resolve(onPlayMotion(group, index)).finally(() => setPlayingKey(null));
+  };
+
+  const empty = !hasMotions && !hasExpressions;
+  return (
+    <div className="mt-3 shrink-0 border-t border-panel-border pt-3" data-testid="motion-catalog">
+      {empty ? (
+        <p className="text-xs text-muted-foreground">此模型未提供动作或表情</p>
+      ) : (
+        <>
+          {hasMotions && hasExpressions && (
+            <div role="tablist" aria-label="预览类型" className="mb-2 flex gap-4">
+              {(["motions", "expressions"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === t}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    "border-b-2 pb-1 text-sm transition-colors",
+                    activeTab === t
+                      ? "border-blue-500 text-text-primary"
+                      : "border-transparent text-muted-foreground hover:text-text-primary",
+                  )}
+                >
+                  {t === "motions" ? "动作" : "表情"}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex max-h-40 flex-wrap content-start gap-2 overflow-y-auto">
+            {activeTab === "motions"
+              ? catalog.motionGroups.map(({ group, motions }) => (
+                  <div key={group} className="w-full">
+                    {catalog.motionGroups.length > 1 && (
+                      <p className="mb-1 text-xs font-medium text-muted-foreground">{group}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {motions.map((m) => {
+                        const key = `${group}/${m.index}`;
+                        return (
+                          <Button
+                            key={key}
+                            variant="outline"
+                            size="sm"
+                            aria-label={`播放动作 ${m.name}`}
+                            disabled={playingKey !== null}
+                            onClick={() => handlePlay(group, m.index)}
+                          >
+                            {playingKey === key ? "播放中…" : m.name}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))
+              : catalog.expressions.map((e) => (
+                  <Button
+                    key={e.index}
+                    variant={appliedExpression === e.index ? "default" : "outline"}
+                    size="sm"
+                    aria-label={`应用表情 ${e.name}`}
+                    onClick={() => {
+                      onApplyExpression(e.index);
+                      setAppliedExpression(e.index);
+                    }}
+                  >
+                    {e.name}
+                  </Button>
+                ))}
+            {activeTab === "expressions" && appliedExpression != null && (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="重置表情"
+                onClick={() => {
+                  onResetExpression();
+                  setAppliedExpression(null);
+                }}
+              >
+                重置表情
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 伙伴页：伙伴模型管理器。
+ *
+ * - 左侧：我的伙伴列表（selected = 蓝色高亮；active = 名字旁绿色「使用中」Badge）；
+ * - 右侧：Live2D 预览；非当前使用时显示「设为当前使用」。
+ *
+ * 状态区分：`selectedCompanionId`（页面 local state，仅切换预览，不动桌宠）与
+ * `activeModelId`（后端 `library.json` 持久化，真正驱动桌宠窗口）。
+ */
+export function CompanionPage() {
+  const {
+    library,
+    loading,
+    error,
+    importModel,
+    importZip,
+    exportPack,
+    uploadVoice,
+    restoreVoice,
+    setActive,
+    rename,
+    setWakeWord,
+    setWelcomeText,
+    remove,
+    openAssetsDir,
+    saveCover,
+  } = useCompanionLibrary();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [stageError, setStageError] = useState<string | null>(null);
+  const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+  const [removeTarget, setRemoveTarget] = useState<CompanionModelInfo | null>(null);
+  /** 音色上传对话框目标（非 null = 打开）。 */
+  const [voiceUploadTarget, setVoiceUploadTarget] = useState<CompanionModelInfo | null>(null);
+  /** 音色恢复确认目标（非 null = 打开；恢复不可逆）。 */
+  const [restoreVoiceTarget, setRestoreVoiceTarget] = useState<CompanionModelInfo | null>(null);
+  /** 唤醒词/欢迎语受控草稿：切伙伴或保存成功（库值变化）时同步。 */
+  const [wakeWordDraft, setWakeWordDraft] = useState("");
+  // 测试伙伴唤醒词弹窗（用选中伙伴的生效唤醒词做 KWS 实测）
+  const [wakeTestOpen, setWakeTestOpen] = useState(false);
+  const [welcomeDraft, setWelcomeDraft] = useState("");
+  const previewRef = useRef<HTMLDivElement>(null);
+  const stageHandleRef = useRef<SharedLive2dStageHandle>(null);
+  const [catalog, setCatalog] = useState<Live2dCatalog | null>(null);
+  /** 最近一次待移除目标：关闭动画期间 removeTarget 已置空，用它兜底保持正文不闪空。 */
+  const lastRemoveTarget = useRef<CompanionModelInfo | null>(null);
+
+  useEffect(() => {
+    if (removeTarget) lastRemoveTarget.current = removeTarget;
+  }, [removeTarget]);
+
+  const selected = useMemo(
+    () => library?.models.find((m) => m.id === selectedId) ?? null,
+    [library, selectedId],
+  );
+  const isActive = selected != null && selected.id === library?.active_model_id;
+
+  // 唤醒词/欢迎语草稿同步：切伙伴或保存成功（库值变化）时重置为库值；
+  // 用户打字期间库值不变，不会打断输入。
+  const selectedWakeWord = selected?.wake_word ?? "";
+  const selectedWelcomeText = selected?.welcome_text ?? "";
+  useEffect(() => {
+    setWakeWordDraft(selectedWakeWord);
+    setWelcomeDraft(selectedWelcomeText);
+  }, [selectedWakeWord, selectedWelcomeText]);
+  const wakeWordDirty = wakeWordDraft.trim() !== selectedWakeWord;
+  const welcomeDirty = welcomeDraft.trim() !== selectedWelcomeText;
+  const commitWakeWord = useCallback(() => {
+    if (!selected || !wakeWordDirty) return;
+    const v = wakeWordDraft.trim();
+    void setWakeWord(selected.id, v === "" ? null : v);
+  }, [selected, wakeWordDirty, wakeWordDraft, setWakeWord]);
+  const commitWelcomeText = useCallback(() => {
+    if (!selected || !welcomeDirty) return;
+    const v = welcomeDraft.trim();
+    void setWelcomeText(selected.id, v === "" ? null : v);
+  }, [selected, welcomeDirty, welcomeDraft, setWelcomeText]);
+
+  // selected 校正：切换模型 / 库变化后，selected 不存在时落到 active(valid) → 首个 valid → null。
+  useEffect(() => {
+    if (!library) return;
+    if (selectedId && library.models.some((m) => m.id === selectedId)) {
+      return;
+    }
+    const active = library.models.find((m) => m.id === library.active_model_id && m.valid);
+    const fallback = active ?? library.models.find((m) => m.valid) ?? null;
+    setSelectedId(fallback?.id ?? null);
+  }, [library, selectedId]);
+
+  const selectModel = useCallback((id: string) => {
+    // 切换选中模型时重置渲染错误并清空旧目录（不能放在 effect 里随 selectedId 清：
+    // 首次校正 selectedId 会与 onModelCatalog 竞争，把新目录覆盖成 null）。
+    setStageError(null);
+    setCatalog(null);
+    setSelectedId(id);
+  }, []);
+
+  // 量测预览容器尺寸，交给 SharedLive2dStage（PIXI 需要非 0 尺寸）。
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) {
+        setPreviewSize({
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const handleStageError = useCallback((e: Error) => {
+    setStageError(e.message);
+  }, []);
+
+  // 桌宠尺寸（缩放百分比，25%~200%，伙伴私有）与透明度（20%~100%，全局）：
+  // 写入后通知桌宠窗口即时生效；切换 active 伙伴时重读以刷新滑杆显示值。
+  // 点击穿透（窗口级行为，与选中哪个伙伴无关）：开启后桌宠窗口对所有鼠标事件透明。
+  // 显示层级（置顶/置底，窗口级）：写入 settings 并通知桌宠窗口即时生效。
+  // 拖拽模式（窗口级）：modifier = 需按住 ⌘/Ctrl 才能拖动，direct = 直接拖动。
+  const [percent, setPercent] = useState(100);
+  const [opacityPercent, setOpacityPercent] = useState(100);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: library?.active_model_id 是伙伴切换触发器（缩放为伙伴私有，需重读刷新滑杆）
+  useEffect(() => {
+    void api
+      .getLive2dConfig()
+      .then((cfg) => {
+        if (cfg.window_scale != null) setPercent(Math.round(cfg.window_scale * 100));
+        if (cfg.window_opacity != null) setOpacityPercent(Math.round(cfg.window_opacity * 100));
+      })
+      .catch(() => {});
+  }, [library?.active_model_id]);
+  const handleScaleChange = useCallback((value: number) => {
+    const clamped = Math.max(25, Math.min(200, Math.round(value)));
+    setPercent(clamped);
+    void api.setCompanionScale({ scale: clamped / 100 });
+  }, []);
+  const handleOpacityChange = useCallback((value: number) => {
+    const clamped = Math.max(20, Math.min(100, Math.round(value)));
+    setOpacityPercent(clamped);
+    void api.setCompanionOpacity({ opacity: clamped / 100 });
+  }, []);
+
+  // 通用导入收尾：清错误、调导入命令并选中新伙伴。
+  const importAndSelect = useCallback(
+    async (source: string) => {
+      setStageError(null);
+      const model = await importModel(source);
+      if (model) {
+        setSelectedId(model.id);
+      }
+    },
+    [importModel],
+  );
+
+  const handleImportDir = useCallback(async () => {
+    const dir = await open({ directory: true, title: "选择 Live2D 模型或角色包目录" });
+    if (typeof dir === "string") await importAndSelect(dir);
+  }, [importAndSelect]);
+
+  const handleImportGif = useCallback(async () => {
+    const file = await open({
+      title: "选择 GIF 动图",
+      filters: [{ name: "GIF 动图", extensions: ["gif"] }],
+    });
+    if (typeof file === "string") await importAndSelect(file);
+  }, [importAndSelect]);
+
+  const handleImportZip = useCallback(async () => {
+    const file = await open({
+      title: "选择角色包压缩包",
+      filters: [{ name: "Zip 压缩包", extensions: ["zip"] }],
+      multiple: false,
+    });
+    if (typeof file !== "string") return;
+    setStageError(null);
+    const model = await importZip(file);
+    if (model) setSelectedId(model.id);
+  }, [importZip]);
+
+  /** 正在导出的伙伴 id（按钮转 spinner 并禁用，防重复点击）。 */
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  // 音色播放条：解析生效音色参考音频（与合成同一条三级解析链），asset:// 播放。
+  // voiceTick 在上传/恢复成功后 +1：wav 路径不变（同一路径被覆盖），靠 query 触发重载。
+  const [voiceSrc, setVoiceSrc] = useState<string | null>(null);
+  const [voiceTick, setVoiceTick] = useState(0);
+  const selectedHasVoice = selected?.has_voice ?? false;
+  useEffect(() => {
+    if (!selectedId || !selectedHasVoice) {
+      setVoiceSrc(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .previewCompanionVoice({ id: selectedId })
+      .then((wav) => {
+        if (cancelled) return;
+        setVoiceSrc(wav ? `${toAssetUrl(wav)}?v=${voiceTick}` : null);
+      })
+      .catch(() => {
+        if (!cancelled) setVoiceSrc(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, selectedHasVoice, voiceTick]);
+  const handleExportPack = useCallback(
+    async (target: CompanionModelInfo) => {
+      const dest = await save({
+        defaultPath: `${target.name}.zip`,
+        filters: [{ name: "Zip 压缩包", extensions: ["zip"] }],
+      });
+      if (typeof dest !== "string") return; // 用户取消，静默
+      setExportingId(target.id);
+      try {
+        await exportPack(target.id, target.name, dest);
+      } finally {
+        setExportingId(null);
+      }
+    },
+    [exportPack],
+  );
+
+  const handleRemoveConfirm = useCallback(() => {
+    if (!removeTarget) return;
+    void remove(removeTarget.id);
+    setRemoveTarget(null);
+  }, [remove, removeTarget]);
+
+  // 每个伙伴在本次会话里只尝试生成一次封面（无封面时才生成）。
+  const coverAttempted = useRef(new Set<string>());
+  const handleModelReady = useCallback(
+    (canvas: HTMLCanvasElement) => {
+      if (!selected || selected.cover_image || coverAttempted.current.has(selected.id)) return;
+      coverAttempted.current.add(selected.id);
+      // 等一帧确保 PIXI ticker 已把模型画到画布，再截取保存。
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const png = canvasToPngBytes(canvas);
+          if (png.length > 0) {
+            void saveCover(selected.id, png);
+          }
+        });
+      });
+    },
+    [selected, saveCover],
+  );
+
+  const isGif = isStaticImageFormat(selected?.format);
+  const previewUrl = selected ? toAssetUrl(selected.model_file) : null;
+  // 静态图像伙伴（GIF/角色包立绘）不走 PIXI 预览（无 canvas/动作目录），单独 img 分支。
+  const showStage = !!selected?.valid && !isGif && previewSize.width > 0 && previewSize.height > 0;
+
+  // 当前 TTS 模型类型：非克隆族（如 kitten）不支持参考音频克隆，上传按钮禁用。
+  const [ttsModelType, setTtsModelType] = useState("");
+  useEffect(() => {
+    void api
+      .getTtsConfig()
+      .then((c) => setTtsModelType(c.model_type))
+      .catch(() => {});
+  }, []);
+
+  return (
+    <div className="flex h-full flex-col gap-4">
+      {/* 顶部：页面标题 */}
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight text-text-primary">伙伴</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">导入并管理你的桌面伙伴</p>
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-4">
+        {/* 左侧：我的伙伴（边框/阴影对齐模型库界面的面板样式） */}
+        <Card className="flex w-[460px] shrink-0 flex-col border-panel-border shadow-none">
+          <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base font-semibold text-text-primary">
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                我的伙伴
+              </CardTitle>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" onClick={handleImportDir} disabled={loading}>
+                <Upload className="h-4 w-4" />
+                导入模型 / 角色包
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleImportGif} disabled={loading}>
+                <ImageIcon className="h-4 w-4" />
+                导入 GIF
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleImportZip()}
+                disabled={loading}
+                aria-label="导入角色包（.zip）"
+                title="从 .zip 导入角色包"
+              >
+                <FileArchive className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+            {error && (
+              <Alert variant="destructive">
+                <CircleAlert className="h-4 w-4" />
+                <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {!library && loading ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">加载中…</p>
+            ) : library && library.models.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-panel-border p-6 text-center">
+                <Sparkles className="h-6 w-6 text-muted-foreground/50" />
+                <p className="text-sm font-medium text-text-primary">还没有伙伴</p>
+                <p className="text-xs text-muted-foreground">
+                  导入一个 Live2D 模型或角色包，让它成为你的桌面伙伴。
+                </p>
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-0.5">
+                {library?.models.map((model) => (
+                  <CompanionListItem
+                    key={model.id}
+                    model={model}
+                    selected={model.id === selectedId}
+                    isActive={model.id === library.active_model_id}
+                    onSelect={() => selectModel(model.id)}
+                    onRename={(id, name) => void rename(id, name)}
+                    onRequestRemove={setRemoveTarget}
+                    onOpenAssets={(id) => void openAssetsDir(id)}
+                    exporting={exportingId === model.id}
+                    onExport={(m) => void handleExportPack(m)}
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 右侧：预览（边框/阴影对齐模型库界面的面板样式） */}
+        <Card className="flex min-w-0 flex-1 flex-col border-panel-border shadow-none">
+          <CardHeader className="flex-col items-start gap-3 space-y-0">
+            <CardTitle className="text-base font-semibold">
+              {selected ? selected.name : "暂无伙伴"}
+            </CardTitle>
+            {/* 桌宠尺寸/透明度：调整窗口缩放与模型透明度，同步到桌宠窗口（尺寸在上，透明度在下）。
+                点击穿透/显示层级是窗口级行为，未选中伙伴也可切换（窗口仍在，遮挡桌面）。 */}
+            <div className="flex w-full flex-col gap-2 text-sm text-muted-foreground">
+              {selected && (
+                <>
+                  <div className="flex w-full items-center gap-2">
+                    <span className="w-20 shrink-0">尺寸</span>
+                    <Slider
+                      aria-label="尺寸"
+                      value={[percent]}
+                      min={25}
+                      max={200}
+                      step={5}
+                      onValueChange={([v]) => handleScaleChange(v)}
+                      className="flex-1"
+                    />
+                    <span className="w-10 shrink-0 text-right tabular-nums">{percent}%</span>
+                  </div>
+                  <div className="flex w-full items-center gap-2">
+                    <span className="w-20 shrink-0">透明度</span>
+                    <Slider
+                      aria-label="透明度"
+                      value={[opacityPercent]}
+                      min={20}
+                      max={100}
+                      step={5}
+                      onValueChange={([v]) => handleOpacityChange(v)}
+                      className="flex-1"
+                    />
+                    <span className="w-10 shrink-0 text-right tabular-nums">{opacityPercent}%</span>
+                  </div>
+                  {/* 音色：label+说明 与 播放条/上传/恢复 单行并排（flex）。
+                      无音色时播放条位置显示状态文字。 */}
+                  <div className="flex w-full items-center gap-2">
+                    <span className="flex w-20 shrink-0 items-center gap-1">
+                      音色
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help text-muted-foreground" aria-label="音色说明">
+                            <CircleHelp className="h-3.5 w-3.5" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-72 text-balance">
+                          播放条播放当前生效音色；「上传音色」用自己的声音覆盖（角色默认音色自动备份，
+                          可恢复）；分享角色包时会带上当前生效的音色。
+                        </TooltipContent>
+                      </Tooltip>
+                    </span>
+                    {selected.has_voice && voiceSrc ? (
+                      <audio
+                        controls
+                        src={voiceSrc}
+                        className="h-8 min-w-0 flex-1"
+                        aria-label="音色播放条"
+                      />
+                    ) : (
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                        {!selected.has_voice && "未设置（合成用全局默认音色）"}
+                        {selected.has_voice &&
+                          selected.has_original_voice &&
+                          "自定义音色（原音色已备份）"}
+                      </span>
+                    )}
+                    {selected.has_original_voice && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0"
+                        title="恢复作者原版音色（丢弃当前上传的版本）"
+                        onClick={() => setRestoreVoiceTarget(selected)}
+                      >
+                        恢复默认
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      title={
+                        isCloneTtsKind(ttsModelType)
+                          ? "上传自定义音色（覆盖当前生效音色，角色默认音色自动备份）"
+                          : "当前 TTS 模型不支持音色克隆，无法上传自定义音色"
+                      }
+                      disabled={!isCloneTtsKind(ttsModelType)}
+                      onClick={() => setVoiceUploadTarget(selected)}
+                    >
+                      上传音色
+                    </Button>
+                  </div>
+                  {/* 唤醒词/欢迎语：受控草稿 + 显式保存——保存会重启语音会话，
+                      不做失焦自动提交，避免误触发；输入文字用正文色
+                      （容器继承 text-muted-foreground，需显式覆盖）。 */}
+                  <div className="flex w-full items-center gap-2">
+                    <span className="w-20 shrink-0">唤醒词</span>
+                    <Input
+                      value={wakeWordDraft}
+                      onChange={(e) => setWakeWordDraft(e.target.value)}
+                      placeholder={selected.wake_word_effective}
+                      aria-label="伙伴唤醒词"
+                      className="h-8 min-w-0 flex-1 text-text-primary"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      aria-label="保存唤醒词"
+                      disabled={!wakeWordDirty}
+                      onClick={() => commitWakeWord()}
+                    >
+                      保存
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      aria-label="测试伙伴唤醒词"
+                      title={`实测「${selected.wake_word_effective}」能否被麦克风唤醒`}
+                      onClick={() => setWakeTestOpen(true)}
+                    >
+                      测试
+                    </Button>
+                  </div>
+                  {selected.wake_word_ok ? (
+                    <p className="text-xs text-muted-foreground">
+                      对着麦克风喊唤醒词即可唤醒；留空 = 跟随角色名。
+                    </p>
+                  ) : (
+                    <p className="text-xs text-destructive">
+                      「{selected.wake_word_effective}
+                      」无法转为唤醒词，已回退全局唤醒词，请换一个词。
+                    </p>
+                  )}
+                  <div className="flex w-full items-center gap-2">
+                    <span className="w-20 shrink-0">欢迎语</span>
+                    <Input
+                      value={welcomeDraft}
+                      onChange={(e) => setWelcomeDraft(e.target.value)}
+                      placeholder={selected.welcome_text_effective}
+                      aria-label="伙伴欢迎语"
+                      className="h-8 min-w-0 flex-1 text-text-primary"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0"
+                      aria-label="保存欢迎语"
+                      disabled={!welcomeDirty}
+                      onClick={() => commitWelcomeText()}
+                    >
+                      保存
+                    </Button>
+                  </div>
+                  {selected.welcome_ready ? (
+                    <p className="text-xs text-muted-foreground">
+                      唤醒后播报的欢迎语；留空 = 使用「你好，我是{selected.name}。」。
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      欢迎语音生成中，唤醒时将先用实时合成。
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col">
+            {/* 已是当前使用时不显示 CTA（左侧「使用中」徽标已标识） */}
+            {selected && !isActive && (
+              <div className="mb-4">
+                <Button onClick={() => void setActive(selected.id)} disabled={!selected.valid}>
+                  <Star className="h-4 w-4" />
+                  设为当前使用
+                </Button>
+              </div>
+            )}
+
+            <div ref={previewRef} className="relative min-h-0 flex-1 overflow-hidden">
+              {selected?.valid && isStaticImageFormat(selected.format) && (
+                <img
+                  src={previewUrl ?? undefined}
+                  alt={selected.name}
+                  draggable={false}
+                  className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
+                />
+              )}
+              {showStage && previewUrl && (
+                <SharedLive2dStage
+                  modelUrl={previewUrl}
+                  width={previewSize.width}
+                  height={previewSize.height}
+                  onError={handleStageError}
+                  onModelReady={handleModelReady}
+                  onModelCatalog={setCatalog}
+                  ref={stageHandleRef}
+                  className="h-full w-full"
+                />
+              )}
+              {selected && !selected.valid && (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  无法加载该 Live2D 模型
+                </div>
+              )}
+              {!selected && (
+                <div className="flex h-full flex-col items-center justify-center gap-1 text-center text-sm text-muted-foreground">
+                  <Sparkles className="h-6 w-6 text-muted-foreground/50" />
+                  暂无伙伴
+                  <span className="text-xs">导入模型后可以在这里预览。</span>
+                </div>
+              )}
+            </div>
+
+            {showStage && catalog && (
+              <MotionCatalogPanel
+                catalog={catalog}
+                onPlayMotion={(group, index) =>
+                  void stageHandleRef.current?.playMotion(group, index)
+                }
+                onApplyExpression={(index) => void stageHandleRef.current?.applyExpression(index)}
+                onResetExpression={() => stageHandleRef.current?.resetExpression()}
+              />
+            )}
+
+            {stageError && (
+              <Alert variant="destructive" className="mt-3">
+                <CircleAlert className="h-4 w-4" />
+                <AlertDescription className="whitespace-pre-wrap">
+                  无法加载该 Live2D 模型：{stageError}
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 测试伙伴唤醒词：用选中伙伴的生效唤醒词（自定义词或角色名推导）做 KWS 实测。
+          条件挂载——伙伴页自身不依赖 useRuntime，对话框打开时才引入运行时依赖。 */}
+      {wakeTestOpen && selected && (
+        <KwsTestDialog
+          open
+          onClose={() => setWakeTestOpen(false)}
+          keywords={selected.wake_word_effective}
+          title={`测试唤醒词 · ${selected.name}`}
+        />
+      )}
+
+      {/* 移除伙伴确认（样式对齐模型卸载确认框） */}
+      <ModelDialog
+        open={removeTarget != null}
+        onClose={() => setRemoveTarget(null)}
+        title="移除伙伴"
+        width="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRemoveTarget(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleRemoveConfirm}>
+              移除
+            </Button>
+          </div>
+        }
+      >
+        {(removeTarget ?? lastRemoveTarget.current) && (
+          <div className="space-y-1">
+            <p className="text-sm text-text-primary">
+              确定要移除{" "}
+              <span className="font-semibold">
+                {(removeTarget ?? lastRemoveTarget.current)?.name}
+              </span>{" "}
+              吗？
+            </p>
+            <p className="text-sm text-text-secondary">
+              移除后，其保存在应用中的模型文件也会被删除。
+            </p>
+          </div>
+        )}
+      </ModelDialog>
+
+      {/* 音色上传对话框 */}
+      <CompanionVoiceUploadDialog
+        open={voiceUploadTarget != null}
+        companion={voiceUploadTarget}
+        onClose={() => setVoiceUploadTarget(null)}
+        onSubmit={async (wavPath, referenceText) => {
+          const ok = await uploadVoice(voiceUploadTarget?.id ?? "", wavPath, referenceText);
+          if (ok) setVoiceTick((t) => t + 1); // wav 路径不变内容已换，触发播放条重载
+          return ok;
+        }}
+      />
+
+      {/* 恢复角色自带音色确认（不可逆：丢弃当前上传的版本） */}
+      <ModelDialog
+        open={restoreVoiceTarget != null}
+        onClose={() => setRestoreVoiceTarget(null)}
+        title="恢复角色自带音色"
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" size="sm" onClick={() => setRestoreVoiceTarget(null)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (restoreVoiceTarget) {
+                  void restoreVoice(restoreVoiceTarget.id).then(() => setVoiceTick((t) => t + 1));
+                }
+                setRestoreVoiceTarget(null);
+              }}
+            >
+              恢复
+            </Button>
+          </>
+        }
+      >
+        {(restoreVoiceTarget ?? null) && (
+          <div className="space-y-1">
+            <p className="text-sm text-text-primary">
+              确定要把 <span className="font-semibold">{restoreVoiceTarget?.name}</span>{" "}
+              的音色恢复为作者原版吗？
+            </p>
+            <p className="text-sm text-text-secondary">
+              恢复后，当前上传的音色将被删除，且无法找回。
+            </p>
+          </div>
+        )}
+      </ModelDialog>
+      {/* 音色播放条已内嵌详情区（controls 自带播放/进度），此处不再有隐藏播放器。 */}
+    </div>
+  );
+}

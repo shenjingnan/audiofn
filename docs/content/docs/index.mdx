@@ -1,0 +1,26 @@
+---
+title: ZapMomo
+---
+
+<div align="center">
+  <img src="/logo.svg" alt="ZapMomo Logo" width="300" />
+</div>
+
+An open-source, real-time desktop **AI companion** with voice, memory, and a customizable virtual character.
+
+开源的实时桌面 **AI 伴侣**：语音交互、记忆能力、可定制的虚拟角色。
+
+## 特性
+
+- **语音唤醒（KWS）** — 基于 sherpa-onnx 的 zipformer 唤醒词检测，支持实时麦克风监听与离线 wav 检测；自定义关键词直接输中文，自动转拼音 token
+- **桌面应用** — 基于 Tauri 2 的 GUI（KWS 控制面板），Windows / macOS / Linux 三平台安装包
+- **音频采集** — 基于 cpal 的麦克风采集 + 自动重采样（设备采样率 → 16k）
+- **CLI 骨架** — 基于 clap 的命令行参数解析，支持子命令和 Shell 补全生成
+- **异步运行时** — 集成 tokio，开箱即用的 async/await 支持
+- **配置管理** — TOML 格式的配置文件读写，支持 `${env.VAR}` 环境变量引用
+- **双层日志** — 基于 tracing 的日志系统，同时输出到文件和 stderr
+- **日期时间工具** — 基于 chrono 的常用时间格式转换函数
+- **测试支持** — 集成 tempfile 的测试隔离辅助工具
+- **代码质量** — cargo fmt / clippy / typos / tarpaulin / codecov 一站式配置
+- **CI/CD** — GitHub Actions 自动化测试、发布、覆盖率报告
+- **Shell 补全** — 支持 bash / zsh / fish / powershell 自动补全
