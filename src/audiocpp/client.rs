@@ -216,8 +216,6 @@ impl AudiocppTts {
 /// （[`Self::new_with_base_url`]）直连 stub server，绕过进程管理与 preflight。
 pub struct AudiocppAsr {
     cfg: ResolvedAsrConfig,
-    /// 模型族描述（构造时查表一次；请求体 `model` 来自它）
-    desc: &'static AudiocppAsrFamilyDesc,
     base_url: String,
     /// 持有租约（保活 server）；Drop 释放。测试构造（直连 stub）为 None。
     _lease: Option<super::server::ServerLease>,
@@ -228,13 +226,13 @@ impl AudiocppAsr {
     /// 生产构造：preflight（GGUF 校验）→ 查族表 → lease server（含 spawn + 健康检查）。
     pub fn new(cfg: ResolvedAsrConfig) -> Result<Self, String> {
         crate::asr::config::preflight(&cfg)?;
-        let desc = lookup_asr_desc(&cfg)?;
+        // 族表校验：sherpa-only kind 配 audiocpp 后端在此 fail-fast
+        lookup_asr_desc(&cfg)?;
         let spec = super::server_config::ServerInstanceSpec::from_asr(&cfg)?;
         let lease = super::server::lease(&spec).map_err(|e| e.to_user_message())?;
         Ok(Self {
             base_url: lease.base_url(),
             cfg,
-            desc,
             _lease: Some(lease),
             client: build_client()?,
         })
@@ -242,10 +240,9 @@ impl AudiocppAsr {
 
     /// 测试构造：直连指定 base_url 的 stub server（不 preflight、不 spawn、不持租约）。
     pub fn new_with_base_url(cfg: ResolvedAsrConfig, base_url: &str) -> Self {
-        let desc = lookup_asr_desc(&cfg).expect("测试构造要求合法 audiocpp ASR 模型族");
+        lookup_asr_desc(&cfg).expect("测试构造要求合法 audiocpp ASR 模型族");
         Self {
             cfg,
-            desc,
             base_url: base_url.to_string(),
             _lease: None,
             client: build_client().expect("构建 HTTP 客户端"),
@@ -255,26 +252,20 @@ impl AudiocppAsr {
     /// 整段转写：f32 采样 → wav 编码 → multipart POST → 文本（trim 后返回）。
     ///
     /// multipart 形状对齐上游 OpenAI Whisper API 兼容实现（`file` + `model`，
-    /// 文件名必须 `.wav` 结尾——上游校验 `is_wav_upload_filename`）。
-    /// `cfg.language` 非空时透传 `language` 字段（量化下 auto 语种识别不可靠时
-    /// 的显式兜底，上游文档明示）；缺省由 server 自动检测。
+    /// 文件名必须 `.wav` 结尾——上游校验 `is_wav_upload_filename`）；`model` 与
+    /// `language` 字段由 [`transcription_request_parts`] 统一构造。
     pub fn transcribe(&self, samples: &[f32], sample_rate: i32) -> Result<String, AudiocppError> {
         let wav = encode_wav(samples, sample_rate)?;
         let part = reqwest::blocking::multipart::Part::bytes(wav)
             .file_name("audio.wav")
             .mime_str("audio/wav")
             .map_err(|e| AudiocppError::EncodeWav(format!("构造 multipart 失败: {e}")))?;
+        let (model, language) = transcription_request_parts(&self.cfg.language);
         let mut form = reqwest::blocking::multipart::Form::new()
             .part("file", part)
-            .text("model", self.desc.model_id.to_string());
-        if let Some(lang) = self
-            .cfg
-            .language
-            .as_deref()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-        {
-            form = form.text("language", lang.to_string());
+            .text("model", model.to_string());
+        if let Some(lang) = language {
+            form = form.text("language", lang);
         }
         let resp = self
             .client
@@ -295,6 +286,24 @@ impl AudiocppAsr {
             .map_err(|e| AudiocppError::Connection(format!("解析转写响应失败: {e}")))?;
         Ok(json["text"].as_str().unwrap_or_default().trim().to_string())
     }
+}
+
+/// `/v1/audio/transcriptions` 请求的两个关键字段（纯函数，无网络，供单测锚定契约）。
+///
+/// `model` 取族表 `model_id`（qwen3_asr → `"qwen3-asr-0.6b"`；新增 ASR 族时改为
+/// 按 kind 查 [`super::asr_families::asr_family_desc`]）；`language` 显式配置时
+/// 原样透传（量化下 auto 语种识别不可靠的兜底，上游文档明示），`None`/纯空白为
+/// `None`（不携带字段，由 server 自动识别语种）。
+pub(crate) fn transcription_request_parts(
+    language: &Option<String>,
+) -> (&'static str, Option<String>) {
+    let model = super::asr_families::QWEN3_ASR_06B.model_id;
+    let language = language
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string);
+    (model, language)
 }
 
 /// 查 ASR 模型族描述；sherpa-only kind 配 audiocpp 后端的非法组合报错。

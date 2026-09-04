@@ -32,7 +32,8 @@ pub const PUNCT_REQUIRED_FILES: [&str; 1] = [DEFAULT_PUNCT_MODEL];
 /// ASR 模型类型（sherpa-onnx `OfflineModelConfig` / `OnlineModelConfig` 的分支）。
 ///
 /// 全链路显式传递：`[asr].model_type`（持久化）→ `ResolvedAsrConfig.model_type` →
-/// 引擎构造分支（`AsrEngine` 流式 / `offline::OfflineAsrEngine` 离线）。默认 Zipformer
+/// 引擎构造分支（流式 zipformer/paraformer 仅剩配置兼容，识别能力已收敛到
+/// audiocpp qwen3_asr，见 `offline`/`dictate`）。默认 Zipformer
 /// （streaming zipformer transducer），老配置无该字段时按目录内容探测兜底。
 /// 注：模型库已精简为 zipformer + qwen3，但引擎仍识别全部族（兼容已装/手工导入目录）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -78,12 +79,12 @@ impl AsrModelKind {
         }
     }
 
-    /// 是否流式（可走实时语音会话 / `AsrEngine`）。
+    /// 是否流式（zipformer/paraformer；实时识别已随 sherpa 后端移除，仅配置兼容）。
     pub fn is_streaming(&self) -> bool {
         matches!(self, Self::Zipformer | Self::Paraformer)
     }
 
-    /// 是否离线（仅整段文件转写，走 `offline::OfflineAsrEngine`）。
+    /// 是否离线（整段文件转写 / 听写）。
     pub fn is_offline(&self) -> bool {
         !self.is_streaming()
     }
@@ -1109,13 +1110,17 @@ mod tests {
 
     #[test]
     fn test_default_punctuation_and_hotwords() {
-        let cfg = ResolvedAsrConfig::default();
-        assert_eq!(cfg.hotwords, None);
-        assert!(cfg.enable_punctuation);
-        assert_eq!(
-            cfg.punctuation_model,
-            crate::model_library::asset::punctuation_user_model_dir().join(DEFAULT_PUNCT_MODEL)
-        );
+        // 用临时 HOME 隔离，避免与其它 `run_with_temp_home` 测试并行时 HOME 竞态
+        // 导致 default 与 `punctuation_user_model_dir` 两次读取到不同数据目录。
+        run_with_temp_home(|_| {
+            let cfg = ResolvedAsrConfig::default();
+            assert_eq!(cfg.hotwords, None);
+            assert!(cfg.enable_punctuation);
+            assert_eq!(
+                cfg.punctuation_model,
+                crate::model_library::asset::punctuation_user_model_dir().join(DEFAULT_PUNCT_MODEL)
+            );
+        });
     }
 
     #[test]

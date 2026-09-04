@@ -56,35 +56,17 @@ pub enum Commands {
 /// ASR 子命令
 #[derive(Subcommand)]
 pub enum AsrCmd {
-    /// 实时监听麦克风并转写
-    Run {
-        /// 模型目录（覆盖 settings.toml 的 asr.model_dir）
-        #[arg(long)]
-        model_dir: Option<PathBuf>,
-        /// 指定输入设备名（包含匹配），默认系统默认麦克风
-        #[arg(long)]
-        device: Option<String>,
-        /// 监听时长（秒），默认无限
-        #[arg(long)]
-        duration: Option<u64>,
-        /// 热词（空格分隔，中文直接写），提升专有名词识别
-        #[arg(long)]
-        hotwords: Option<String>,
-    },
-    /// 离线转写 wav 文件（不需要麦克风；流式 zipformer/paraformer / 离线 SenseVoice/Whisper/Qwen3-ASR 均可用）
+    /// 离线转写 wav 文件（不需要麦克风；audiocpp qwen3_asr）
     Test {
         /// wav 路径；默认 <model_dir>/test_wavs/0.wav
         #[arg(long)]
         wav: Option<PathBuf>,
         #[arg(long)]
         model_dir: Option<PathBuf>,
-        /// 热词（空格分隔，中文直接写），提升专有名词识别
-        #[arg(long)]
-        hotwords: Option<String>,
-        /// 转写语言（SenseVoice/Whisper；Qwen3-ASR 自动识别、忽略此参数），如 zh / en / ja
+        /// 转写语言（透传 audiocpp；缺省由模型自动识别），如 zh / en / ja
         #[arg(long)]
         language: Option<String>,
-        /// SenseVoice 反向文本正则化（数字/标点），缺省开启；Qwen3-ASR 忽略此参数
+        /// 反向文本正则化（数字/标点），audiocpp 后端不支持、忽略此参数
         #[arg(long)]
         use_itn: Option<bool>,
     },
@@ -99,7 +81,7 @@ pub enum AsrCmd {
         #[arg(long)]
         force: bool,
     },
-    /// 免提连续听写（离线 SenseVoice/Whisper/Qwen3-ASR + Silero VAD 分段，每段整句转写）
+    /// 免提连续听写（Silero VAD 分段，每段整句送 audiocpp qwen3_asr 转写）
     Dictate {
         /// 模型目录（覆盖 settings.toml 的 asr.model_dir）
         #[arg(long)]
@@ -110,10 +92,10 @@ pub enum AsrCmd {
         /// 听写时长（秒），默认无限
         #[arg(long)]
         duration: Option<u64>,
-        /// 转写语言（SenseVoice/Whisper；Qwen3-ASR 自动识别、忽略此参数），如 zh / en / ja
+        /// 转写语言（透传 audiocpp；缺省由模型自动识别），如 zh / en / ja
         #[arg(long)]
         language: Option<String>,
-        /// SenseVoice 反向文本正则化（数字/标点），缺省开启；Qwen3-ASR 忽略此参数
+        /// 反向文本正则化（数字/标点），audiocpp 后端不支持、忽略此参数
         #[arg(long)]
         use_itn: Option<bool>,
     },
@@ -217,35 +199,18 @@ pub async fn run(cli: Cli) -> Result<(), String> {
 /// ASR 命令入口
 async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
     match cmd {
-        AsrCmd::Run {
-            model_dir,
-            device,
-            duration,
-            hotwords,
-        } => {
-            let mut cfg = asr_config(model_dir.as_ref())?;
-            if hotwords.is_some() {
-                cfg.hotwords = hotwords;
-            }
-            crate::asr::run_realtime(&cfg, device.as_deref(), duration)
-        }
         AsrCmd::Test {
             wav,
             model_dir,
-            hotwords,
             language,
             use_itn,
         } => {
             let mut cfg = asr_config(model_dir.as_ref())?;
-            if hotwords.is_some() {
-                cfg.hotwords = hotwords;
+            if language.is_some() {
+                eprintln!("提示：--language 透传 audiocpp；缺省由模型自动识别语种。");
             }
-            if cfg.model_type == crate::asr::config::AsrModelKind::Qwen3Asr
-                && (language.is_some() || use_itn.is_some())
-            {
-                eprintln!(
-                    "提示：Qwen3-ASR 自动识别语种并原生输出标点，--language/--use-itn 已忽略。"
-                );
+            if use_itn.is_some() {
+                eprintln!("提示：audiocpp 后端原生输出标点/规则化，--use-itn 已忽略。");
             }
             if language.is_some() {
                 cfg.language = language;
@@ -310,7 +275,7 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
             language,
             use_itn,
         } => {
-            use crate::asr::reaction::ConsoleAsrReaction;
+            use crate::asr::ConsoleAsrReaction;
             let mut cfg = asr_config(model_dir.as_ref())?;
             if cfg.model_type.is_streaming() {
                 return Err(format!(
@@ -318,12 +283,11 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
                     cfg.model_type.as_str()
                 ));
             }
-            if cfg.model_type == crate::asr::config::AsrModelKind::Qwen3Asr
-                && (language.is_some() || use_itn.is_some())
-            {
-                eprintln!(
-                    "提示：Qwen3-ASR 自动识别语种并原生输出标点，--language/--use-itn 已忽略。"
-                );
+            if language.is_some() {
+                eprintln!("提示：--language 透传 audiocpp；缺省由模型自动识别语种。");
+            }
+            if use_itn.is_some() {
+                eprintln!("提示：audiocpp 后端原生输出标点/规则化，--use-itn 已忽略。");
             }
             if language.is_some() {
                 cfg.language = language;
@@ -698,8 +662,7 @@ mod tests {
 
     #[test]
     fn test_cli_parse_asr_test_flags() {
-        // 离线模型（SenseVoice/Whisper/Qwen3-ASR）转写语言与 ITN 开关
-        // （Qwen3-ASR 自动识别语种，运行时提示忽略）
+        // 文件转写的语言透传与 ITN 开关（ITN 由 audiocpp 后端忽略）
         let cli = Cli::try_parse_from([
             "test",
             "asr",
@@ -718,21 +681,6 @@ mod tests {
                     use_itn: Some(true),
                     ..
                 } if l == "zh"
-            )),
-            _ => panic!("Expected Asr command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_parse_asr_run() {
-        let cli = Cli::try_parse_from(["test", "asr", "run", "--duration", "10"]).unwrap();
-        match cli.command.unwrap() {
-            Commands::Asr { cmd } => assert!(matches!(
-                cmd,
-                AsrCmd::Run {
-                    duration: Some(10),
-                    ..
-                }
             )),
             _ => panic!("Expected Asr command"),
         }

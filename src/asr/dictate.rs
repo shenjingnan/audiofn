@@ -1,10 +1,10 @@
-/// 离线免提连续听写（SenseVoice/Whisper + Silero VAD 分段，每段整句转写）。
+/// 离线免提连续听写（Silero VAD 分段，每段整句送 audiocpp qwen3_asr 转写）。
 ///
-/// 平行于流式 `run_realtime_with`：麦克风 → 重采样 16k → Silero VAD 分段 →
-/// 每段 `OfflineAsrEngine::transcribe_samples` 整句转写 → `AsrReaction`。
+/// 麦克风 → 重采样 16k → Silero VAD 分段 →
+/// 每段 [`AudiocppAsr::transcribe`] 整句转写 → [`AsrReaction`]。
 use crate::asr::config::ResolvedAsrConfig;
-use crate::asr::offline::OfflineAsrEngine;
-use crate::asr::reaction::{AsrReaction, AsrResult};
+use crate::asr::{AsrReaction, AsrResult};
+use crate::audiocpp::client::AudiocppAsr;
 use crate::model_library::asset::{
     ProgressFn, asr_vad_asset, asr_vad_user_model_path, install_raw_file_to,
 };
@@ -112,7 +112,7 @@ pub(crate) fn segment_start_time_seconds(start_sample: i32) -> f32 {
 
 /// 免提连续听写循环：麦克风 → 16k → VAD 分段 → 每段整句转写 → reaction。
 ///
-/// `should_stop` 语义同 `run_realtime_with`：`Some(running)` 且 `running=false` 时干净退出。
+/// `should_stop` 语义：`Some(running)` 且 `running=false` 时干净退出。
 pub fn run_dictate(
     cfg: &ResolvedAsrConfig,
     vad_cfg: &DictateConfig,
@@ -121,7 +121,8 @@ pub fn run_dictate(
     reaction: &mut dyn AsrReaction,
     should_stop: Option<&AtomicBool>,
 ) -> Result<(), String> {
-    let engine = OfflineAsrEngine::new(cfg.clone())?;
+    // 会话级单例：sidecar 租约贯穿整次听写（每段只做一次 HTTP 上传）
+    let engine = AudiocppAsr::new(cfg.clone())?;
     let vad =
         VoiceActivityDetector::create(&build_vad_config(vad_cfg), vad_cfg.buffer_size_in_seconds)
             .ok_or_else(|| "无法创建 VAD 检测器，请检查 silero_vad.onnx 是否就绪".to_string())?;
@@ -136,7 +137,7 @@ pub fn run_dictate(
 
     // 处理 VAD 已排队的所有语音段：拷贝样本 → pop → 整句转写 → reaction。
     let process_segments = |vad: &VoiceActivityDetector,
-                            engine: &OfflineAsrEngine,
+                            engine: &AudiocppAsr,
                             reaction: &mut dyn AsrReaction|
      -> Result<bool, String> {
         while !vad.is_empty() {
@@ -148,7 +149,10 @@ pub fn run_dictate(
             if stop_requested() {
                 return Ok(true);
             }
-            let text = match engine.transcribe_samples(&samples, DICTATE_MODEL_SAMPLE_RATE) {
+            let text = match engine
+                .transcribe(&samples, DICTATE_MODEL_SAMPLE_RATE)
+                .map_err(|e| e.to_user_message())
+            {
                 Ok(t) => t,
                 Err(e) => {
                     tracing::warn!("听写分段转写失败（跳过该段）: {e}");
@@ -160,8 +164,6 @@ pub fn run_dictate(
             }
             let result = AsrResult {
                 text,
-                tokens: Vec::new(),
-                timestamps: None,
                 start_time: Some(segment_start_time_seconds(start_sample)),
                 is_final: true,
             };

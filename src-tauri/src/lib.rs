@@ -127,31 +127,6 @@ fn request_mic_permission() -> Result<bool, String> {
     zapmomo::audio::request_mic_permission()
 }
 
-struct AsrListenState {
-    running: Arc<AtomicBool>,
-    handle: Mutex<Option<std::thread::JoinHandle<()>>>,
-    /// 当前会话真正使用的模型目录（RuntimeActual）
-    active_model_dir: Arc<Mutex<Option<PathBuf>>>,
-}
-
-impl AsrListenState {
-    fn new() -> Self {
-        Self {
-            running: Arc::new(AtomicBool::new(false)),
-            handle: Mutex::new(None),
-            active_model_dir: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    fn is_listening(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
-    }
-
-    fn active_model_dir(&self) -> Option<PathBuf> {
-        self.active_model_dir.lock().ok().and_then(|g| g.clone())
-    }
-}
-
 /// ASR 模型下载状态：防重入标志。
 struct AsrDownloadState {
     in_progress: Arc<AtomicBool>,
@@ -165,19 +140,7 @@ impl Default for AsrDownloadState {
     }
 }
 
-/// 把语音识别结果通过 Tauri 事件发给前端。
-struct TauriAsrReaction {
-    app: AppHandle,
-}
-
-impl AsrReaction for TauriAsrReaction {
-    fn on_result(&mut self, result: &AsrResult) -> ReactionOutcome {
-        let _ = self.app.emit("asr-result", result);
-        ReactionOutcome::Continue
-    }
-}
-
-/// 离线听写线程状态：共享停止标志 + 线程句柄（镜像 `AsrListenState`）。
+/// 离线听写线程状态：共享停止标志 + 线程句柄 + 当前使用的模型目录。
 struct AsrDictateState {
     running: Arc<AtomicBool>,
     handle: Mutex<Option<std::thread::JoinHandle<()>>>,
@@ -300,10 +263,9 @@ struct TranscribeResult {
     model_dir: String,
 }
 
-/// 一键离线转写 wav 文件（流式 zipformer / SenseVoice / Whisper 均可用）。
+/// 一键离线转写 wav 文件（走 audiocpp qwen3_asr，经 `asr::transcribe_wav`）。
 ///
-/// 族感知：`asr::transcribe_wav` 按 `model_type` 分发到在线/离线引擎；
-/// `wav_path` 为 None 时转写模型自带的 `test_wavs/` 示例音频（离线「测试识别」）；
+/// `wav_path` 为 None 时转写模型自带的 `test_wavs/` 示例音频（「测试识别」）；
 /// 阻塞线程池执行避免卡 UI。
 #[tauri::command]
 async fn transcribe_audio(wav_path: Option<String>) -> Result<TranscribeResult, String> {
@@ -326,123 +288,10 @@ async fn transcribe_audio(wav_path: Option<String>) -> Result<TranscribeResult, 
     .map_err(|e| e.to_string())?
 }
 
-/// 开始实时语音识别的内部实现（`start_asr_listen` command 与「切换设备重启」共用）。
-///
-/// 校验模型文件后启动独立线程跑 `run_realtime_with`，识别结果经
-/// `asr-result` 事件发给前端；线程结束发 `asr-stopped`，启动成功发 `asr-started`。
-fn start_asr_listen_impl(
-    app: AppHandle,
-    state: &AsrListenState,
-    device: Option<String>,
-) -> Result<(), String> {
-    if state.is_listening() {
-        return Err("已在识别中".to_string());
-    }
-
-    let settings = zapmomo::config::settings::load_settings()?;
-    let asr_settings = settings.as_ref().and_then(|s| s.asr.clone());
-    let cfg = zapmomo::asr::config::resolve(asr_settings.as_ref(), None)?;
-
-    // 离线族（SenseVoice/Whisper/Qwen3-ASR）不支持实时识别：前端已禁用开关，这里双保险拦截
-    if !cfg.model_type.is_streaming() {
-        return Err(format!(
-            "当前模型类型 {} 不支持实时识别。请切换回流式（zipformer/paraformer）模型，或使用「转写文件」/「免提听写」离线转写。",
-            cfg.model_type.as_str()
-        ));
-    }
-
-    // 预检模型文件（族感知：zipformer 四件 / paraformer 三件），
-    // 失败同步返回清晰错误（避免在后台线程里才报错）
-    let preflight = collect_asr_preflight_files(&cfg)?;
-    if let Some((_, missing)) = preflight.iter().find(|(_, p)| !p.is_file()) {
-        return Err(format!(
-            "缺少模型文件: {}\n\n请在「配置」面板点击「下载模型」，或运行 `zapmomo asr install-model` 下载模型。",
-            missing.display()
-        ));
-    }
-
-    let running = state.running.clone();
-    running.store(true, Ordering::Relaxed);
-    // RuntimeActual：记录本次识别会话使用的模型目录；随线程退出自动清空
-    let _active_guard = ActiveModelGuard::set(&state.active_model_dir, cfg.model_dir.clone());
-    let thread_app = app.clone();
-    let handle = std::thread::spawn(move || {
-        let _active = _active_guard;
-        tracing::info!("ASR listen thread started");
-        let mut reaction = TauriAsrReaction { app: thread_app };
-        let result = zapmomo::asr::run_realtime_with(
-            &cfg,
-            device.as_deref(),
-            None,
-            &mut reaction,
-            Some(&running),
-        );
-        running.store(false, Ordering::Relaxed);
-        match &result {
-            Ok(()) => tracing::info!("ASR listen thread finished (clean)"),
-            Err(e) => tracing::error!("ASR listen thread finished with error: {e}"),
-        }
-        let payload = ListenStopped {
-            error: result.err(),
-        };
-        let _ = reaction.app.emit("asr-stopped", payload);
-    });
-    *state
-        .handle
-        .lock()
-        .expect("asr listen handle lock poisoned") = Some(handle);
-    // 通知前端识别已启动（含切换设备后的自动重启；启动瞬间前端未订阅时静默丢弃）
-    let _ = app.emit("asr-started", ListenStopped { error: None });
-    Ok(())
-}
-
-/// 开始实时语音识别。 —— Tauri command 外壳，签名与前端契约不变。
-#[tauri::command]
-fn start_asr_listen(
-    app: AppHandle,
-    state: State<'_, AsrListenState>,
-    device: Option<String>,
-) -> Result<(), String> {
-    start_asr_listen_impl(app, state.inner(), device)
-}
-
-/// 停止实时语音识别的内部实现（command 与「切换设备重启」共用）。
-fn stop_asr_listen_inner(state: &AsrListenState) -> Result<(), String> {
-    if !state.is_listening() {
-        return Err("当前没有在识别".to_string());
-    }
-    state.running.store(false, Ordering::Relaxed);
-    let handle = state
-        .handle
-        .lock()
-        .expect("asr listen handle lock poisoned")
-        .take();
-    if let Some(handle) = handle {
-        let _ = handle.join();
-    }
-    *state
-        .active_model_dir
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = None;
-    Ok(())
-}
-
-/// 停止实时语音识别：置停止标志并等待线程退出。
-#[tauri::command]
-fn stop_asr_listen(state: State<'_, AsrListenState>) -> Result<(), String> {
-    stop_asr_listen_inner(state.inner())
-}
-
-/// 当前是否正在识别。
-#[tauri::command]
-fn is_asr_listening(state: State<'_, AsrListenState>) -> bool {
-    state.is_listening()
-}
-
 /// 开始离线免提听写的内部实现（command 与「切换设备重启」共用）。
 ///
-/// 守卫：仅在离线模型（SenseVoice/Whisper/Qwen3-ASR）下可用；流式族（zipformer/paraformer）被拒（听写是离线专用）。
-/// 线程内先惰性下载 Silero VAD 模型，再跑 `run_dictate`（VAD 分段 → 每段整句转写）。
+/// 守卫：仅在离线模型（非 zipformer/paraformer 流式族）下可用。
+/// 线程内先惰性下载 Silero VAD 模型，再跑 `run_dictate`（VAD 分段 → 每段整句送 audiocpp qwen3_asr）。
 fn start_asr_dictate_impl(
     app: AppHandle,
     state: &AsrDictateState,
@@ -464,10 +313,8 @@ fn start_asr_dictate_impl(
         ));
     }
 
-    // 离线模型文件预检（族感知），避免在后台线程里才报错
-    if !zapmomo::asr::config::asr_files_present_for_kind(&cfg.model_dir, cfg.model_type) {
-        return Err("离线模型文件不完整，请在「切换模型」中重新下载或选择完整模型。".to_string());
-    }
+    // ASR 就绪预检（backend 感知：audiocpp 按 GGUF 单文件校验），避免在后台线程里才报错
+    zapmomo::asr::config::preflight(&cfg)?;
 
     let running = state.running.clone();
     running.store(true, Ordering::Relaxed);
@@ -1049,12 +896,11 @@ fn get_microphone() -> Result<String, String> {
 
 /// 设置并持久化全局默认麦克风（空串 → None = 系统默认）。
 ///
-/// 若 ASR 实时识别 / 离线听写正在运行，用新设备自动重启对应监听，使切换立即生效；
+/// 若离线听写正在运行，用新设备自动重启监听，使切换立即生效；
 /// 重启失败（如新设备不可用）返回错误，已停止的任务保持停止。
 #[tauri::command]
 fn set_microphone(
     app: AppHandle,
-    asr_listen: State<'_, AsrListenState>,
     asr_dictate: State<'_, AsrDictateState>,
     mic: String,
 ) -> Result<(), String> {
@@ -1068,11 +914,6 @@ fn set_microphone(
 
     let new_mic = settings.microphone.clone();
 
-    // ASR 监听运行中 → 用新设备重启。
-    if asr_listen.is_listening() {
-        stop_asr_listen_inner(asr_listen.inner())?;
-        start_asr_listen_impl(app.clone(), asr_listen.inner(), new_mic.clone())?;
-    }
     // 离线听写运行中 → 用新设备重启。
     if asr_dictate.is_dictating() {
         stop_asr_dictate_inner(asr_dictate.inner())?;
@@ -1502,15 +1343,12 @@ fn open_path(p: &Path) -> Result<(), String> {
 /// 模型库列表（含每个模型的安装状态 / current / runtime_status）。
 #[tauri::command]
 fn list_model_library(
-    asr: State<'_, AsrListenState>,
     asr_dictate: State<'_, AsrDictateState>,
     tts: State<'_, TtsSynthesizeState>,
 ) -> Result<Vec<LibraryModel>, String> {
     let mut models = model_library::list_models();
-    // 流式识别与离线听写任一在跑 → ASR RuntimeActual 置位（模型库卡片显示 Active）
-    let asr_actual = asr
-        .active_model_dir()
-        .or_else(|| asr_dictate.active_model_dir());
+    // 离线听写在跑 → ASR RuntimeActual 置位（模型库卡片显示 Active）
+    let asr_actual = asr_dictate.active_model_dir();
     // TTS 无常驻引擎：actual = 当前 selection（与 current 判定同源，写配置即切换），
     // active = 是否有合成线程在跑。
     // LLM 已改为远程连接：无本地 runtime，llm 相关 actual 恒 None/false。
@@ -1644,7 +1482,7 @@ fn cancel_model_download(state: State<'_, ModelLibraryState>) -> Result<(), Stri
 #[tauri::command]
 async fn set_current_model(
     app: AppHandle,
-    asr: State<'_, AsrListenState>,
+    asr_dictate: State<'_, AsrDictateState>,
     id: String,
 ) -> Result<SetCurrentResult, String> {
     let model = resolve_library_model(&id)?;
@@ -1666,7 +1504,7 @@ async fn set_current_model(
                 true,
                 format!("已将 {} 设为当前模型", model.display_name),
             ),
-            LibModelType::Asr if asr.is_listening() => (
+            LibModelType::Asr if asr_dictate.is_dictating() => (
                 LibRuntimeAction::RestartRequired,
                 false,
                 format!(
@@ -1698,7 +1536,7 @@ async fn set_current_model(
 #[tauri::command]
 fn delete_model(
     dl: State<'_, ModelLibraryState>,
-    asr: State<'_, AsrListenState>,
+    asr_dictate: State<'_, AsrDictateState>,
     id: String,
 ) -> Result<(), String> {
     let model = resolve_library_model(&id)?;
@@ -1716,7 +1554,7 @@ fn delete_model(
     }
     if let Some(lp) = &model.local_path {
         let lp = Path::new(lp);
-        let loaded = asr
+        let loaded = asr_dictate
             .active_model_dir()
             .is_some_and(|d| model_library::paths_equal(&d, lp));
         if loaded {
@@ -1789,7 +1627,7 @@ fn check_storage_busy(
     dl_asr: &AsrDownloadState,
     dl_tts: &TtsDownloadState,
     lib_dl: &ModelLibraryState,
-    asr: &AsrListenState,
+    asr_dictate: &AsrDictateState,
 ) -> Result<(), String> {
     if dl_asr.in_progress.load(Ordering::Relaxed)
         || dl_tts.in_progress.load(Ordering::Relaxed)
@@ -1797,7 +1635,7 @@ fn check_storage_busy(
     {
         return Err("有模型正在下载，请先等待下载完成或取消后再操作".to_string());
     }
-    if asr.is_listening() {
+    if asr_dictate.is_dictating() {
         return Err("有识别任务正在运行，请先停止后再操作".to_string());
     }
     Ok(())
@@ -1844,13 +1682,18 @@ async fn set_data_dir(
     dl_asr: State<'_, AsrDownloadState>,
     dl_tts: State<'_, TtsDownloadState>,
     lib_dl: State<'_, ModelLibraryState>,
-    asr: State<'_, AsrListenState>,
+    asr_dictate: State<'_, AsrDictateState>,
     mig: State<'_, StorageMigrateState>,
 ) -> Result<StorageInfoView, String> {
     if mig.is_running() {
         return Err("正在迁移模型，请稍候".to_string());
     }
-    check_storage_busy(dl_asr.inner(), dl_tts.inner(), lib_dl.inner(), asr.inner())?;
+    check_storage_busy(
+        dl_asr.inner(),
+        dl_tts.inner(),
+        lib_dl.inner(),
+        asr_dictate.inner(),
+    )?;
 
     let data_dir_value = match &path {
         Some(p) if !p.trim().is_empty() => Some(
@@ -1881,12 +1724,17 @@ async fn migrate_storage(
     dl_asr: State<'_, AsrDownloadState>,
     dl_tts: State<'_, TtsDownloadState>,
     lib_dl: State<'_, ModelLibraryState>,
-    asr: State<'_, AsrListenState>,
+    asr_dictate: State<'_, AsrDictateState>,
 ) -> Result<(), String> {
     if mig.is_running() {
         return Err("迁移已在进行中".to_string());
     }
-    check_storage_busy(dl_asr.inner(), dl_tts.inner(), lib_dl.inner(), asr.inner())?;
+    check_storage_busy(
+        dl_asr.inner(),
+        dl_tts.inner(),
+        lib_dl.inner(),
+        asr_dictate.inner(),
+    )?;
     mig.running.store(true, Ordering::SeqCst);
     mig.cancel.store(false, Ordering::SeqCst);
     let running = mig.running.clone();
@@ -2075,58 +1923,6 @@ fn build_chatbox_item(app: &AppHandle) -> tauri::Result<CheckMenuItem<tauri::Wry
     )
 }
 
-/// 按模型族返回 ASR 必需文件（(标签, 解析后路径)）。
-///
-/// 不用 `asr_files_present_for_kind`（按 model_dir 探测）：preflight 需校验解析后的
-/// 绝对路径（settings 可显式指定模型目录外的文件）。SenseVoice 主模型在 `cfg.model`
-/// （Option）需 unwrap，resolve 已保证解析。
-fn collect_asr_preflight_files(
-    cfg: &zapmomo::asr::config::ResolvedAsrConfig,
-) -> Result<Vec<(&'static str, &std::path::Path)>, String> {
-    use zapmomo::asr::config::AsrModelKind;
-    let files: Vec<(&'static str, &std::path::Path)> = match cfg.model_type {
-        AsrModelKind::Zipformer => vec![
-            ("ASR encoder", &cfg.encoder),
-            ("ASR decoder", &cfg.decoder),
-            ("ASR joiner", &cfg.joiner),
-            ("ASR tokens", &cfg.tokens),
-        ],
-        AsrModelKind::Paraformer => vec![
-            ("ASR encoder", &cfg.encoder),
-            ("ASR decoder", &cfg.decoder),
-            ("ASR tokens", &cfg.tokens),
-        ],
-        AsrModelKind::SenseVoice => {
-            let model = cfg
-                .model
-                .as_deref()
-                .ok_or_else(|| "SenseVoice 模型未解析出主模型文件".to_string())?;
-            vec![("ASR model", model), ("ASR tokens", &cfg.tokens)]
-        }
-        AsrModelKind::Whisper => vec![
-            ("ASR encoder", &cfg.encoder),
-            ("ASR decoder", &cfg.decoder),
-            ("ASR tokens", &cfg.tokens),
-        ],
-        AsrModelKind::Qwen3Asr => {
-            let conv = cfg
-                .model
-                .as_deref()
-                .ok_or_else(|| "Qwen3-ASR 模型未解析出 conv_frontend 文件".to_string())?;
-            // tokenizer 是目录（非文件），不进 is_file 循环，单独校验
-            if !cfg.tokens.is_dir() {
-                return Err(format!("缺少 tokenizer 目录: {}", cfg.tokens.display()));
-            }
-            vec![
-                ("ASR conv_frontend", conv),
-                ("ASR encoder", &cfg.encoder),
-                ("ASR decoder", &cfg.decoder),
-            ]
-        }
-    };
-    Ok(files)
-}
-
 /// Tauri 应用入口。
 pub fn run() {
     zapmomo::logging::init_logging();
@@ -2144,7 +1940,6 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
         ))
-        .manage(AsrListenState::new())
         .manage(AsrDictateState::new())
         .manage(AsrDownloadState::default())
         .manage(TtsSynthesizeState::new())
@@ -2160,9 +1955,6 @@ pub fn run() {
             get_asr_config,
             set_asr_enabled,
             set_asr_params,
-            start_asr_listen,
-            stop_asr_listen,
-            is_asr_listening,
             download_asr_model,
             transcribe_audio,
             start_asr_dictate,
@@ -2559,99 +2351,5 @@ mod autostart_tests {
             autostart_item_labels(true),
             ("disable_autostart", "关闭开机自启动")
         );
-    }
-}
-
-#[cfg(test)]
-mod preflight_tests {
-    use super::collect_asr_preflight_files;
-    use std::path::PathBuf;
-    use zapmomo::asr::config::{AsrModelKind, ResolvedAsrConfig};
-
-    fn cfg_with(kind: AsrModelKind) -> ResolvedAsrConfig {
-        let base = PathBuf::from("/models");
-        ResolvedAsrConfig {
-            model_type: kind,
-            model_dir: base.clone(),
-            model: Some(base.join("model.onnx")),
-            encoder: base.join("encoder.onnx"),
-            decoder: base.join("decoder.onnx"),
-            joiner: base.join("joiner.onnx"),
-            tokens: base.join("tokens.txt"),
-            ..ResolvedAsrConfig::default()
-        }
-    }
-
-    fn labels(files: &[(&'static str, &std::path::Path)]) -> Vec<&'static str> {
-        files.iter().map(|(l, _)| *l).collect()
-    }
-
-    #[test]
-    fn test_preflight_files_zipformer_includes_joiner() {
-        let cfg = cfg_with(AsrModelKind::Zipformer);
-        let files = collect_asr_preflight_files(&cfg).unwrap();
-        let labels = labels(&files);
-        assert!(labels.contains(&"ASR joiner"));
-        assert!(labels.contains(&"ASR encoder"));
-        assert!(labels.contains(&"ASR tokens"));
-    }
-
-    #[test]
-    fn test_preflight_files_sensevoice_no_joiner() {
-        let cfg = cfg_with(AsrModelKind::SenseVoice);
-        let files = collect_asr_preflight_files(&cfg).unwrap();
-        let labels = labels(&files);
-        assert!(labels.contains(&"ASR model"));
-        assert!(labels.contains(&"ASR tokens"));
-        assert!(!labels.contains(&"ASR joiner"));
-        assert!(!labels.contains(&"ASR encoder"));
-    }
-
-    #[test]
-    fn test_preflight_files_whisper_no_joiner() {
-        let cfg = cfg_with(AsrModelKind::Whisper);
-        let files = collect_asr_preflight_files(&cfg).unwrap();
-        let labels = labels(&files);
-        assert!(labels.contains(&"ASR encoder"));
-        assert!(labels.contains(&"ASR decoder"));
-        assert!(labels.contains(&"ASR tokens"));
-        assert!(!labels.contains(&"ASR joiner"));
-    }
-
-    #[test]
-    fn test_preflight_files_qwen3_no_joiner_tokenizer_as_dir() {
-        // 手建临时目录（src-tauri 无 tempfile 依赖）
-        let dir =
-            std::env::temp_dir().join(format!("zapmomo-preflight-qwen3-{}", std::process::id()));
-        let tokenizer = dir.join("tokenizer");
-        std::fs::create_dir_all(&tokenizer).unwrap();
-
-        // tokenizer 目录存在 → conv_frontend/encoder/decoder 三件（无 joiner/tokens 标签）
-        let cfg = ResolvedAsrConfig {
-            model_type: AsrModelKind::Qwen3Asr,
-            model_dir: dir.clone(),
-            model: Some(dir.join("conv_frontend.onnx")),
-            encoder: dir.join("encoder.int8.onnx"),
-            decoder: dir.join("decoder.int8.onnx"),
-            tokens: tokenizer.clone(),
-            ..ResolvedAsrConfig::default()
-        };
-        let files = collect_asr_preflight_files(&cfg).unwrap();
-        let labels = labels(&files);
-        assert!(labels.contains(&"ASR conv_frontend"));
-        assert!(labels.contains(&"ASR encoder"));
-        assert!(labels.contains(&"ASR decoder"));
-        assert!(!labels.contains(&"ASR joiner"));
-        assert!(!labels.contains(&"ASR tokens"));
-
-        // tokenizer 目录缺失 → 直接报错（目录级校验，不进 is_file 循环）
-        let cfg_bad = ResolvedAsrConfig {
-            tokens: dir.join("nonexistent-tokenizer"),
-            ..cfg
-        };
-        let err = collect_asr_preflight_files(&cfg_bad).err().unwrap();
-        assert!(err.contains("tokenizer"), "err: {err}");
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }
