@@ -102,17 +102,27 @@ mod tests {
     #[test]
     fn test_entry_lookup() {
         let reg = VerifiedRegistry::builtin();
-        let m = reg.entry_for_model("kws-zipformer-zh-en-3m").unwrap();
-        assert!(m.repo_id.is_none(), "sherpa 内置无 HF repo");
-        assert_eq!(m.model_type.as_deref(), Some("kws"));
+        let m = reg.entry_for_model("asr-qwen3-0.6b-audiocpp").unwrap();
+        assert!(m.repo_id.is_none(), "内置精选无 HF repo 映射");
+        assert_eq!(m.model_type.as_deref(), Some("asr"));
+        let t = reg
+            .entry_for_model("tts-qwen3-17b-base-q8-audiocpp")
+            .unwrap();
+        assert_eq!(t.model_type.as_deref(), Some("tts"));
+        // 与 model_registry 一一对应（条目 id 必须真实存在于 registry）
+        for e in reg.all() {
+            assert!(
+                crate::model_library::registry::model_by_id(&e.model_id).is_some(),
+                "verified 条目 {} 在 model_registry 中不存在",
+                e.model_id
+            );
+        }
     }
 
     #[test]
     fn test_hf_repo_ids_empty_after_llm_removal() {
-        // 本地 LLM 推理移除后，verified overlay 不再含任何 HF repo 映射
-        // （剩余 sherpa 内置均来自 GitHub releases，无 HF repo）
+        // 本地 LLM 推理与 sherpa 内置移除后，verified overlay 不再含任何 HF repo 映射
         let repos = VerifiedRegistry::builtin().hf_repo_ids();
         assert!(repos.is_empty(), "LLM 条目移除后不应再有 HF repo 映射");
-        assert!(!repos.contains(&"kws-zipformer-zh-en-3m"));
     }
 }

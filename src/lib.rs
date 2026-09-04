@@ -33,31 +33,6 @@ pub(crate) mod test_util {
         data
     }
 
-    /// 摆一个含 KWS 模型文件的临时目录（`kws::config` 探测/解析与
-    /// `model_library::asset::kws_files_present` 测试共用）。
-    ///
-    /// 三件套与 tokens 取给定文件名（可传默认常量或非默认 epoch 布局），
-    /// 关键词文件按 `keywords_rel` 落位（可含子目录），`extra` 追加干扰文件。
-    pub(crate) fn fake_kws_model_dir(
-        encoder: &str,
-        decoder: &str,
-        joiner: &str,
-        keywords_rel: &str,
-        extra: &[&str],
-    ) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        for f in [encoder, decoder, joiner, "tokens.txt"] {
-            std::fs::write(dir.path().join(f), b"m").unwrap();
-        }
-        let kw = dir.path().join(keywords_rel);
-        std::fs::create_dir_all(kw.parent().unwrap()).unwrap();
-        std::fs::write(kw, "n ǐ h ǎo @你好").unwrap();
-        for f in extra {
-            std::fs::write(dir.path().join(f), b"m").unwrap();
-        }
-        dir
-    }
-
     /// 在临时 HOME 目录下执行测试函数
     /// 使用全局锁确保 HOME 环境变量不会被并行测试竞态覆盖
     pub fn run_with_temp_home(f: impl FnOnce(&std::path::Path)) {

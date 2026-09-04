@@ -206,27 +206,50 @@ pub fn models_present(cfg: &ResolvedTtsConfig) -> bool {
     preflight(cfg).is_ok()
 }
 
+/// `tts install-model` 缺省安装的模型库条目（audiocpp Qwen3-TTS 0.6B，单 GGUF）。
+///
+/// CLI（`src/cli.rs`）与 Tauri（`download_tts_model`）共用；目录基名取同一条目的
+/// registry `model.name`（见 [`default_registry_model_dir_name`]，与
+/// `install_managed_model` 的落位规则同源）。
+pub const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
+
+/// 缺省模型条目的安装目录基名（registry `model.name`）。
+///
+/// 与 `install_managed_model` 的落位（`models/<model.name>`）取同一事实源，
+/// 保证「先 install-model 再 tts run」的缺省路径能对上同一目录。
+/// （缺陷修复：此前缺省目录取已裁剪的 manifest role `"tts"` 资产名
+/// `sherpa-onnx-zipvoice-distill-int8-…`，而 audiocpp 模型装到
+/// `qwen3-tts-06b-base-audiocpp`——fresh HOME 下装完模型依旧报缺文件死循环。）
+fn default_registry_model_dir_name() -> String {
+    crate::model_library::registry::model_by_id(DEFAULT_TTS_REGISTRY_ID)
+        .unwrap_or_else(|| panic!("模型库缺少 audiocpp Qwen3-TTS 条目: {DEFAULT_TTS_REGISTRY_ID}"))
+        .name
+        .clone()
+}
+
 /// 用户默认模型目录：`~/.zapmomo/models/<模型名>`
 pub fn user_default_model_dir() -> PathBuf {
-    crate::model_library::asset::tts_user_model_dir()
+    crate::config::settings::get_models_dir().join(default_registry_model_dir_name())
 }
 
 /// 源码仓库中的模型目录（开发者 `./models/<模型名>`，仅作开发回退）。
 fn repo_models_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("models")
-        .join(&crate::model_library::asset::tts_asset().name)
+        .join(default_registry_model_dir_name())
 }
 
 /// 默认模型目录选择：用户已安装 > 旧默认根存量（data_dir 切换后）> 源码仓库已下载（开发便利）> 用户默认。
 ///
-/// 纯决策函数（不访问真实文件系统），便于测试注入路径。
+/// 探测文件是 audiocpp 族的主 GGUF（单文件即完整）；纯决策函数（不访问真实文件
+/// 系统），便于测试注入路径。
 fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> PathBuf {
-    if user.join(DEFAULT_TOKENS).is_file() {
+    let probe = crate::audiocpp::families::QWEN3_TTS_06B.gguf_file;
+    if user.join(probe).is_file() {
         user.to_path_buf()
-    } else if legacy.is_some_and(|l| l.join(DEFAULT_TOKENS).is_file()) {
+    } else if legacy.is_some_and(|l| l.join(probe).is_file()) {
         legacy.unwrap().to_path_buf()
-    } else if repo.join(DEFAULT_TOKENS).is_file() {
+    } else if repo.join(probe).is_file() {
         repo.to_path_buf()
     } else {
         user.to_path_buf()
@@ -237,7 +260,7 @@ fn choose_default_model_dir(user: &Path, legacy: Option<&Path>, repo: &Path) -> 
 pub fn default_model_dir() -> PathBuf {
     // legacy 与 user 层次对等：旧根下对应模型的子目录（user 是 `models/<模型名>`）
     let legacy = crate::config::settings::legacy_models_dir()
-        .map(|l| l.join(&crate::model_library::asset::tts_asset().name));
+        .map(|l| l.join(default_registry_model_dir_name()));
     choose_default_model_dir(
         &user_default_model_dir(),
         legacy.as_deref(),
@@ -431,10 +454,11 @@ mod tests {
                 .join(".zapmomo")
                 .join("models")
                 .join(new_dir.file_name().unwrap());
+            let gguf = crate::audiocpp::families::QWEN3_TTS_06B.gguf_file;
 
             for d in [&new_dir, &legacy_dir] {
                 std::fs::create_dir_all(d).unwrap();
-                std::fs::write(d.join(DEFAULT_TOKENS), b"t").unwrap();
+                std::fs::write(d.join(gguf), b"t").unwrap();
             }
             assert_eq!(default_model_dir(), new_dir);
 
@@ -446,6 +470,52 @@ mod tests {
         });
     }
 
+    /// 缺省目录基名 == 缺省 registry 条目的 managed 安装目录名（同一事实源）。
+    ///
+    /// 回归锚点：此前缺省目录解析已裁剪的 manifest role `"tts"`（zipvoice 目录名），
+    /// 与 `install_managed_model` 的落位目录不一致 → fresh HOME 下 `tts install-model`
+    /// 装完模型后 `tts run` 依旧 preflight 报缺文件死循环。
+    #[test]
+    fn test_default_model_dir_matches_registry_install_dir() {
+        run_with_temp_home(|_| {
+            let model = crate::model_library::registry::model_by_id(DEFAULT_TTS_REGISTRY_ID)
+                .expect("模型库应含缺省 Qwen3-TTS 条目");
+            // 落位目录（install_managed_model 的 commit 目标）
+            let install_dir = crate::model_library::managed_install_dir(model);
+            assert_eq!(user_default_model_dir(), install_dir);
+            assert_eq!(
+                default_model_dir().file_name(),
+                install_dir.file_name(),
+                "缺省目录基名必须等于 registry 条目目录名"
+            );
+            assert_eq!(default_model_dir(), install_dir);
+
+            // fresh HOME：模拟「install-model 装完」→ 缺省解析命中该目录且 preflight 通过
+            std::fs::create_dir_all(&install_dir).unwrap();
+            std::fs::write(
+                install_dir.join(crate::audiocpp::families::QWEN3_TTS_06B.gguf_file),
+                b"x",
+            )
+            .unwrap();
+            assert_eq!(default_model_dir(), install_dir);
+            let cfg = resolve(None, None).unwrap();
+            assert_eq!(cfg.model_dir, install_dir);
+            crate::tts::config::preflight(&cfg)
+                .expect("缺省条目安装完成后 tts run preflight 应通过");
+
+            // 未安装时不 panic：解析回落用户目录，preflight 报缺文件 + install-model 提示
+            std::fs::remove_dir_all(&install_dir).unwrap();
+            let cfg = resolve(None, None).unwrap();
+            let err = preflight(&cfg).unwrap_err();
+            assert!(
+                err.contains(crate::audiocpp::families::QWEN3_TTS_06B.gguf_file),
+                "err: {err}"
+            );
+            assert!(err.contains("tts install-model"), "err: {err}");
+            assert!(err.contains(DEFAULT_TTS_REGISTRY_ID), "err: {err}");
+        });
+    }
+
     #[test]
     fn test_default_config_points_to_default_model_dir() {
         let cfg = ResolvedTtsConfig::default();
@@ -453,7 +523,8 @@ mod tests {
             cfg.model_dir
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string()),
-            Some(crate::model_library::asset::tts_asset().name.clone())
+            Some("qwen3-tts-06b-base-audiocpp".to_string()),
+            "缺省目录 = 缺省 registry 条目的安装目录"
         );
         // 缺省即 Qwen3-TTS 0.6B + audiocpp 后端（唯一在册引擎）
         assert_eq!(cfg.model_type, TtsModelKind::Qwen3Tts06);
@@ -478,13 +549,14 @@ mod tests {
             assert_eq!(
                 dir,
                 home.join(".zapmomo/models")
-                    .join(crate::model_library::asset::tts_asset().name.as_str())
+                    .join("qwen3-tts-06b-base-audiocpp")
             );
         });
     }
 
     #[test]
     fn test_choose_default_model_dir_priority() {
+        let probe = crate::audiocpp::families::QWEN3_TTS_06B.gguf_file;
         let base = tempfile::tempdir().unwrap();
         let user = base.path().join("user-model");
         let repo = base.path().join("repo-model");
@@ -492,21 +564,41 @@ mod tests {
         assert_eq!(choose_default_model_dir(&user, None, &repo), user);
 
         std::fs::create_dir_all(&repo).unwrap();
-        std::fs::write(repo.join(DEFAULT_TOKENS), b"t").unwrap();
+        std::fs::write(repo.join(probe), b"t").unwrap();
         assert_eq!(choose_default_model_dir(&user, None, &repo), repo);
 
         std::fs::create_dir_all(&user).unwrap();
-        std::fs::write(user.join(DEFAULT_TOKENS), b"t").unwrap();
+        std::fs::write(user.join(probe), b"t").unwrap();
         assert_eq!(choose_default_model_dir(&user, None, &repo), user);
 
-        std::fs::remove_file(user.join(DEFAULT_TOKENS)).unwrap();
+        std::fs::remove_file(user.join(probe)).unwrap();
         let legacy = base.path().join("legacy-model");
         std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::write(legacy.join(DEFAULT_TOKENS), b"t").unwrap();
+        std::fs::write(legacy.join(probe), b"t").unwrap();
         assert_eq!(
             choose_default_model_dir(&user, Some(&legacy), &repo),
             legacy
         );
+    }
+
+    /// 探针是 audiocpp 族主 GGUF，而非旧 sherpa 目录的 `tokens.txt`：
+    /// 已装 qwen3 模型的目录（无 tokens.txt）必须被识别为「已安装」。
+    #[test]
+    fn test_default_dir_probe_is_family_gguf_not_legacy_tokens() {
+        run_with_temp_home(|_| {
+            let dir = user_default_model_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join(crate::audiocpp::families::QWEN3_TTS_06B.gguf_file),
+                b"x",
+            )
+            .unwrap();
+            assert!(
+                !dir.join(DEFAULT_TOKENS).exists(),
+                "audiocpp 族目录不含旧 sherpa 的 tokens.txt"
+            );
+            assert_eq!(default_model_dir(), dir, "GGUF 探针应命中已装目录");
+        });
     }
 
     #[test]

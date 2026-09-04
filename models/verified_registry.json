@@ -2,28 +2,28 @@
   "schema_version": 1,
   "entries": [
     {
-      "model_id": "kws-zipformer-zh-en-3m",
-      "provider": null,
-      "repo_id": null,
-      "model_type": "kws",
-      "architecture": "sherpa-kws-streaming-zipformer",
-      "compatibility_notes": "内置唤醒词模型，sherpa-onnx KeywordSpotter 验证可用（中英 3M）。"
-    },
-    {
-      "model_id": "asr-streaming-bilingual-zh-en",
+      "model_id": "asr-qwen3-0.6b-audiocpp",
       "provider": null,
       "repo_id": null,
       "model_type": "asr",
-      "architecture": "sherpa-asr-streaming-zipformer",
-      "compatibility_notes": "内置流式 ASR（中英双语），sherpa-onnx OnlineRecognizer 验证可用。"
+      "architecture": "audiocpp-qwen3-asr-gguf",
+      "compatibility_notes": "内置离线转写模型，audio.cpp qwen3_asr 验证可用（29 语言，实测 RTF≈0.05）。"
     },
     {
-      "model_id": "tts-zipvoice-distill-int8",
+      "model_id": "tts-qwen3-06b-base-q8-audiocpp",
       "provider": null,
       "repo_id": null,
       "model_type": "tts",
-      "architecture": "sherpa-tts-zipvoice",
-      "compatibility_notes": "内置 TTS（ZipVoice），sherpa-onnx OfflineTts 验证可用。"
+      "architecture": "audiocpp-qwen3-tts-gguf",
+      "compatibility_notes": "内置音色克隆模型，audio.cpp qwen3_tts 验证可用（0.6B 延迟优先，24kHz）。"
+    },
+    {
+      "model_id": "tts-qwen3-17b-base-q8-audiocpp",
+      "provider": null,
+      "repo_id": null,
+      "model_type": "tts",
+      "architecture": "audiocpp-qwen3-tts-gguf",
+      "compatibility_notes": "内置音色克隆模型，audio.cpp qwen3_tts 验证可用（1.7B 质量优先，q8_0_v2 打包）。"
     }
   ]
 }

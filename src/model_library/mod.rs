@@ -63,7 +63,7 @@ pub enum InstallState {
     Invalid,
 }
 
-/// 运行状态：区分「已选择但未运行」与「正在运行旧模型」与「已经是当前 runtime」。
+/// 运行状态：区分「已选择但未运行」与「正在运行旧模型」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeStatus {
@@ -71,12 +71,8 @@ pub enum RuntimeStatus {
     Inactive,
     /// selected path == RuntimeActual path 且能力正在运行
     Active,
-    /// LLM 正在切换到此 target（runtime 加载中）
-    Switching,
     /// RuntimeActual = A、RuntimeSelection = B（下次 start 使用 B）
     PendingRestart,
-    /// selection model == last_load_error.model_path 且 RuntimeActual = None
-    LoadFailed,
 }
 
 /// 一次「设为当前模型」最终发生了什么（set current 的返回值语义）。
@@ -87,12 +83,8 @@ pub enum RuntimeAction {
     None,
     /// 切换并成功 reload 到新模型
     Reloaded,
-    /// KWS/ASR 正在监听：已更新 selection，需下次启动生效
+    /// ASR 正在识别：已更新 selection，需下次启动生效
     RestartRequired,
-    /// LLM：B 加载失败，已恢复 A 且 A 重新加载成功
-    ReloadFailedRolledBack,
-    /// LLM：B 加载失败，恢复 A 后 A 也加载失败
-    ReloadFailedRollbackFailed,
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +137,7 @@ pub struct LibraryModel {
     pub version: String,
     pub size_bytes: Option<u64>,
     pub homepage: Option<String>,
-    /// 是否有内置下载源（false = LLM 需导入 GGUF）
+    /// 是否有内置下载源
     pub downloadable: bool,
     pub source: ModelSource,
     pub ownership: StorageOwnership,
@@ -165,27 +157,20 @@ pub struct LibraryModel {
     pub compatibility: Option<String>,
 }
 
-/// 四个能力的当前 selection（复用现有 settings，不新增字段）。
+/// 两个能力（asr/tts）的当前 selection（复用现有 settings，不新增字段）。
 #[derive(Debug, Clone, Default)]
 pub struct Selections {
-    pub kws: Option<PathBuf>,
     pub asr: Option<PathBuf>,
     pub tts: Option<PathBuf>,
-    pub llm: Option<PathBuf>,
 }
 
 /// 供 `enrich_runtime_status` 注入的 RuntimeActual（来自 Tauri 层 runtime state）。
 pub struct RuntimeActuals<'a> {
-    pub kws: Option<&'a Path>,
     pub asr: Option<&'a Path>,
     /// TTS 无常驻引擎：actual = 当前 selection（与 current 判定同源）
     pub tts: Option<&'a Path>,
     /// 是否有合成线程在跑（在飞合成用旧配置完成，下次合成读新配置）
     pub tts_active: bool,
-    pub llm: Option<&'a Path>,
-    pub llm_switching: bool,
-    pub llm_switch_target: Option<&'a Path>,
-    pub llm_load_error_path: Option<&'a Path>,
 }
 
 /// managed 安装元数据（`.zapmomo-lib.json`）。只记录安装信息，不含 current/enabled。
@@ -313,8 +298,6 @@ fn cancelled(cancel: Option<&AtomicBool>) -> bool {
 pub fn current_selections() -> Selections {
     let s = settings::load_settings().ok().flatten();
     Selections {
-        // KWS 已随伴侣模块删除，selection 恒 None（ModelType::Kws 收口在后续任务）
-        kws: None,
         asr: s
             .as_ref()
             .and_then(|c| crate::asr::config::resolve(c.asr.as_ref(), None).ok())
@@ -323,8 +306,6 @@ pub fn current_selections() -> Selections {
             .as_ref()
             .and_then(|c| crate::tts::config::resolve(c.tts.as_ref(), None).ok())
             .map(|c| c.model_dir),
-        // LLM 已改为远程连接（无本地模型路径选择），恒 None
-        llm: None,
     }
 }
 
@@ -332,28 +313,9 @@ pub fn current_selections() -> Selections {
 pub fn selection_path(mt: ModelType) -> Option<PathBuf> {
     let s = current_selections();
     match mt {
-        ModelType::Kws => s.kws,
         ModelType::Asr => s.asr,
         ModelType::Tts => s.tts,
-        ModelType::Llm => s.llm,
     }
-}
-
-/// GGUF 文件有效性检查（扩展名 + 魔数）。
-///
-/// 原实现来自已移除的 llama 后端（`llm::local::llama::is_gguf_file`）；
-/// 本地 LLM 推理移除后此处仅服务于「用户历史注册的 external LLM 条目」
-/// 的完整性探测。
-fn is_gguf_file(path: &Path) -> bool {
-    use std::io::Read;
-    if path.extension().and_then(|e| e.to_str()) != Some("gguf") {
-        return false;
-    }
-    let Ok(mut f) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut magic = [0u8; 4];
-    f.read_exact(&mut magic).is_ok() && &magic == b"GGUF"
 }
 
 /// 路径是否为该能力当前 selection。
@@ -365,8 +327,6 @@ pub fn is_path_current(mt: ModelType, path: &Path) -> bool {
 pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
     let path_str = path.to_string_lossy().to_string();
     update_settings(|cfg| match mt {
-        // KWS 已随伴侣模块删除：selection 恒 None（ModelType::Kws 收口在后续任务）
-        ModelType::Kws => {}
         ModelType::Asr => {
             let asr = cfg.asr.get_or_insert_with(Default::default);
             asr.model_dir = Some(path_str);
@@ -409,7 +369,7 @@ pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
             }
             // 切换模型目录时重置文件级覆盖：旧模型的手写覆盖（encoder/decoder/joiner/
             // tokens）与族专属参数（language/use_itn）会污染新模型，交回 resolve 自动探测
-            // （与 KWS/TTS 分支同款取舍）。
+            // （与 TTS 分支同款取舍）。
             asr.encoder = None;
             asr.decoder = None;
             asr.joiner = None;
@@ -453,7 +413,7 @@ pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
                 tts.voice = None;
             }
             // 切换模型目录时重置文件级覆盖：旧模型的手写覆盖（encoder/vocoder 等）
-            // 会污染新模型的文件探测，交回 resolve 自动探测（与 KWS/ASR 分支同款取舍）。
+            // 会污染新模型的文件探测，交回 resolve 自动探测（与 ASR 分支同款取舍）。
             // reference_wav/text 指向旧模型目录内的参考音频，一并重置回默认音色；
             // enabled / num_steps / speed 等用户偏好不重置。
             tts.encoder = None;
@@ -465,20 +425,14 @@ pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
             tts.reference_wav = None;
             tts.reference_text = None;
         }
-        ModelType::Llm => {
-            // LLM 已改为远程连接：无本地模型路径可写，切换不产生配置副作用
-        }
     })
 }
 
 /// 恢复之前的选择（回滚用）。`old` 为 `None` 表示恢复为「未配置」。
 pub fn restore_selected_model(mt: ModelType, old: Option<String>) -> Result<(), String> {
     update_settings(|cfg| match mt {
-        // KWS 已随伴侣模块删除：无 selection 可恢复
-        ModelType::Kws => {}
         ModelType::Asr => cfg.asr.get_or_insert_with(Default::default).model_dir = old,
         ModelType::Tts => cfg.tts.get_or_insert_with(Default::default).model_dir = old,
-        ModelType::Llm => {}
     })
 }
 
@@ -499,12 +453,7 @@ pub fn runtime_status(
     model_path: Option<&Path>,
     actual: Option<&Path>,
     capability_active: bool,
-    switching_for_this: bool,
-    load_failed_for_this: bool,
 ) -> RuntimeStatus {
-    if switching_for_this {
-        return RuntimeStatus::Switching;
-    }
     match actual {
         Some(a) => {
             let same = model_path.is_some_and(|m| paths_equal(m, a));
@@ -520,13 +469,7 @@ pub fn runtime_status(
                 RuntimeStatus::Inactive
             }
         }
-        None => {
-            if load_failed_for_this {
-                RuntimeStatus::LoadFailed
-            } else {
-                RuntimeStatus::Inactive
-            }
-        }
+        None => RuntimeStatus::Inactive,
     }
 }
 
@@ -539,17 +482,10 @@ pub fn enrich_runtime_status(models: &mut [LibraryModel], a: &RuntimeActuals) {
         }
         let mp = m.local_path.as_deref().map(Path::new);
         let (actual, active) = match m.model_type {
-            ModelType::Kws => (a.kws, a.kws.is_some()),
             ModelType::Asr => (a.asr, a.asr.is_some()),
-            ModelType::Llm => (a.llm, a.llm.is_some()),
             ModelType::Tts => (a.tts, a.tts_active),
         };
-        let switching = m.model_type == ModelType::Llm
-            && a.llm_switching
-            && mp.is_some_and(|p| a.llm_switch_target.is_some_and(|t| paths_equal(p, t)));
-        let load_failed = m.model_type == ModelType::Llm
-            && mp.is_some_and(|p| a.llm_load_error_path.is_some_and(|e| paths_equal(p, e)));
-        m.runtime_status = runtime_status(mp, actual, active, switching, load_failed);
+        m.runtime_status = runtime_status(mp, actual, active);
     }
 }
 
@@ -567,10 +503,14 @@ pub fn list_models() -> Vec<LibraryModel> {
     let mut out = Vec::new();
     // 平台受限条目（如仅 darwin-aarch64/windows-x86_64 的 audiocpp TTS）在此过滤：不可见即不可下载
     for reg in registry::models_for_current_platform() {
-        out.push(build_registry_model(reg, &sel, &locals));
+        out.push(build_registry_model(reg, &sel));
     }
+    // external 注册：仅保留当前支持的类型（asr/tts）；老 settings 里残留的
+    // kws/llm 等已下架类型不再展示（注册记录不删，避免破坏用户 settings）。
     for lm in locals.iter().filter(|l| l.registry_id.is_none()) {
-        out.push(build_local_model(lm, &sel));
+        if let Some(m) = build_local_model(lm, &sel) {
+            out.push(m);
+        }
     }
     // HF 在线下载安装（scan `.zapmomo-lib.json`）
     for (dir, meta) in crate::model_library::install::ModelStorage::scan_installs() {
@@ -591,35 +531,24 @@ pub fn resolve_model(id: &str) -> Option<LibraryModel> {
 }
 
 /// 从 HF 安装元数据构建 LibraryModel。
+///
+/// 历史安装的 model_type 已不在支持范围（如 llm/kws）→ `None`，不进列表。
 fn build_installed_model(
     dir: &std::path::Path,
     meta: &crate::model_library::install::InstallMeta,
 ) -> Option<LibraryModel> {
     use crate::model_library::catalog::CompatibilityLevel;
 
-    let mt = ModelType::from_str_value(&meta.model_type).unwrap_or(ModelType::Llm);
-    let (runtime_path, install_state) = if mt == ModelType::Llm {
-        let gguf = first_gguf_in(dir);
-        match gguf {
-            Some(p) if is_gguf_file(&p) => (p, InstallState::Installed),
-            Some(p) => (p, InstallState::Invalid),
-            None => (dir.to_path_buf(), InstallState::Invalid),
-        }
+    let mt = ModelType::from_str_value(&meta.model_type)?;
+    let ok = match mt {
+        ModelType::Asr => crate::asr::is_installed(dir),
+        ModelType::Tts => crate::tts::is_installed(dir),
+    };
+    let runtime_path = dir.to_path_buf();
+    let install_state = if ok {
+        InstallState::Installed
     } else {
-        let ok = match mt {
-            ModelType::Kws => crate::model_library::asset::kws_files_present(dir),
-            ModelType::Asr => crate::asr::is_installed(dir),
-            ModelType::Tts => crate::tts::is_installed(dir),
-            ModelType::Llm => false,
-        };
-        (
-            dir.to_path_buf(),
-            if ok {
-                InstallState::Installed
-            } else {
-                InstallState::Invalid
-            },
-        )
+        InstallState::Invalid
     };
     let current = is_path_current(mt, &runtime_path);
     let display_name = meta
@@ -639,13 +568,8 @@ fn build_installed_model(
         name: meta.model_id.clone(),
         display_name,
         model_type: mt,
-        runtime: if mt == ModelType::Llm {
-            "llama.cpp"
-        } else {
-            "sherpa-onnx"
-        }
-        .to_string(),
-        format: if mt == ModelType::Llm { "GGUF" } else { "ONNX" }.to_string(),
+        runtime: "audiocpp".to_string(),
+        format: "GGUF".to_string(),
         description: "Hugging Face 在线下载".to_string(),
         languages: Vec::new(),
         tags: Vec::new(),
@@ -672,115 +596,9 @@ fn build_installed_model(
     })
 }
 
-/// 目录内第一个 .gguf 文件（LLM runtime_path）。
-fn first_gguf_in(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("gguf") {
-            return Some(p);
-        }
-    }
-    None
-}
-
-fn build_registry_model(
-    reg: &RegistryModel,
-    sel: &Selections,
-    locals: &[LocalModel],
-) -> LibraryModel {
+fn build_registry_model(reg: &RegistryModel, sel: &Selections) -> LibraryModel {
     let root = crate::config::settings::get_models_dir();
-    if reg.is_llm() {
-        let binding = locals
-            .iter()
-            .find(|l| l.registry_id.as_deref() == Some(reg.id.as_str()));
-        // 双根定位：模型可能装在新根或旧默认根（双根兼容），都不在时保持主根路径展示
-        let managed_dir = locate_managed_dir(&reg.name);
-        let canonical = match (&managed_dir, reg.file_name.as_ref()) {
-            (Some(dir), Some(f)) => Some(dir.join(f)),
-            _ => None,
-        };
-        let (local_path, ownership, install_state) = if let Some(b) = binding {
-            let p = PathBuf::from(&b.path);
-            let state = if p.is_file() && is_gguf_file(&p) {
-                InstallState::Installed
-            } else {
-                InstallState::Invalid
-            };
-            (Some(p), StorageOwnership::External, state)
-        } else if let Some(c) = &canonical {
-            if c.is_file() && is_gguf_file(c) {
-                ensure_managed_meta(reg, c.parent().unwrap_or(&root));
-                (
-                    Some(c.clone()),
-                    StorageOwnership::Managed,
-                    InstallState::Installed,
-                )
-            } else if c.exists() || c.parent().is_some_and(|d| d.exists()) {
-                (
-                    Some(c.clone()),
-                    StorageOwnership::Managed,
-                    InstallState::Invalid,
-                )
-            } else {
-                (None, StorageOwnership::Managed, InstallState::NotInstalled)
-            }
-        } else {
-            (None, StorageOwnership::Managed, InstallState::NotInstalled)
-        };
-        let current = sel
-            .llm
-            .as_ref()
-            .is_some_and(|s| local_path.as_ref().is_some_and(|p| paths_equal(s, p)));
-        let installed_at = binding.as_ref().map(|b| b.added_at.clone()).or_else(|| {
-            local_path
-                .as_deref()
-                .and_then(|p| read_managed_installed_at(Path::new(p).parent().unwrap_or(&root)))
-        });
-        let verified_entry =
-            crate::model_library::verified::VerifiedRegistry::builtin().entry_for_model(&reg.id);
-        let install_id = if matches!(
-            install_state,
-            InstallState::Installed | InstallState::Invalid
-        ) {
-            Some(reg.id.clone())
-        } else {
-            None
-        };
-        return LibraryModel {
-            id: reg.id.clone(),
-            name: reg.name.clone(),
-            display_name: reg.display_name.clone(),
-            model_type: reg.model_type,
-            runtime: reg.runtime.clone(),
-            format: reg.format.clone(),
-            description: reg.description.clone(),
-            languages: reg.languages.clone(),
-            tags: reg.tags.clone(),
-            parameter_count: reg.parameter_count.clone(),
-            quantization: reg.quantization.clone(),
-            version: reg.version.clone(),
-            size_bytes: reg.size_bytes,
-            homepage: reg.homepage.clone(),
-            downloadable: reg.download.is_some(),
-            source: ModelSource::Registry,
-            ownership,
-            install_state,
-            current,
-            runtime_status: RuntimeStatus::Inactive,
-            local_path: local_path.map(|p| p.display().to_string()),
-            installed_at,
-            install_id,
-            repo_id: verified_entry.and_then(|e| e.repo_id.clone()),
-            compatibility: verified_entry.map(|_| {
-                crate::model_library::catalog::CompatibilityLevel::Verified
-                    .as_str()
-                    .to_string()
-            }),
-        };
-    }
-
-    // sherpa managed 模型：双根定位（旧根存量仍识别为已安装）
+    // managed 模型：双根定位（旧根存量仍识别为已安装）
     let dest = locate_managed_dir(&reg.name).unwrap_or_else(|| root.join(&reg.name));
     let required: Vec<&str> = reg
         .required_assets
@@ -796,10 +614,8 @@ fn build_registry_model(
         InstallState::NotInstalled
     };
     let sel_path = match reg.model_type {
-        ModelType::Kws => sel.kws.as_ref(),
         ModelType::Asr => sel.asr.as_ref(),
         ModelType::Tts => sel.tts.as_ref(),
-        ModelType::Llm => sel.llm.as_ref(),
     };
     let current = sel_path.is_some_and(|s| paths_equal(s, &dest));
     let verified_entry =
@@ -849,27 +665,17 @@ fn build_registry_model(
     }
 }
 
-fn build_local_model(lm: &LocalModel, sel: &Selections) -> LibraryModel {
-    let mt = ModelType::from_str_value(&lm.model_type).unwrap_or(ModelType::Llm);
+/// external 注册记录 → 列表条目。
+///
+/// 老版本 settings 可能残留已下架类型（kws/llm/…）的注册：`None` 表示不再展示
+/// （注册记录保留，用户 settings 不被改写）。
+fn build_local_model(lm: &LocalModel, sel: &Selections) -> Option<LibraryModel> {
+    let mt = ModelType::from_str_value(&lm.model_type)?;
     let path = PathBuf::from(&lm.path);
     let install_state = if !path.exists() {
         InstallState::Invalid
     } else {
         match mt {
-            ModelType::Llm => {
-                if is_gguf_file(&path) {
-                    InstallState::Installed
-                } else {
-                    InstallState::Invalid
-                }
-            }
-            ModelType::Kws => {
-                if crate::model_library::asset::kws_files_present(&path) {
-                    InstallState::Installed
-                } else {
-                    InstallState::Invalid
-                }
-            }
             ModelType::Asr => {
                 if crate::asr::is_installed(&path) {
                     InstallState::Installed
@@ -887,24 +693,17 @@ fn build_local_model(lm: &LocalModel, sel: &Selections) -> LibraryModel {
         }
     };
     let sel_path = match mt {
-        ModelType::Kws => sel.kws.as_ref(),
         ModelType::Asr => sel.asr.as_ref(),
         ModelType::Tts => sel.tts.as_ref(),
-        ModelType::Llm => sel.llm.as_ref(),
     };
     let current = sel_path.is_some_and(|s| paths_equal(s, &path));
-    let (runtime, format) = if mt == ModelType::Llm {
-        ("llama.cpp".to_string(), "GGUF".to_string())
-    } else {
-        ("sherpa-onnx".to_string(), "ONNX".to_string())
-    };
-    LibraryModel {
+    Some(LibraryModel {
         id: lm.id.clone(),
         name: lm.name.clone(),
         display_name: lm.name.clone(),
         model_type: mt,
-        runtime,
-        format,
+        runtime: "audiocpp".to_string(),
+        format: "GGUF".to_string(),
         description: "本地模型".to_string(),
         languages: Vec::new(),
         tags: Vec::new(),
@@ -924,7 +723,7 @@ fn build_local_model(lm: &LocalModel, sel: &Selections) -> LibraryModel {
         install_id: Some(lm.id.clone()),
         repo_id: None,
         compatibility: None,
-    }
+    })
 }
 
 fn managed_meta_path(dir: &Path) -> PathBuf {
@@ -1007,7 +806,7 @@ pub fn remove_dir_tree_checked(dir: &Path) -> Result<(), String> {
     delete_managed_dir(dir)
 }
 
-/// 由运行时路径推导安装目录：文件（LLM gguf）取父目录，目录（sherpa 模型目录）原样。
+/// 由运行时路径推导安装目录：文件（单 GGUF 资产）取父目录，目录原样。
 ///
 /// 供删除等命令把 `local_path`（双根定位后的实际位置）换算成安装目录。
 pub fn runtime_to_install_dir(p: &Path) -> PathBuf {
@@ -1068,18 +867,15 @@ pub fn install_managed_model(
     .map_err(ModelError::InsufficientSpace)?;
     let final_dir = stage_and_commit(model, &assets, total_bytes, on_progress, cancel)?;
 
-    // optional assets best-effort（独立目录，失败仅 warn，不回滚主模型）
+    // optional assets best-effort（失败仅 warn，不回滚主模型）。
+    // 当前 qwen3 三条目均无 optional 资产，循环保留为二期加族（独立目录资产）的扩展点。
     let mut progress = on_progress;
     for role in &model.optional_assets {
         let asset = match crate::model_library::asset::asset_by_role(role) {
             Some(a) => a,
             None => continue,
         };
-        let dest = if role == "punctuation" {
-            crate::model_library::asset::punctuation_user_model_dir()
-        } else {
-            final_dir.clone()
-        };
+        let dest = final_dir.clone();
         let required = registry::required_files_for_role(role);
         if let Err(e) = crate::model_library::asset::install_asset_to_cancellable(
             asset,
@@ -1188,17 +984,12 @@ fn stage_and_commit<'a>(
             }
             done_bytes.fetch_add(asset.size_bytes, Ordering::Relaxed);
         }
-        // 2. 整体完整性校验（staging）
-        // LLM 是 raw 单文件，必需文件 = `file_name`（避免为每个 LLM role 维护静态表）
-        let required_files: Vec<&str> = if model.is_llm() {
-            vec![model.file_name.as_deref().unwrap_or_default()]
-        } else {
-            model
-                .required_assets
-                .iter()
-                .flat_map(|r| registry::required_files_for_role(r).iter().copied())
-                .collect()
-        };
+        // 2. 整体完整性校验（staging）：必需文件按 required_assets 的 role 清单推导
+        let required_files: Vec<&str> = model
+            .required_assets
+            .iter()
+            .flat_map(|r| registry::required_files_for_role(r).iter().copied())
+            .collect();
         if !has_required_files(&staging_model, &required_files) {
             return Err(ModelError::Download("安装后完整性校验失败".to_string()));
         }
@@ -1240,53 +1031,43 @@ mod tests {
     fn test_runtime_status_matrix() {
         let a = Path::new("/models/A");
         let b = Path::new("/models/B");
-        // KWS 正在监听 A、selected=A → Active（不 Pending）
+        // 正在运行 A、selected=A → Active（不 Pending）
         assert_eq!(
-            runtime_status(Some(a), Some(a), true, false, false),
+            runtime_status(Some(a), Some(a), true),
             RuntimeStatus::Active
         );
         // selected=B, actual=A, running → PendingRestart
         assert_eq!(
-            runtime_status(Some(b), Some(a), true, false, false),
+            runtime_status(Some(b), Some(a), true),
             RuntimeStatus::PendingRestart
         );
-        // selected=B, actual=None → Inactive（不是 Pending）
+        // selected=B, actual=None → Inactive
         assert_eq!(
-            runtime_status(Some(b), None, false, false, false),
+            runtime_status(Some(b), None, false),
             RuntimeStatus::Inactive
         );
         // actual 同 selected 但 running=false → Inactive（异常态不显示 Active）
         assert_eq!(
-            runtime_status(Some(a), Some(a), false, false, false),
+            runtime_status(Some(a), Some(a), false),
             RuntimeStatus::Inactive
-        );
-        // LLM selected=B, loaded=None + load_failed → LoadFailed
-        assert_eq!(
-            runtime_status(Some(b), None, false, false, true),
-            RuntimeStatus::LoadFailed
-        );
-        // Switching
-        assert_eq!(
-            runtime_status(Some(b), None, false, true, false),
-            RuntimeStatus::Switching
         );
     }
 
     /// 测试用最小 TTS LibraryModel（enrich 只读 current / model_type / local_path）。
     fn tts_library_model(current: bool) -> LibraryModel {
         LibraryModel {
-            id: "tts-zipvoice-distill-int8".to_string(),
-            name: "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia".to_string(),
-            display_name: "ZipVoice TTS zh-en".to_string(),
+            id: "tts-qwen3-06b-base-q8-audiocpp".to_string(),
+            name: "qwen3-tts-06b-base-audiocpp".to_string(),
+            display_name: "Qwen3-TTS 0.6B 音色克隆 (audio.cpp)".to_string(),
             model_type: ModelType::Tts,
-            runtime: "sherpa-onnx".to_string(),
-            format: "ONNX".to_string(),
+            runtime: "audiocpp".to_string(),
+            format: "GGUF".to_string(),
             description: String::new(),
             languages: vec![],
             tags: vec![],
             parameter_count: None,
             quantization: None,
-            version: "distill-int8".to_string(),
+            version: "q8_0".to_string(),
             size_bytes: None,
             homepage: None,
             downloadable: true,
@@ -1295,7 +1076,7 @@ mod tests {
             install_state: InstallState::Installed,
             current,
             runtime_status: RuntimeStatus::Inactive,
-            local_path: Some("/models/zipvoice".to_string()),
+            local_path: Some("/models/qwen3-tts-06b-base-audiocpp".to_string()),
             installed_at: None,
             install_id: None,
             repo_id: None,
@@ -1305,18 +1086,13 @@ mod tests {
 
     #[test]
     fn test_enrich_runtime_status_tts() {
-        let dir = Path::new("/models/zipvoice");
+        let dir = Path::new("/models/qwen3-tts-06b-base-audiocpp");
         // 合成中：当前模型 Active、非当前恒 Inactive
         let mut models = vec![tts_library_model(true), tts_library_model(false)];
         let actuals = RuntimeActuals {
-            kws: None,
             asr: None,
             tts: Some(dir),
             tts_active: true,
-            llm: None,
-            llm_switching: false,
-            llm_switch_target: None,
-            llm_load_error_path: None,
         };
         enrich_runtime_status(&mut models, &actuals);
         assert_eq!(models[0].runtime_status, RuntimeStatus::Active);
@@ -1668,12 +1444,12 @@ mod tests {
         run_with_temp_home(|home| {
             let dir = home.join("models-local");
             std::fs::create_dir_all(&dir).unwrap();
-            let model_dir = dir.join("keepme-kws");
+            let model_dir = dir.join("keepme-asr");
             std::fs::create_dir_all(&model_dir).unwrap();
             let record = LocalModel {
                 id: "local-keepme".to_string(),
-                name: "keepme-kws".to_string(),
-                model_type: "kws".to_string(),
+                name: "keepme-asr".to_string(),
+                model_type: "asr".to_string(),
                 path: model_dir.display().to_string(),
                 added_at: "2026-08-27T00:00:00Z".to_string(),
                 registry_id: None,
@@ -1686,22 +1462,62 @@ mod tests {
         });
     }
 
+    /// 已下架类型（kws/llm）的 external 注册不再进列表（记录保留，不破坏用户 settings）。
+    #[test]
+    fn test_unsupported_local_model_type_not_listed() {
+        run_with_temp_home(|home| {
+            let dir = home.join("models-local");
+            let legacy = dir.join("legacy-kws");
+            std::fs::create_dir_all(&legacy).unwrap();
+            for (id, name, mt, path) in [
+                (
+                    "local-legacy-kws",
+                    "legacy-kws",
+                    "kws",
+                    legacy.display().to_string(),
+                ),
+                ("local-asr", "my-asr", "asr", legacy.display().to_string()),
+            ] {
+                add_local_model_record(LocalModel {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    model_type: mt.to_string(),
+                    path: path.clone(),
+                    added_at: "2026-08-27T00:00:00Z".to_string(),
+                    registry_id: None,
+                })
+                .unwrap();
+            }
+            let models = list_models();
+            assert!(
+                !models.iter().any(|m| m.id == "local-legacy-kws"),
+                "kws 注册不应再展示"
+            );
+            assert!(
+                models.iter().any(|m| m.id == "local-asr"),
+                "asr 注册正常展示"
+            );
+            // 注册记录未被清理
+            assert_eq!(get_local_models().len(), 2);
+        });
+    }
+
     #[test]
     fn test_duplicate_registry_binding_replaced() {
         run_with_temp_home(|home| {
             let dir = home.join("models-local");
             std::fs::create_dir_all(&dir).unwrap();
-            let a = dir.join("a-kws");
-            let b = dir.join("b-kws");
+            let a = dir.join("a-asr");
+            let b = dir.join("b-asr");
             std::fs::create_dir_all(&a).unwrap();
             std::fs::create_dir_all(&b).unwrap();
             let mk = |dir: &std::path::Path| LocalModel {
                 id: format!("local-{}", dir.file_name().unwrap().to_string_lossy()),
                 name: "binding".to_string(),
-                model_type: "kws".to_string(),
+                model_type: "asr".to_string(),
                 path: dir.display().to_string(),
                 added_at: "2026-08-27T00:00:00Z".to_string(),
-                registry_id: Some("kws-zipformer-zh-en-3m".to_string()),
+                registry_id: Some("asr-qwen3-0.6b-audiocpp".to_string()),
             };
             add_local_model_record(mk(&a)).unwrap();
             // 第二次导入另一个目录 → 重新关联（旧绑定被替换）
@@ -1709,10 +1525,10 @@ mod tests {
             let records = get_local_models();
             let bindings: Vec<_> = records
                 .iter()
-                .filter(|l| l.registry_id.as_deref() == Some("kws-zipformer-zh-en-3m"))
+                .filter(|l| l.registry_id.as_deref() == Some("asr-qwen3-0.6b-audiocpp"))
                 .collect();
             assert_eq!(bindings.len(), 1, "同一 registry_id 只允许一条绑定");
-            assert!(bindings[0].path.ends_with("b-kws"));
+            assert!(bindings[0].path.ends_with("b-asr"));
         });
     }
 
@@ -1734,32 +1550,44 @@ mod tests {
         });
     }
 
-    /// 回归：optional 资产（如 punctuation）绝不能进 staging 安装清单。
+    /// 回归：optional 资产绝不能进 staging 安装清单。
     ///
     /// 进了会因 extract_and_place「目标已存在先移除」的原子落位摧毁主模型文件，
     /// 曾导致模型库下载任何 ASR 模型都在「安装后完整性校验失败」处必败。
+    /// （在册 qwen3 三条目均无 optional 资产，此处用「借另一 role 作伪 optional」
+    /// 的合成条目保留该回归语义。）
     #[test]
     fn test_staged_assets_excludes_optional() {
-        // ASR：required 1 个 + optional punctuation → staging 只装 required，字节两者都计
-        let asr = registry::model_by_id("asr-streaming-bilingual-zh-en").unwrap();
-        let (assets, total) = staged_assets(asr).unwrap();
-        assert_eq!(assets.len(), 1, "punctuation 不得进 staging 清单");
-        assert_eq!(assets[0].0.role, "asr");
-        let req = crate::model_library::asset::asset_by_role("asr")
+        // 伪 optional 的合成条目（required + optional 同为在册 role）：
+        // staging 只装 required，进度总量两者都计
+        let mut synthetic = test_reg_model("synthetic-model", "synthetic-optional");
+        synthetic.required_assets = vec!["asr-audiocpp-qwen3-06b".into()];
+        synthetic.optional_assets = vec!["tts-audiocpp-qwen3-06b".into()];
+        let (assets, total) = staged_assets(&synthetic).unwrap();
+        assert_eq!(assets.len(), 1, "optional 资产不得进 staging 清单");
+        assert_eq!(assets[0].0.role, "asr-audiocpp-qwen3-06b");
+        let req = crate::model_library::asset::asset_by_role("asr-audiocpp-qwen3-06b")
             .unwrap()
             .size_bytes;
-        let opt = crate::model_library::asset::asset_by_role("punctuation")
+        let opt = crate::model_library::asset::asset_by_role("tts-audiocpp-qwen3-06b")
             .unwrap()
             .size_bytes;
         assert_eq!(total, req + opt, "optional 只计字节（进度总量）");
 
-        // KWS（无 optional）单资产；TTS（tts + tts-vocoder 双 required）两资产
-        let (kws_assets, _) =
-            staged_assets(registry::model_by_id("kws-zipformer-zh-en-3m").unwrap()).unwrap();
-        assert_eq!(kws_assets.len(), 1);
-        let (tts_assets, _) =
-            staged_assets(registry::model_by_id("tts-zipvoice-distill-int8").unwrap()).unwrap();
-        assert_eq!(tts_assets.len(), 2);
+        // 在册 qwen3 三条目均单资产（裸 GGUF、无 optional）
+        for id in [
+            "asr-qwen3-0.6b-audiocpp",
+            "tts-qwen3-06b-base-q8-audiocpp",
+            "tts-qwen3-17b-base-q8-audiocpp",
+        ] {
+            let (assets, total) = staged_assets(registry::model_by_id(id).unwrap()).unwrap();
+            assert_eq!(assets.len(), 1, "{id} 应为单资产条目");
+            assert!(assets[0].0.is_raw(), "{id} 资产应为裸单文件");
+            assert_eq!(
+                total, assets[0].0.size_bytes,
+                "{id} 无 optional，总量应等于单资产"
+            );
+        }
     }
 
     fn test_reg_model(name: &str, id: &str) -> RegistryModel {
@@ -1767,84 +1595,84 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             display_name: name.to_string(),
-            model_type: ModelType::Kws,
+            model_type: ModelType::Asr,
             tts_kind: None,
             asr_kind: None,
-            runtime: "sherpa-onnx".into(),
-            format: "ONNX".into(),
+            runtime: "audiocpp".into(),
+            format: "GGUF".into(),
             description: String::new(),
             languages: Vec::new(),
             tags: Vec::new(),
             parameter_count: None,
             quantization: None,
-            file_name: None,
             version: "test".into(),
             size_bytes: None,
             homepage: None,
-            required_assets: vec!["wake-word".into()],
+            required_assets: vec!["asr-audiocpp-qwen3-06b".into()],
             optional_assets: Vec::new(),
             platforms: None,
             download: None,
         }
     }
 
-    /// LLM 预设安装布局：raw 单文件落在 `<models>/<name>/<file_name>`，带 managed 元数据。
-    /// `download_llm_model` 的幂等预检（managed_install_dir + file_name）依赖该布局。
+    /// audiocpp 预设安装布局：raw 单文件落在 `<models>/<name>/<archive>`，带 managed 元数据。
+    ///
+    /// 与真实 qwen3 条目同构（registry.name = 安装目录名，archive = GGUF 文件名），
+    /// CLI/Tauri 的幂等预检（`managed_install_dir` + 主 GGUF 文件名）依赖该布局。
     #[test]
-    fn test_install_llm_raw_layout() {
+    fn test_install_audiocpp_raw_layout() {
         use crate::model_library::asset::tests::{serve_many, sha256_hex};
 
         run_with_temp_home(|_| {
-            // 与真实预设同构：registry.name = 安装目录名，file_name = manifest archive 文件名
+            let gguf_name = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
             let bytes = b"GGUF-test-payload".to_vec();
             let asset = crate::model_library::asset::ModelAsset {
-                name: "Qwen3-0.6B".into(),
-                role: "llm-test-raw".into(),
+                name: "qwen3-asr-test".into(),
+                role: "asr-test-raw".into(),
                 version: "test".into(),
                 kind: Some("raw".into()),
-                archive: "Qwen3-0.6B-Q4_K_M.gguf".into(),
+                archive: gguf_name.into(),
                 source: serve_many(bytes.clone()),
                 sha256: sha256_hex(&bytes),
                 size_bytes: bytes.len() as u64,
                 license: "Apache-2.0".into(),
             };
-            let mut reg = test_reg_model("Qwen3-0.6B", "llm-raw-test");
-            reg.model_type = ModelType::Llm;
-            reg.runtime = "llama.cpp".into();
+            let mut reg = test_reg_model("qwen3-asr-test", "asr-raw-test");
+            reg.runtime = "audiocpp".into();
             reg.format = "GGUF".into();
-            reg.file_name = Some("Qwen3-0.6B-Q4_K_M.gguf".into());
-            reg.required_assets = vec!["llm-test-raw".into()];
+            reg.required_assets = vec!["asr-test-raw".into()];
 
             let final_dir =
                 stage_and_commit(&reg, &[(&asset, &[])], asset.size_bytes, &mut |_| {}, None)
                     .unwrap();
-            let final_file = final_dir.join("Qwen3-0.6B-Q4_K_M.gguf");
+            let final_file = final_dir.join(gguf_name);
             assert!(
                 final_file.is_file(),
-                "GGUF 应落在 <models>/<name>/<file_name>"
+                "GGUF 应落在 <models>/<name>/<archive>"
             );
             assert_eq!(std::fs::read(&final_file).unwrap(), bytes);
             assert!(final_dir.join(".zapmomo-lib.json").is_file());
-            // command 幂等预检用 managed_install_dir(model).join(file_name)，必须与落盘位置一致
-            assert!(paths_equal(
-                &final_file,
-                &managed_install_dir(&reg).join("Qwen3-0.6B-Q4_K_M.gguf")
-            ));
+            // 安装落位与 managed_install_dir 必须一致（幂等预检 / 缺省目录解析的事实源）
+            assert!(paths_equal(&final_dir, &managed_install_dir(&reg)));
         });
     }
 
     /// staging 保证：任一 required asset 失败，正式模型目录不得出现半安装状态。
+    ///
+    /// 归档内容按在册 role（asr-audiocpp-qwen3-06b）的完整性清单摆放，
+    /// 使「逐资产幂等清单」与「整体完整性校验」走同一份真实定义。
     #[test]
     fn test_install_staging_failure_leaves_no_partial() {
-        use crate::model_library::asset::tests::{mini_tarbz2, serve_many, sha256_hex};
-        use crate::model_library::asset::{KWS_REQUIRED_FILES, ModelAsset, is_installed};
+        use crate::model_library::asset::tests::{serve_many, sha256_hex, tarbz2_with};
+        use crate::model_library::asset::{ModelAsset, has_required_files};
 
         run_with_temp_home(|_| {
-            let bytes = mini_tarbz2("test-kws-model");
+            let gguf = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
+            let bytes = tarbz2_with("test-model", &[gguf]);
             let url = serve_many(bytes.clone());
             let mk_asset = |sha: String, archive: &str| ModelAsset {
-                name: "test-kws-model".into(),
-                role: "wake-word".into(),
+                name: "test-model".into(),
+                role: "asr-audiocpp-qwen3-06b".into(),
                 version: "test".into(),
                 kind: None,
                 archive: archive.into(),
@@ -1856,31 +1684,31 @@ mod tests {
 
             // 成功：完整安装 + 写 metadata
             let good = mk_asset(sha256_hex(&bytes), "mini.tar.bz2");
-            let reg_ok = test_reg_model("test-kws-model", "kws-test-ok");
+            let reg_ok = test_reg_model("test-model", "test-ok");
             let dest = stage_and_commit(
                 &reg_ok,
-                &[(&good, &KWS_REQUIRED_FILES)],
+                &[(&good, &[gguf])],
                 good.size_bytes,
                 &mut |_| {},
                 None,
             )
             .unwrap();
-            assert!(is_installed(&dest));
+            assert!(has_required_files(&dest, &[gguf]));
             assert!(dest.join(".zapmomo-lib.json").is_file());
 
             // 失败：sha 不匹配 → 正式目录绝不能出现，staging 被清理
             let bad = mk_asset("0".repeat(64), "mini.tar.bz2");
-            let reg_bad = test_reg_model("test-kws-model-bad", "kws-test-bad");
+            let reg_bad = test_reg_model("test-model-bad", "test-bad");
             let err = stage_and_commit(
                 &reg_bad,
-                &[(&bad, &KWS_REQUIRED_FILES)],
+                &[(&bad, &[gguf])],
                 bad.size_bytes,
                 &mut |_| {},
                 None,
             )
             .unwrap_err();
             assert!(matches!(err, ModelError::Sha256Mismatch { .. }));
-            let final_bad = crate::config::settings::get_models_dir().join("test-kws-model-bad");
+            let final_bad = crate::config::settings::get_models_dir().join("test-model-bad");
             assert!(!final_bad.exists(), "失败不得留下正式目录");
             let install_root = crate::config::settings::get_models_dir().join(".install");
             let leftovers = std::fs::read_dir(&install_root)
@@ -1894,28 +1722,20 @@ mod tests {
     #[test]
     fn test_legacy_managed_recognition_and_metadata_best_effort() {
         run_with_temp_home(|home| {
-            // 用 KWS 资产字段摆一个「完整但无 metadata」的旧目录
-            use crate::model_library::asset::{
-                DEFAULT_DECODER, DEFAULT_ENCODER, DEFAULT_JOINER, DEFAULT_KEYWORDS_REL,
-                DEFAULT_TOKENS,
-            };
+            // 用 audiocpp Qwen3-ASR 的落位布局摆一个「完整但无 metadata」的旧目录
             let models = home.join(".zapmomo/models");
-            let dest = models.join("sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20");
-            std::fs::create_dir_all(dest.join("test_wavs")).unwrap();
-            for f in [
-                DEFAULT_ENCODER,
-                DEFAULT_DECODER,
-                DEFAULT_JOINER,
-                DEFAULT_TOKENS,
-            ] {
-                std::fs::write(dest.join(f), b"x").unwrap();
-            }
-            std::fs::write(dest.join(DEFAULT_KEYWORDS_REL), b"k").unwrap();
+            let dest = models.join("qwen3-asr-0.6b-audiocpp");
+            std::fs::create_dir_all(&dest).unwrap();
+            std::fs::write(
+                dest.join(crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file),
+                b"x",
+            )
+            .unwrap();
 
             let models_list = list_models();
             let m = models_list
                 .iter()
-                .find(|m| m.id == "kws-zipformer-zh-en-3m")
+                .find(|m| m.id == "asr-qwen3-0.6b-audiocpp")
                 .unwrap();
             assert_eq!(
                 m.install_state,
@@ -2050,27 +1870,19 @@ mod tests {
     fn test_registry_model_in_legacy_root_listed_installed() {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
-            // 旧版默认根下摆一个完整 KWS 目录（同 legacy 识别测试的摆法）
-            use crate::model_library::asset::{
-                DEFAULT_DECODER, DEFAULT_ENCODER, DEFAULT_JOINER, DEFAULT_KEYWORDS_REL,
-                DEFAULT_TOKENS,
-            };
-            let dest = home.join(".zapmomo/models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20");
-            std::fs::create_dir_all(dest.join("test_wavs")).unwrap();
-            for f in [
-                DEFAULT_ENCODER,
-                DEFAULT_DECODER,
-                DEFAULT_JOINER,
-                DEFAULT_TOKENS,
-            ] {
-                std::fs::write(dest.join(f), b"x").unwrap();
-            }
-            std::fs::write(dest.join(DEFAULT_KEYWORDS_REL), b"k").unwrap();
+            // 旧版默认根下摆一个完整的 audiocpp Qwen3-ASR 目录（同 legacy 识别测试的摆法）
+            let dest = home.join(".zapmomo/models/qwen3-asr-0.6b-audiocpp");
+            std::fs::create_dir_all(&dest).unwrap();
+            std::fs::write(
+                dest.join(crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file),
+                b"x",
+            )
+            .unwrap();
 
             let models_list = list_models();
             let m = models_list
                 .iter()
-                .find(|m| m.id == "kws-zipformer-zh-en-3m")
+                .find(|m| m.id == "asr-qwen3-0.6b-audiocpp")
                 .unwrap();
             assert_eq!(
                 m.install_state,
@@ -2112,7 +1924,7 @@ mod tests {
         });
     }
 
-    /// 造一个 HF 安装（meta v2 + gguf 文件），返回 (install_dir, runtime_path, install_id)。
+    /// 造一个 HF 安装（meta v2 + gguf 文件，asr 类型），返回 (install_dir, runtime_path, install_id)。
     fn make_hf_install(repo: &str, variant: &str, gguf_name: &str) -> (PathBuf, PathBuf, String) {
         use crate::model_library::catalog::ModelCategory;
         use crate::model_library::install::ArtifactSource;
@@ -2121,7 +1933,7 @@ mod tests {
         };
 
         let artifact_id = format!("{repo}-{variant}");
-        let dir = ModelStorage::install_dir("hf", repo, ModelCategory::Llm, &artifact_id);
+        let dir = ModelStorage::install_dir("hf", repo, ModelCategory::Asr, &artifact_id);
         std::fs::create_dir_all(&dir).unwrap();
         let runtime = dir.join(gguf_name);
         std::fs::write(&runtime, b"GGUFxxxxx").unwrap();
@@ -2138,10 +1950,10 @@ mod tests {
             model_id: repo.into(),
             repo_id: Some(repo.into()),
             revision: Some("main".into()),
-            model_type: "llm".into(),
+            model_type: "asr".into(),
             artifact_id: artifact_id.clone(),
             variant: Some(variant.into()),
-            architecture: Some("llama-cpp-gguf".into()),
+            architecture: Some("audiocpp-qwen3-asr-gguf".into()),
             installed_at: "2026-08-17T00:00:00Z".into(),
             registry_id: None,
             version: None,
@@ -2162,7 +1974,7 @@ mod tests {
                 InstallMeta, META_SCHEMA_VERSION, ModelStorage, derive_install_id,
             };
 
-            // 造一个 sherpa HF 安装（meta v2 + 占位文件），返回 (install_dir, install_id)
+            // 造一个 ASR HF 安装（meta v2 + 占位文件），返回 (install_dir, install_id)
             let make_hf_asr_install = |repo: &str, artifact: &str| -> (PathBuf, String) {
                 let dir = ModelStorage::install_dir("hf", repo, ModelCategory::Asr, artifact);
                 std::fs::create_dir_all(&dir).unwrap();
@@ -2179,7 +1991,7 @@ mod tests {
                     model_type: "asr".into(),
                     artifact_id: artifact.into(),
                     variant: None,
-                    architecture: Some("sherpa-asr-streaming-zipformer".into()),
+                    architecture: Some("audiocpp-qwen3-asr-gguf".into()),
                     installed_at: "2026-08-17T00:00:00Z".into(),
                     registry_id: None,
                     version: None,
@@ -2189,7 +2001,7 @@ mod tests {
                 (dir, install_id)
             };
 
-            let repo = "k2-fsa/sherpa-onnx-test";
+            let repo = "example/qwen3-asr-test";
             let (a_dir, a_install) = make_hf_asr_install(repo, "artifact-a");
             let (_b_dir, b_install) = make_hf_asr_install(repo, "artifact-b");
 
@@ -2228,19 +2040,19 @@ mod tests {
     #[test]
     fn test_delete_hf_install_only_removes_one_variant() {
         run_with_temp_home(|_| {
-            let repo = "Qwen/Qwen3-4B-GGUF";
-            let (q4_dir, _, q4_install) = make_hf_install(repo, "Q4_K_M", "Qwen3-4B-Q4_K_M.gguf");
-            let (q5_dir, _, q5_install) = make_hf_install(repo, "Q5_K_M", "Qwen3-4B-Q5_K_M.gguf");
+            let repo = "example/qwen3-asr-gguf";
+            let (q4_dir, _, q4_install) = make_hf_install(repo, "Q4_K_M", "qwen3-asr-q4_k_m.gguf");
+            let (q5_dir, _, q5_install) = make_hf_install(repo, "Q5_K_M", "qwen3-asr-q5_k_m.gguf");
 
-            // 按 installId 定位 Q5 目录并删除
+            // 按 installId 定位 Q5 安装目录并删除（与 command 层同款换算）
             let models = list_models();
             let q5 = models
                 .iter()
                 .find(|m| m.install_id.as_deref() == Some(&q5_install))
                 .unwrap();
             let p = Path::new(q5.local_path.as_ref().unwrap());
-            let dir = p.parent().unwrap();
-            delete_hf_install_dir(dir).unwrap();
+            let dir = runtime_to_install_dir(p);
+            delete_hf_install_dir(&dir).unwrap();
 
             assert!(!q5_dir.exists(), "Q5 应被删除");
             assert!(q4_dir.exists(), "Q4 不得误删");

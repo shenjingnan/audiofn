@@ -1,6 +1,6 @@
 //! 模型库 Registry：编译期嵌入 `models/model_registry.json` 的目录解析。
 //!
-//! 一个 RegistryModel = 一个实际可加载的模型版本/变体（如 `qwen3-1.7b-q4-k-m`）。
+//! 一个 RegistryModel = 一个实际可加载的模型版本/变体（如 `asr-qwen3-0.6b-audiocpp`）。
 //! 下载源（URL/sha256/size）不在此重复维护，而是通过 `download.manifest_role`
 //! 引用 `models/manifest.json`（单一数据源）。
 
@@ -13,30 +13,27 @@ use crate::model_library::asset::{ModelAsset, asset_by_role};
 use crate::tts::config::TtsModelKind;
 
 /// 能力类型。
+///
+/// 一期裁剪后仅剩语音两族（KWS 随伴侣模块删除、LLM 改远程连接、声纹已移除）；
+/// 历史 JSON/settings 里的 `kws`/`llm` 值反序列化为 `None`，由调用方按不支持处理。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelType {
-    Kws,
     Asr,
-    Llm,
     Tts,
 }
 
 impl ModelType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ModelType::Kws => "kws",
             ModelType::Asr => "asr",
-            ModelType::Llm => "llm",
             ModelType::Tts => "tts",
         }
     }
 
     pub fn from_str_value(s: &str) -> Option<Self> {
         match s {
-            "kws" => Some(ModelType::Kws),
             "asr" => Some(ModelType::Asr),
-            "llm" => Some(ModelType::Llm),
             "tts" => Some(ModelType::Tts),
             _ => None,
         }
@@ -55,7 +52,8 @@ pub struct ModelRegistry {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RegistryModel {
     pub id: String,
-    /// 目录基名（sherpa 模型目录名 / LLM 期望目录名）
+    /// 目录基名（= managed 安装目录名，`install_managed_model` 落位与缺省
+    /// 模型目录解析的同一事实源）
     pub name: String,
     pub display_name: String,
     #[serde(rename = "model_type")]
@@ -63,7 +61,7 @@ pub struct RegistryModel {
     /// TTS 子类型（qwen3_tts_06/qwen3_tts_17；仅 `model_type == Tts` 有意义，其余为 None）
     #[serde(default)]
     pub tts_kind: Option<TtsModelKind>,
-    /// ASR 子类型（zipformer/sensevoice/whisper；仅 `model_type == Asr` 有意义，其余为 None）
+    /// ASR 子类型（qwen3_asr；仅 `model_type == Asr` 有意义，其余为 None）
     #[serde(default)]
     pub asr_kind: Option<AsrModelKind>,
     pub runtime: String,
@@ -77,9 +75,6 @@ pub struct RegistryModel {
     pub parameter_count: Option<String>,
     #[serde(default)]
     pub quantization: Option<String>,
-    /// LLM 条目：具体 GGUF 文件名
-    #[serde(default)]
-    pub file_name: Option<String>,
     pub version: String,
     #[serde(default)]
     pub size_bytes: Option<u64>,
@@ -88,16 +83,16 @@ pub struct RegistryModel {
     /// 安装所需资产 role 列表（安装与完整性共用同一份定义）
     #[serde(default)]
     pub required_assets: Vec<String>,
-    /// 可选增强资产 role 列表（如 ASR 的 punctuation，缺失不影响可用性）
+    /// 可选增强资产 role 列表（缺失不影响可用性；当前 qwen3 三条目均为空）
     #[serde(default)]
     pub optional_assets: Vec<String>,
     /// 可用平台约束（`None` = 全平台；取值对齐 target triple 简写，如
-    /// "darwin-aarch64"）。平台不符的条目在模型库中隐藏——如 omnivoice
-    /// 依赖 Metal 加速，仅 macOS arm64 的 sidecar 构建编入 Metal 后端，
-    /// 其余平台纯 CPU 实测 RTF 不可用（技术方案 R1 预案）。
+    /// "darwin-aarch64"）。平台不符的条目在模型库中隐藏——如 audiocpp qwen3
+    /// 依赖 GPU 加速，仅 macOS arm64 / Windows CUDA 的 sidecar 构建可用，
+    /// 其余平台纯 CPU 实测不可用（技术方案 R1 预案）。
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
-    /// `None` = 无内置下载源（需导入本地文件；当前 LLM 预设均已有 manifest 下载源）
+    /// `None` = 无内置下载源（需导入本地文件；在册 qwen3 三条目均有 manifest 下载源）
     pub download: Option<RegistryDownload>,
 }
 
@@ -128,12 +123,6 @@ pub(crate) fn current_platform_triple() -> &'static str {
     )))]
     {
         "other"
-    }
-}
-
-impl RegistryModel {
-    pub fn is_llm(&self) -> bool {
-        self.model_type == ModelType::Llm
     }
 }
 
@@ -201,29 +190,17 @@ pub fn asset_for(model: &RegistryModel) -> Option<&'static ModelAsset> {
 ///
 /// 安装（`install_asset_to` 的幂等/校验）与完整性判断使用**同一份**定义，
 /// 避免出现「安装要求 A+B、完整性只查 A」的不一致。
+///
+/// 一期裁剪后 manifest 只剩 qwen3 三资产（单文件 GGUF），必需文件名统一从
+/// audiocpp 族表（`audiocpp::families` / `audiocpp::asr_families`）单源推导；
+/// 已移除的 sherpa/KWS/标点 role 不再维护静态表（未知 role 返回空，只会让
+/// 完整性校验失败，不会误判「已安装」）。
 pub fn required_files_for_role(role: &str) -> &'static [&'static str] {
     match role {
-        "wake-word" => &crate::model_library::asset::KWS_REQUIRED_FILES,
-        // 离线 ASR：精确 role 必须在 asr-* 通配之前，否则被通配吞掉返回错误 4 件套
-        "asr-sensevoice" => &crate::asr::config::SENSEVOICE_REQUIRED_FILES,
-        "asr-whisper-tiny" => &crate::asr::config::WHISPER_TINY_REQUIRED_FILES,
-        "asr-whisper-base" => &crate::asr::config::WHISPER_BASE_REQUIRED_FILES,
-        // 流式 Paraformer：裸名三件套（int8），同样先于 asr-* 通配
-        "asr-paraformer-bilingual-zh-en" | "asr-paraformer-trilingual-zh-cantonese-en" => {
-            &crate::asr::config::PARAFORMER_REQUIRED_FILES
-        }
-        // 离线 Qwen3-ASR：conv_frontend + 裸名 int8 二件 + tokenizer 三文件
-        // （has_required_files 是 is_file 语义，tokenizer 目录不能作条目），先于通配
-        "asr-qwen3" => &crate::asr::config::QWEN3_REQUIRED_FILES,
-        // audiocpp Qwen3-ASR：单文件 GGUF，先于 asr-* 通配
         "asr-audiocpp-qwen3-06b" => &[crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file],
-        // 所有 streaming zipformer ASR（含每个 ASR 的唯一 role）共用同一组 4 文件
-        r if r == "asr" || r.starts_with("asr-") => &crate::asr::config::REQUIRED_FILES,
-        "punctuation" => &crate::asr::config::PUNCT_REQUIRED_FILES,
         // Qwen3-TTS 两尺寸（音色克隆）：钉死各自 gguf 主文件名
         "tts-audiocpp-qwen3-06b" => &[crate::audiocpp::families::QWEN3_TTS_06B.gguf_file],
         "tts-audiocpp-qwen3-17b" => &[crate::audiocpp::families::QWEN3_TTS_17B.gguf_file],
-        // LLM：必需文件由 `RegistryModel.file_name` 推导（见 install_managed_model），这里不维护静态表
         _ => &[],
     }
 }
@@ -247,8 +224,8 @@ mod tests {
         let models = all_models();
         assert_eq!(
             models.len(),
-            8,
-            "应为 1 KWS + 2 ASR（默认 zipformer + audiocpp Qwen3）+ 5 TTS（zipvoice + 4 audiocpp；small/14M zipformer、Paraformer、SenseVoice、Whisper、sherpa Qwen3-ASR 已从模型库移除，vits/matcha/kokoro/pocket TTS 已移除）"
+            3,
+            "模型清单收敛为 qwen3 三族：1 ASR + 2 TTS（KWS/LLM/声纹、sherpa 全族、omnivoice/voxcpm2 已移除）"
         );
         assert!(
             models
@@ -260,11 +237,14 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), models.len(), "Registry id 必须唯一");
-        // 本地 LLM 推理已移除：registry 不应再有 LLM 条目
-        assert!(
-            !models.iter().any(|m| m.is_llm()),
-            "LLM 已改为远程连接，registry 不应包含 LLM 条目"
-        );
+        // 只剩 audiocpp 运行时的 qwen3 三族
+        for m in models {
+            assert_eq!(
+                m.runtime, "audiocpp",
+                "{} 应为 audiocpp 条目（sherpa 运行时已移除）",
+                m.id
+            );
+        }
     }
 
     #[test]
@@ -300,46 +280,17 @@ mod tests {
 
     #[test]
     fn test_model_by_id_and_order() {
-        let m = model_by_id("asr-streaming-bilingual-zh-en").expect("按 id 查找");
+        let m = model_by_id("asr-qwen3-0.6b-audiocpp").expect("按 id 查找");
         assert_eq!(m.model_type, ModelType::Asr);
-        // 推荐顺序 = registry 原始顺序（首个是 KWS）
-        assert_eq!(all_models()[0].model_type, ModelType::Kws);
+        // 推荐顺序 = registry 原始顺序（ASR 在前）
+        assert_eq!(all_models()[0].id, "asr-qwen3-0.6b-audiocpp");
     }
 
+    /// manifest role → 必需文件清单：只剩 qwen3 三 role，文件名单源 audiocpp 族表；
+    /// 已移除的 sherpa/KWS/标点 role 返回空（不会误判「已安装」）。
     #[test]
     fn test_required_files_for_role() {
-        assert_eq!(required_files_for_role("asr").len(), 4);
-        assert_eq!(required_files_for_role("punctuation").len(), 1);
-        assert_eq!(required_files_for_role("wake-word").len(), 5);
-        // 新离线 ASR：精确 role 优先于 asr-* 通配
-        assert_eq!(required_files_for_role("asr-sensevoice").len(), 2);
-        assert!(required_files_for_role("asr-sensevoice").contains(&"model.int8.onnx"));
-        assert_eq!(required_files_for_role("asr-whisper-tiny").len(), 3);
-        assert!(required_files_for_role("asr-whisper-tiny").contains(&"tiny-tokens.txt"));
-        assert_eq!(required_files_for_role("asr-whisper-base").len(), 3);
-        assert!(required_files_for_role("asr-whisper-base").contains(&"base-encoder.onnx"));
-        // 流式 Paraformer：裸名三件套（int8），先于 asr-* 通配
-        assert_eq!(
-            required_files_for_role("asr-paraformer-bilingual-zh-en").len(),
-            3
-        );
-        assert!(
-            required_files_for_role("asr-paraformer-bilingual-zh-en")
-                .contains(&"encoder.int8.onnx")
-        );
-        assert_eq!(
-            required_files_for_role("asr-paraformer-trilingual-zh-cantonese-en").len(),
-            3
-        );
-        // 离线 Qwen3-ASR：6 件（含 tokenizer 目录内三文件，目录不能作 is_file 条目）
-        let q3 = required_files_for_role("asr-qwen3");
-        assert_eq!(q3.len(), 6, "不应被 asr-* 通配吞成 4 件套");
-        assert!(q3.contains(&"conv_frontend.onnx"));
-        assert!(q3.contains(&"tokenizer/vocab.json"));
-        assert!(!q3.contains(&"tokenizer"), "目录不能作完整性条目");
-        // 回归：既有 streaming zipformer role 仍为 4 件套（不被新精确 arm 吞掉）
-        assert_eq!(required_files_for_role("asr-zh-14m").len(), 4);
-        // audiocpp Qwen3-ASR：单文件 GGUF（families 常量单源），先于 asr-* 通配
+        // audiocpp Qwen3-ASR：单文件 GGUF（families 常量单源）
         assert_eq!(
             required_files_for_role("asr-audiocpp-qwen3-06b"),
             &[crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file]
@@ -353,6 +304,23 @@ mod tests {
             required_files_for_role("tts-audiocpp-qwen3-17b"),
             &[crate::audiocpp::families::QWEN3_TTS_17B.gguf_file]
         );
+        // 已随清单裁剪移除的 role：空清单（完整性按「无必需文件」处理，不再命中旧表）
+        for legacy in [
+            "wake-word",
+            "asr",
+            "asr-sensevoice",
+            "asr-whisper-tiny",
+            "asr-paraformer-bilingual-zh-en",
+            "asr-qwen3",
+            "punctuation",
+            "tts",
+            "tts-vocoder",
+        ] {
+            assert!(
+                required_files_for_role(legacy).is_empty(),
+                "{legacy} 已随清单裁剪移除"
+            );
+        }
         assert!(required_files_for_role("unknown").is_empty());
     }
 
@@ -366,47 +334,34 @@ mod tests {
             registry_tts_kind("tts-qwen3-17b-base-q8-audiocpp"),
             Some(TtsModelKind::Qwen3Tts17)
         );
-        // 一期已移除、但 JSON 尚未裁剪的 TTS 条目（JSON 裁剪在模型清单任务）：
-        // kind 反序列化回落默认 0.6B（与 settings 老值迁移语义一致）
+        // 已随清单裁剪移除的 TTS 条目：registry 反查不到 → None
         for id in [
             "tts-zipvoice-distill-int8",
             "tts-omnivoice-q8-audiocpp",
             "tts-voxcpm2-q8-audiocpp",
+            "tts-vits-melo-zh-en",
+            "tts-kokoro-multi-lang-v1-1",
         ] {
-            assert_eq!(
-                model_by_id(id).and_then(|m| m.tts_kind),
-                Some(TtsModelKind::Qwen3Tts06),
-                "{id} 已移除条目回落默认 kind"
+            assert!(
+                model_by_id(id).and_then(|m| m.tts_kind).is_none(),
+                "{id} 应已从 registry 移除"
             );
         }
-        // 更早已从 registry 移除的 vits/matcha/kokoro/pocket 条目：查不到 → None
-        for id in [
-            "tts-vits-melo-zh-en",
-            "tts-matcha-zh-baker",
-            "tts-kokoro-int8-multi-lang-v1-1",
-            "tts-kokoro-multi-lang-v1-1",
-            "tts-pocket-english-audiocpp",
-        ] {
-            assert!(model_by_id(id).is_none(), "{id} 应已从 registry 移除");
-        }
-        // 非 TTS 或无 tts_kind → None
-        assert_eq!(registry_tts_kind("kws-zipformer-zh-en-3m"), None);
+        // 非 TTS 或不存在 → None
+        assert_eq!(registry_tts_kind("asr-qwen3-0.6b-audiocpp"), None);
         assert_eq!(registry_tts_kind("不存在"), None);
     }
 
-    /// 平台过滤：audiocpp TTS 家族 = darwin-aarch64 + windows-x86_64（Windows CUDA
+    /// 平台过滤：audiocpp qwen3 家族 = darwin-aarch64 + windows-x86_64（Windows CUDA
     /// 解锁）；无 platforms 的条目全平台可见。本机命中解锁平台时条目在列；
     /// 其它平台的 CI 通过「显式三元组判定函数」覆盖，不依赖宿主平台。
     #[test]
     fn test_platforms_filter() {
-        let audiocpp_ids = [
-            "tts-omnivoice-q8-audiocpp",
-            "tts-voxcpm2-q8-audiocpp",
+        let expected = ["darwin-aarch64", "windows-x86_64"];
+        for id in [
             "tts-qwen3-06b-base-q8-audiocpp",
             "tts-qwen3-17b-base-q8-audiocpp",
-        ];
-        let expected = ["darwin-aarch64", "windows-x86_64"];
-        for id in audiocpp_ids {
+        ] {
             let m = model_by_id(id).unwrap();
             assert_eq!(
                 m.platforms.as_deref(),
@@ -416,27 +371,17 @@ mod tests {
         }
         // 显式判定（不依赖宿主平台）：解锁 darwin-aarch64 / windows-x86_64，
         // darwin-x86_64（引擎无 Metal）/ linux（CPU-only 引擎）保持隐藏
-        let omni = model_by_id("tts-omnivoice-q8-audiocpp").unwrap();
-        assert!(platform_allows(omni, "darwin-aarch64"));
-        assert!(platform_allows(omni, "windows-x86_64"));
-        assert!(!platform_allows(omni, "darwin-x86_64"));
-        assert!(!platform_allows(omni, "linux-x86_64"));
-        // 无 platforms 的条目恒可见
-        let zipvoice = model_by_id("tts-zipvoice-distill-int8").unwrap();
-        assert!(zipvoice.platforms.is_none());
-        assert!(platform_allows(zipvoice, "linux-x86_64"));
-        // 全量条目在当前平台的过滤数 ≤ 总数，解锁平台上 audiocpp 条目在列
-        let filtered = models_for_current_platform();
-        assert!(filtered.len() <= all_models().len());
-        let triple = current_platform_triple();
-        if triple == "darwin-aarch64" || triple == "windows-x86_64" {
-            assert!(filtered.iter().any(|m| m.id == "tts-omnivoice-q8-audiocpp"));
-        } else {
-            assert!(
-                !filtered.iter().any(|m| m.id == "tts-omnivoice-q8-audiocpp"),
-                "{triple} 上 omnivoice 不可见"
-            );
-        }
+        let q06 = model_by_id("tts-qwen3-06b-base-q8-audiocpp").unwrap();
+        assert!(platform_allows(q06, "darwin-aarch64"));
+        assert!(platform_allows(q06, "windows-x86_64"));
+        assert!(!platform_allows(q06, "darwin-x86_64"));
+        assert!(!platform_allows(q06, "linux-x86_64"));
+        // ASR 条目无平台约束（CPU 可跑，GPU 只是加速）
+        let asr = model_by_id("asr-qwen3-0.6b-audiocpp").unwrap();
+        assert!(asr.platforms.is_none());
+        assert!(platform_allows(asr, "linux-x86_64"));
+        // 全量条目在当前平台的过滤数 ≤ 总数
+        assert!(models_for_current_platform().len() <= all_models().len());
     }
 
     /// 下载门控纯函数：`model_for_current_platform` 按 id + 当前平台过滤
@@ -445,10 +390,10 @@ mod tests {
     fn test_model_for_current_platform() {
         let triple = current_platform_triple();
         let unlocked = triple == "darwin-aarch64" || triple == "windows-x86_64";
-        let vox = model_for_current_platform("tts-voxcpm2-q8-audiocpp");
-        assert_eq!(vox.is_some(), unlocked, "{triple} 上 VoxCPM2 可见性");
-        // zipvoice 全平台可见
-        assert!(model_for_current_platform("tts-zipvoice-distill-int8").is_some());
+        let q06 = model_for_current_platform("tts-qwen3-06b-base-q8-audiocpp");
+        assert_eq!(q06.is_some(), unlocked, "{triple} 上 Qwen3-TTS 可见性");
+        // 无平台约束的 ASR 全平台可见
+        assert!(model_for_current_platform("asr-qwen3-0.6b-audiocpp").is_some());
         // 不存在的 id 恒 None
         assert!(model_for_current_platform("不存在").is_none());
     }
@@ -456,39 +401,53 @@ mod tests {
     #[test]
     fn test_registry_asr_kind() {
         use crate::asr::config::AsrModelKind;
-        // 离线 Qwen3-ASR（audiocpp 版；sherpa 版已从模型库移除）
+        // 唯一在册 ASR：audiocpp Qwen3-ASR 0.6B
         assert_eq!(
             registry_asr_kind("asr-qwen3-0.6b-audiocpp"),
             Some(AsrModelKind::Qwen3Asr)
         );
-        // 既有 streaming zipformer：asr_kind 缺省 → None（老行为）
-        assert_eq!(registry_asr_kind("asr-streaming-bilingual-zh-en"), None);
         // 非 ASR 或不存在 → None
-        assert_eq!(registry_asr_kind("tts-zipvoice-distill-int8"), None);
+        assert_eq!(registry_asr_kind("tts-qwen3-06b-base-q8-audiocpp"), None);
         assert_eq!(registry_asr_kind("不存在"), None);
-        // 已从模型库移除的模型（Paraformer/SenseVoice/Whisper/small/14M/sherpa Qwen3）：
-        // registry 反查不到 → None，已装目录交回 detect_kind_from_dir 探测兜底
+        // 已随清单裁剪移除的模型（sherpa zipformer/Paraformer/SenseVoice/Whisper/
+        // sherpa Qwen3）：registry 反查不到 → None，已装目录交回
+        // detect_kind_from_dir 探测兜底
+        assert_eq!(registry_asr_kind("asr-streaming-bilingual-zh-en"), None);
         assert_eq!(registry_asr_kind("asr-qwen3-0.6b"), None);
         assert_eq!(registry_asr_kind("asr-sensevoice-zh-en-ja-ko-yue"), None);
         assert_eq!(registry_asr_kind("asr-whisper-tiny"), None);
-        assert_eq!(registry_asr_kind("asr-whisper-base"), None);
         assert_eq!(registry_asr_kind("asr-paraformer-bilingual-zh-en"), None);
-        assert_eq!(
-            registry_asr_kind("asr-paraformer-trilingual-zh-cantonese-en"),
-            None
-        );
-        assert_eq!(
-            registry_asr_kind("asr-streaming-small-bilingual-zh-en"),
-            None
-        );
-        assert_eq!(registry_asr_kind("asr-streaming-zh-14m"), None);
     }
 
+    /// 已裁剪的 manifest role 资产不可再解析（KWS/标点/TTS-sherpa/声纹资产已删除），
+    /// 防止旧代码路径经 `asset_by_role` 拿到已下架资产。
     #[test]
-    fn test_default_asset_stays_zh_en() {
-        // manifest 中第一个 role=="wake-word" 资产必须保持 zh-en（default_asset 语义）。
-        let d = crate::model_library::asset::default_asset();
-        assert_eq!(d.role, "wake-word");
-        assert_eq!(d.name, "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20");
+    fn test_removed_manifest_roles_are_gone() {
+        for role in [
+            "wake-word",
+            "asr",
+            "punctuation",
+            "tts",
+            "tts-vocoder",
+            "asr-vad",
+            "tts-audiocpp-omnivoice",
+            "tts-audiocpp-voxcpm2",
+            "speaker-embedding",
+        ] {
+            assert!(
+                asset_by_role(role).is_none(),
+                "role {role} 应已从 manifest 移除"
+            );
+        }
+        // 剩余资产恰为 qwen3 三项，且全部是裸单文件（raw）
+        let roles = crate::model_library::asset::manifest_roles();
+        assert_eq!(
+            roles,
+            [
+                "tts-audiocpp-qwen3-06b",
+                "tts-audiocpp-qwen3-17b",
+                "asr-audiocpp-qwen3-06b"
+            ]
+        );
     }
 }

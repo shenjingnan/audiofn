@@ -3,9 +3,6 @@ use std::path::PathBuf;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// `tts install-model` 缺省安装的模型库条目（Qwen3-TTS 0.6B，延迟优先档）。
-const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
-
 #[derive(Parser)]
 #[command(
     name = "audiofn",
@@ -208,8 +205,9 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
                 .or_else(|| crate::asr::default_test_wav(&cfg.model_dir))
                 .ok_or_else(|| {
                     format!(
-                        "未指定 --wav 且 {} 下没有 test_wavs/*.wav 示例音频",
-                        cfg.model_dir.display()
+                        "未指定 --wav 且 {} 下没有 test_wavs/*.wav 示例音频。\n若模型尚未安装，请先执行 {} 下载（安装后自带示例音频）。",
+                        cfg.model_dir.display(),
+                        crate::audiocpp::asr_families::QWEN3_ASR_06B.registry_hint,
                     )
                 })?;
             crate::asr::run_offline(&cfg, &wav_path)
@@ -408,7 +406,8 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
         TtsCmd::InstallModel { registry_id, force } => {
             use crate::model_library::asset::{DownloadProgress, DownloadStage};
             use crate::model_library::{install_managed_model, registry};
-            let id = registry_id.unwrap_or_else(|| DEFAULT_TTS_REGISTRY_ID.to_string());
+            let id = registry_id
+                .unwrap_or_else(|| crate::tts::config::DEFAULT_TTS_REGISTRY_ID.to_string());
             let model = registry::model_for_current_platform(&id)
                 .ok_or_else(|| format!("未知的模型库条目（或当前平台不可用）: {id}"))?;
             if model.model_type != crate::model_library::registry::ModelType::Tts {

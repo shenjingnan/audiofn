@@ -2,9 +2,12 @@
 //!
 //! 模型元数据编译期嵌入（`include_str!`），运行时从用户目录
 //! `~/.zapmomo/models/<name>` 安装/查找，供 asr / tts / model_library、
-//! CLI（`asr/tts install-model`）及 GUI（下载按钮）复用。流程与
-//! `scripts/download-kws-model.sh` 一致：
-//! 下载 → sha256 校验 → 临时目录解压 → 原子落位，幂等可重跑。
+//! CLI（`asr/tts install-model`）及 GUI（下载按钮）复用。流程：
+//! 下载 → sha256 校验 → 落位（裸文件原子改名 / 归档解压），幂等可重跑。
+//!
+//! 一期裁剪后清单只含 qwen3 三资产（单文件 GGUF），各能力的「默认装哪个模型、
+//! 装到哪个目录」由各能力模块的 registry 常量解析（`asr::config::DEFAULT_ASR_REGISTRY_ID`
+//! / `tts::config::DEFAULT_TTS_REGISTRY_ID`），本模块只提供通用下载/校验/落位。
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -13,14 +16,6 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 
 use crate::config::settings::get_models_dir;
-
-/// 模型包内默认文件名（chunk-16 变体，与官方测试命令一致）。
-pub const DEFAULT_ENCODER: &str = "encoder-epoch-13-avg-2-chunk-16-left-64.onnx";
-pub const DEFAULT_DECODER: &str = "decoder-epoch-13-avg-2-chunk-16-left-64.onnx";
-pub const DEFAULT_JOINER: &str = "joiner-epoch-13-avg-2-chunk-16-left-64.onnx";
-pub const DEFAULT_TOKENS: &str = "tokens.txt";
-/// 模型包内自带的关键词文件（中英混合，开箱即用）。
-pub const DEFAULT_KEYWORDS_REL: &str = "test_wavs/keywords.txt";
 
 /// `models/manifest.json` 的顶层结构。
 #[derive(Debug, Clone, Deserialize)]
@@ -66,69 +61,19 @@ fn manifest() -> &'static ModelManifest {
     CACHE.get_or_init(|| serde_json::from_str(MANIFEST_JSON).expect("内嵌模型清单无效"))
 }
 
-/// 按 role 查找模型资产（如 "wake-word" / "asr"）。
+/// 按 role 查找模型资产（如 "asr-audiocpp-qwen3-06b"）。
 pub fn asset_by_role(role: &str) -> Option<&'static ModelAsset> {
     manifest().assets.iter().find(|a| a.role == role)
 }
 
-/// 默认唤醒词模型资产（清单中第一个 `role == "wake-word"` 的资产，找不到则取首个）。
-pub fn default_asset() -> &'static ModelAsset {
-    asset_by_role("wake-word")
-        .or_else(|| manifest().assets.first())
-        .expect("模型清单为空")
-}
-
-/// ASR 模型资产（清单中 `role == "asr"` 的资产）。
-pub fn asr_asset() -> &'static ModelAsset {
-    asset_by_role("asr").expect("模型清单缺少 asr 资产")
-}
-
-/// 标点恢复模型资产（清单中 `role == "punctuation"` 的资产）。
-pub fn punctuation_asset() -> &'static ModelAsset {
-    asset_by_role("punctuation").expect("模型清单缺少 punctuation 资产")
-}
-
-/// TTS 主模型资产（清单中 `role == "tts"` 的资产，tar.bz2 归档）。
-pub fn tts_asset() -> &'static ModelAsset {
-    asset_by_role("tts").expect("模型清单缺少 tts 资产")
-}
-
-/// TTS 声码器资产（清单中 `role == "tts-vocoder"` 的资产，裸 .onnx 单文件）。
-pub fn tts_vocoder_asset() -> &'static ModelAsset {
-    asset_by_role("tts-vocoder").expect("模型清单缺少 tts-vocoder 资产")
+/// 清单内全部资产 role（自洽校验 / 诊断用）。
+pub fn manifest_roles() -> Vec<&'static str> {
+    manifest().assets.iter().map(|a| a.role.as_str()).collect()
 }
 
 /// 用户模型根目录：`~/.zapmomo/models`
 pub fn user_models_dir() -> PathBuf {
     get_models_dir()
-}
-
-/// 默认 KWS 模型安装目录：`~/.zapmomo/models/<name>`
-pub fn user_model_dir() -> PathBuf {
-    get_models_dir().join(&default_asset().name)
-}
-
-/// 默认标点模型安装目录：`~/.zapmomo/models/<name>`
-pub fn punctuation_user_model_dir() -> PathBuf {
-    get_models_dir().join(&punctuation_asset().name)
-}
-
-/// 默认 TTS 模型安装目录：`~/.zapmomo/models/<name>`
-pub fn tts_user_model_dir() -> PathBuf {
-    get_models_dir().join(&tts_asset().name)
-}
-
-/// 声纹识别 embedding 模型资产（清单中 `role == "speaker-embedding"` 的资产，
-/// 裸 .onnx 单文件，CAM++ 中文 16k）。
-pub fn speaker_asset() -> &'static ModelAsset {
-    asset_by_role("speaker-embedding").expect("模型清单缺少 speaker-embedding 资产")
-}
-
-/// 声纹识别模型文件路径：`~/.zapmomo/models/<name>/<archive>`。
-pub fn speaker_user_model_path() -> PathBuf {
-    get_models_dir()
-        .join(&speaker_asset().name)
-        .join(&speaker_asset().archive)
 }
 
 /// 下载/安装阶段（CLI 打日志 / GUI 推事件共用）。
@@ -172,121 +117,9 @@ pub enum ModelError {
     Cancelled,
 }
 
-/// KWS 模型安装完成所需的文件（相对目标目录）。
-pub const KWS_REQUIRED_FILES: [&str; 5] = [
-    DEFAULT_ENCODER,
-    DEFAULT_DECODER,
-    DEFAULT_JOINER,
-    DEFAULT_TOKENS,
-    DEFAULT_KEYWORDS_REL,
-];
-
 /// 目标目录是否已包含给定的一组文件。
 pub fn has_required_files(dest_dir: &Path, required: &[&str]) -> bool {
     required.iter().all(|f| dest_dir.join(f).is_file())
-}
-
-/// 目标目录是否已装好 KWS 模型（5 个核心文件齐全）。
-pub fn is_installed(dest_dir: &Path) -> bool {
-    has_required_files(dest_dir, &KWS_REQUIRED_FILES)
-}
-
-/// onnx 默认文件名探测：settings 未显式配置某 onnx 文件时按模型目录内容选择。
-///
-/// 规则（确定性）：
-/// 1. 默认常量文件名存在 → 直接用（zh-en 已装用户零行为变化，混放两代文件时偏默认代）；
-/// 2. 否则扫目录中 `{prefix}-` 开头、`.onnx` 结尾、含 `chunk-16` 且非 `.int8` 的文件，
-///    排序取第一个（read_dir 顺序不确定，排序保证确定性；字母序下 epoch-12 优先于 epoch-99）；
-/// 3. 目录不存在或无匹配 → 回退默认常量名（后续预检报「缺少模型文件」，错误路径清晰）。
-pub(crate) fn detect_default_onnx(model_dir: &Path, prefix: &str, fallback: &str) -> String {
-    if model_dir.join(fallback).is_file() {
-        return fallback.to_string();
-    }
-    let Ok(entries) = std::fs::read_dir(model_dir) else {
-        return fallback.to_string();
-    };
-    let mut candidates: Vec<String> = entries
-        .flatten()
-        .filter(|e| e.path().is_file())
-        .filter_map(|e| e.file_name().to_str().map(str::to_string))
-        .filter(|n| {
-            n.starts_with(&format!("{prefix}-"))
-                && n.ends_with(".onnx")
-                && n.contains("chunk-16")
-                && !n.contains(".int8")
-        })
-        .collect();
-    candidates.sort();
-    candidates
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| fallback.to_string())
-}
-
-/// keywords 默认文件名探测：不同模型包自带的关键词文件名不同，按候选链取第一个存在的。
-pub(crate) fn detect_keywords_rel(model_dir: &Path) -> String {
-    /// 候选链（固定顺序）：zh-en 的 `test_wavs/keywords.txt` 在前（与 DEFAULT_KEYWORDS_REL
-    /// 一致），其余为其它 sherpa KWS 包（external/HF 导入）的常见布局兜底。
-    const CANDIDATES: [&str; 4] = [
-        DEFAULT_KEYWORDS_REL,
-        "test_wavs/test_keywords.txt",
-        "test_keywords.txt",
-        "keywords.txt",
-    ];
-    CANDIDATES
-        .iter()
-        .find(|c| model_dir.join(c).is_file())
-        .copied()
-        .unwrap_or(DEFAULT_KEYWORDS_REL)
-        .to_string()
-}
-
-/// 目录内是否探测得到完整的一套 KWS 模型文件（模型无关，替代按 zh-en 文件名硬编码的
-/// [`is_installed`]，供模型库 external/HF 导入的完整性判断复用）。
-pub fn kws_files_present(model_dir: &Path) -> bool {
-    let files = [
-        detect_default_onnx(model_dir, "encoder", DEFAULT_ENCODER),
-        detect_default_onnx(model_dir, "decoder", DEFAULT_DECODER),
-        detect_default_onnx(model_dir, "joiner", DEFAULT_JOINER),
-        DEFAULT_TOKENS.to_string(),
-        detect_keywords_rel(model_dir),
-    ];
-    files.iter().all(|f| model_dir.join(f).is_file())
-}
-
-/// 安装默认唤醒词模型到 `dest_dir`（默认 `~/.zapmomo/models/<name>`）。
-///
-/// 幂等：已安装且 `force` 为假时直接返回。下载过程中回调进度。
-pub fn install_model_to(
-    dest_dir: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-) -> Result<(), ModelError> {
-    install_asset_to(
-        default_asset(),
-        dest_dir,
-        force,
-        on_progress,
-        &KWS_REQUIRED_FILES,
-    )
-}
-
-/// 安装标点模型到 `dest_dir`（默认 `~/.zapmomo/models/<标点模型名>`）。
-///
-/// 幂等：已安装且 `force` 为假时直接返回。`required_files` 用于幂等性判断。
-pub fn install_punctuation_model_to(
-    dest_dir: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-    required_files: &[&str],
-) -> Result<(), ModelError> {
-    install_asset_to(
-        punctuation_asset(),
-        dest_dir,
-        force,
-        on_progress,
-        required_files,
-    )
 }
 
 /// 按指定资产安装（测试/多模型可复用）。`required_files` 用于幂等性判断。
@@ -373,18 +206,9 @@ fn cancelled(cancel: Option<&std::sync::atomic::AtomicBool>) -> bool {
 
 /// 安装「裸文件」资产（单文件，无解压）到 `dest_path`。
 ///
-/// 用于 TTS 声码器这类与主包分离发布的独立 .onnx 文件。流程：
+/// 用于 audiocpp 单文件 GGUF 这类独立发布的模型文件。流程：
 /// 幂等检查 → 下载到临时文件 → sha256 校验 → 原子落位（无解压阶段）。
-pub fn install_raw_file_to(
-    asset: &ModelAsset,
-    dest_path: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-) -> Result<(), ModelError> {
-    install_raw_file_to_cancellable(asset, dest_path, force, on_progress, None)
-}
-
-/// 可取消版本的 [`install_raw_file_to`]。
+/// 需要中途取消时用 [`install_raw_file_to_cancellable`]。
 pub fn install_raw_file_to_cancellable(
     asset: &ModelAsset,
     dest_path: &Path,
@@ -688,7 +512,16 @@ pub(crate) mod tests {
     use super::*;
     use std::net::TcpListener;
 
+    /// 测试归档内的占位模型文件（形状自定，仅需与安装校验清单一致；
+    /// 真实清单单源 audiocpp 族表，见 `registry::required_files_for_role`）。
+    pub(crate) const TEST_MODEL_FILES: [&str; 2] = ["encoder.onnx", "tokens.txt"];
+
     pub(crate) fn mini_tarbz2(prefix: &str) -> Vec<u8> {
+        tarbz2_with(prefix, &TEST_MODEL_FILES)
+    }
+
+    /// 归档内容可指定的变体（调用方按其完整性清单摆文件）。
+    pub(crate) fn tarbz2_with(prefix: &str, files: &[&str]) -> Vec<u8> {
         use bzip2::Compression;
         use bzip2::write::BzEncoder;
         let mut bz = BzEncoder::new(Vec::new(), Compression::default());
@@ -714,11 +547,9 @@ pub(crate) mod tests {
                 ar.append_data(&mut h, format!("{base}{rel}"), bytes)
                     .unwrap();
             };
-            f(DEFAULT_ENCODER, b"enc-onnx-bytes");
-            f(DEFAULT_DECODER, b"dec-onnx-bytes");
-            f(DEFAULT_JOINER, b"joiner-onnx-bytes");
-            f(DEFAULT_TOKENS, b"token symbols");
-            f(DEFAULT_KEYWORDS_REL, b"k w @KW\n");
+            for (i, name) in files.iter().enumerate() {
+                f(name, format!("payload-{i}").as_bytes());
+            }
             ar.finish().unwrap();
         }
         bz.finish().unwrap()
@@ -748,10 +579,10 @@ pub(crate) mod tests {
         format!("http://{addr}/model.tar.bz2")
     }
 
-    fn asset_for(source: &str, sha256: &str, archive: &str) -> ModelAsset {
+    fn test_asset(source: &str, sha256: &str, archive: &str) -> ModelAsset {
         ModelAsset {
-            name: "test-kws-model".to_string(),
-            role: "wake-word".to_string(),
+            name: "test-model".to_string(),
+            role: "test-role".to_string(),
             version: "test".to_string(),
             kind: None,
             archive: archive.to_string(),
@@ -767,69 +598,26 @@ pub(crate) mod tests {
         hex::encode(Sha256::digest(data))
     }
 
+    /// 清单自洽：只含 qwen3 三资产，全部为裸单文件 GGUF，校验字段齐全。
     #[test]
-    fn test_manifest_default_asset() {
-        let a = default_asset();
-        assert!(!a.name.is_empty());
-        assert!(a.source.starts_with("http"));
-        assert_eq!(a.sha256.len(), 64);
-        // 默认资产应为清单中 role == "wake-word" 的条目（自洽校验，不依赖模型文件是否已下载）
-        let m = manifest();
-        assert!(
-            m.assets
-                .iter()
-                .any(|x| x.name == a.name && x.role == "wake-word"),
-            "default_asset 不在清单中"
+    fn test_manifest_qwen3_assets() {
+        assert_eq!(
+            manifest_roles(),
+            [
+                "tts-audiocpp-qwen3-06b",
+                "tts-audiocpp-qwen3-17b",
+                "asr-audiocpp-qwen3-06b"
+            ],
+            "模型清单收敛为 qwen3 三资产（KWS/标点/sherpa TTS/声纹/omnivoice/voxcpm2 已移除）"
         );
-    }
-
-    #[test]
-    fn test_manifest_asr_asset() {
-        let a = asr_asset();
-        assert!(!a.name.is_empty());
-        assert!(a.source.starts_with("http"));
-        assert_eq!(a.sha256.len(), 64);
-        // asr_asset 应为清单中 role == "asr" 的条目（自洽校验，不依赖模型文件是否已下载）
-        let m = manifest();
-        assert!(
-            m.assets.iter().any(|x| x.name == a.name && x.role == "asr"),
-            "asr_asset 不在清单中"
-        );
-        // asset_by_role 应与 asr_asset 一致
-        assert_eq!(asset_by_role("asr").unwrap().name, a.name);
-    }
-
-    #[test]
-    fn test_manifest_punctuation_asset() {
-        let a = punctuation_asset();
-        assert!(!a.name.is_empty());
-        assert!(a.source.starts_with("http"));
-        assert_eq!(a.sha256.len(), 64);
-        // punctuation_asset 应为清单中 role == "punctuation" 的条目（自洽校验）
-        let m = manifest();
-        assert!(
-            m.assets
-                .iter()
-                .any(|x| x.name == a.name && x.role == "punctuation"),
-            "punctuation_asset 不在清单中"
-        );
-        assert_eq!(asset_by_role("punctuation").unwrap().name, a.name);
-    }
-
-    #[test]
-    fn test_manifest_tts_assets() {
-        let a = tts_asset();
-        assert_eq!(a.role, "tts");
-        assert!(!a.is_raw());
-        assert_eq!(a.sha256.len(), 64);
-
-        let v = tts_vocoder_asset();
-        assert_eq!(v.role, "tts-vocoder");
-        assert!(v.is_raw());
-        assert_eq!(v.sha256.len(), 64);
-
-        // 声码器与主包落位到同一模型目录
-        assert_eq!(tts_asset().name, tts_vocoder_asset().name);
+        for role in manifest_roles() {
+            let a = asset_by_role(role).unwrap();
+            assert!(!a.name.is_empty());
+            assert!(a.source.starts_with("http"), "{role} 需有下载源");
+            assert_eq!(a.sha256.len(), 64, "{role} 需有 sha256");
+            assert!(a.is_raw(), "{role} 应为裸单文件资产（audio.cpp GGUF）");
+            assert_eq!(asset_by_role(role).unwrap().archive, a.archive);
+        }
     }
 
     #[test]
@@ -850,33 +638,32 @@ pub(crate) mod tests {
     fn test_extract_and_place_mini_archive() {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("mini.tar.bz2");
-        std::fs::write(&archive, mini_tarbz2("test-kws-model")).unwrap();
-        let dest = dir.path().join("test-kws-model");
+        std::fs::write(&archive, mini_tarbz2("test-model")).unwrap();
+        let dest = dir.path().join("test-model");
         extract_and_place(&archive, &dest).unwrap();
-        assert!(is_installed(&dest));
+        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
         assert!(!archive.exists());
-        assert!(!dir.path().join(".test-kws-model.extract").exists());
+        assert!(!dir.path().join(".test-model.extract").exists());
     }
 
     #[test]
     fn test_install_full_flow_via_local_server() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = mini_tarbz2("test-kws-model");
+        let bytes = mini_tarbz2("test-model");
         let url = serve_many(bytes.clone());
-        let archive = "mini.tar.bz2".to_string();
-        let asset = asset_for(&url, &sha256_hex(&bytes), &archive);
+        let asset = test_asset(&url, &sha256_hex(&bytes), "mini.tar.bz2");
 
-        let dest = dir.path().join("test-kws-model");
+        let dest = dir.path().join("test-model");
         let mut stages = Vec::new();
         install_asset_to(
             &asset,
             &dest,
             false,
             &mut |p| stages.push(p.stage),
-            &KWS_REQUIRED_FILES,
+            &TEST_MODEL_FILES,
         )
         .unwrap();
-        assert!(is_installed(&dest));
+        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
 
         let expected = [
             DownloadStage::Downloading,
@@ -890,22 +677,24 @@ pub(crate) mod tests {
     #[test]
     fn test_install_idempotent_skips_when_installed() {
         let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("test-kws-model");
-        // 直接摆好核心文件，模拟已安装
-        std::fs::create_dir_all(dest.join("test_wavs")).unwrap();
-        std::fs::write(dest.join(DEFAULT_ENCODER), b"e").unwrap();
-        std::fs::write(dest.join(DEFAULT_DECODER), b"d").unwrap();
-        std::fs::write(dest.join(DEFAULT_JOINER), b"j").unwrap();
-        std::fs::write(dest.join(DEFAULT_TOKENS), b"t").unwrap();
-        std::fs::write(dest.join(DEFAULT_KEYWORDS_REL), b"k").unwrap();
+        let dest = dir.path().join("test-model");
+        // 直接摆好必需文件，模拟已安装
+        std::fs::create_dir_all(&dest).unwrap();
+        for f in TEST_MODEL_FILES {
+            std::fs::write(dest.join(f), b"x").unwrap();
+        }
 
         let mut stages = Vec::new();
         install_asset_to(
-            default_asset(),
+            &test_asset(
+                "http://127.0.0.1:1/none.tar.bz2",
+                &"0".repeat(64),
+                "mini.tar.bz2",
+            ),
             &dest,
             false,
             &mut |p| stages.push(p.stage),
-            &KWS_REQUIRED_FILES,
+            &TEST_MODEL_FILES,
         )
         .unwrap();
         assert_eq!(stages, vec![DownloadStage::Done]);
@@ -914,14 +703,15 @@ pub(crate) mod tests {
     #[test]
     fn test_install_raw_file_via_local_server() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = b"vocos-onnx-bytes".to_vec();
+        let bytes = b"gguf-bytes".to_vec();
         let url = serve_many(bytes.clone());
-        let mut asset = asset_for(&url, &sha256_hex(&bytes), "vocos_24khz.onnx");
+        let mut asset = test_asset(&url, &sha256_hex(&bytes), "qwen3-test-q8_0.gguf");
         asset.kind = Some("raw".to_string());
 
-        let dest = dir.path().join("vocos_24khz.onnx");
+        let dest = dir.path().join("qwen3-test-q8_0.gguf");
         let mut stages = Vec::new();
-        install_raw_file_to(&asset, &dest, false, &mut |p| stages.push(p.stage)).unwrap();
+        install_raw_file_to_cancellable(&asset, &dest, false, &mut |p| stages.push(p.stage), None)
+            .unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), bytes);
 
         let expected = [
@@ -933,42 +723,43 @@ pub(crate) mod tests {
 
         // 幂等：已装且非 force → 仅 Done
         let mut stages = Vec::new();
-        install_raw_file_to(&asset, &dest, false, &mut |p| stages.push(p.stage)).unwrap();
+        install_raw_file_to_cancellable(&asset, &dest, false, &mut |p| stages.push(p.stage), None)
+            .unwrap();
         assert_eq!(stages, vec![DownloadStage::Done]);
     }
 
     #[test]
     fn test_install_force_reinstalls() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = mini_tarbz2("test-kws-model");
+        let bytes = mini_tarbz2("test-model");
         let url = serve_many(bytes.clone());
-        let asset = asset_for(&url, &sha256_hex(&bytes), "mini.tar.bz2");
-        let dest = dir.path().join("test-kws-model");
+        let asset = test_asset(&url, &sha256_hex(&bytes), "mini.tar.bz2");
+        let dest = dir.path().join("test-model");
 
         // 先装好，再 force 重装 → 应重新走完整流程
-        install_asset_to(&asset, &dest, false, &mut |_| {}, &KWS_REQUIRED_FILES).unwrap();
+        install_asset_to(&asset, &dest, false, &mut |_| {}, &TEST_MODEL_FILES).unwrap();
         let mut stages = Vec::new();
         install_asset_to(
             &asset,
             &dest,
             true,
             &mut |p| stages.push(p.stage),
-            &KWS_REQUIRED_FILES,
+            &TEST_MODEL_FILES,
         )
         .unwrap();
-        assert!(is_installed(&dest));
+        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
         assert!(stages.contains(&DownloadStage::Downloading));
     }
 
     #[test]
     fn test_install_sha256_mismatch_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = mini_tarbz2("test-kws-model");
+        let bytes = mini_tarbz2("test-model");
         let url = serve_many(bytes);
-        let asset = asset_for(&url, &"0".repeat(64), "mini.tar.bz2");
-        let dest = dir.path().join("test-kws-model");
+        let asset = test_asset(&url, &"0".repeat(64), "mini.tar.bz2");
+        let dest = dir.path().join("test-model");
         let err =
-            install_asset_to(&asset, &dest, false, &mut |_| {}, &KWS_REQUIRED_FILES).unwrap_err();
+            install_asset_to(&asset, &dest, false, &mut |_| {}, &TEST_MODEL_FILES).unwrap_err();
         assert!(matches!(err, ModelError::Sha256Mismatch { .. }));
         assert!(!dest.exists());
     }
@@ -1010,8 +801,8 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let payload = vec![0u8; 512 * 1024];
         let url = serve_slow(15, payload);
-        let asset = asset_for(&url, &"0".repeat(64), "slow.tar.bz2");
-        let dest = dir.path().join("test-kws-model");
+        let asset = test_asset(&url, &"0".repeat(64), "slow.tar.bz2");
+        let dest = dir.path().join("test-model");
         let parent = dest.parent().unwrap();
         let tmp_path = parent.join(".slow.tar.bz2.tmp");
 
@@ -1033,7 +824,7 @@ pub(crate) mod tests {
                     }
                     stages.push(p.percent);
                 },
-                &KWS_REQUIRED_FILES,
+                &TEST_MODEL_FILES,
                 Some(&cancel_clone),
             );
             (result, stages)
@@ -1055,20 +846,20 @@ pub(crate) mod tests {
 
         // 取消后重新下载（cancel 复位）能正常开始并完成
         cancel.store(false, Ordering::Relaxed);
-        let bytes = mini_tarbz2("test-kws-model");
+        let bytes = mini_tarbz2("test-model");
         let url2 = serve_many(bytes.clone());
-        let asset2 = asset_for(&url2, &sha256_hex(&bytes), "mini.tar.bz2");
+        let asset2 = test_asset(&url2, &sha256_hex(&bytes), "mini.tar.bz2");
         let mut stages2 = Vec::new();
         install_asset_to_cancellable(
             &asset2,
             &dest,
             false,
             &mut |p| stages2.push(p.stage),
-            &KWS_REQUIRED_FILES,
+            &TEST_MODEL_FILES,
             Some(&cancel),
         )
         .unwrap();
-        assert!(is_installed(&dest));
+        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
     }
 
     /// 多资产总体进度聚合：各 asset 下载字节累计后总体百分比单调不减。
@@ -1111,7 +902,7 @@ pub(crate) mod tests {
     #[test]
     #[ignore = "联网探针，诊断时手动运行"]
     fn probe_model_url() {
-        let url = default_asset().source.clone();
+        let url = asset_by_role(manifest_roles()[0]).unwrap().source.clone();
         let range = "bytes=0-1023";
         let resp = download_agent()
             .get(&url)
@@ -1204,81 +995,5 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(std::fs::read(&tmp).unwrap(), payload);
         assert_eq!(last_percent, 100.0);
-    }
-
-    // ---- 模型目录文件名探测（detect_* / kws_files_present）----
-
-    #[test]
-    fn test_detect_prefers_non_int8_and_earliest_epoch() {
-        // epoch-12 fp32 与 int8、epoch-99 fp32 并存 → 排序后取 epoch-12 fp32
-        let dir = crate::test_util::fake_kws_model_dir(
-            "encoder-epoch-99-avg-1-chunk-16-left-64.onnx",
-            DEFAULT_DECODER,
-            DEFAULT_JOINER,
-            DEFAULT_KEYWORDS_REL,
-            &[
-                "encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
-                "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
-                "encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
-            ],
-        );
-        let enc = detect_default_onnx(dir.path(), "encoder", DEFAULT_ENCODER);
-        assert_eq!(enc, "encoder-epoch-12-avg-2-chunk-16-left-64.onnx");
-    }
-
-    #[test]
-    fn test_detect_int8_only_falls_back_to_constant() {
-        // 目录里只有 int8 变体（非默认布局）→ 回退常量名
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path()
-                .join("encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx"),
-            b"m",
-        )
-        .unwrap();
-        let enc = detect_default_onnx(dir.path(), "encoder", DEFAULT_ENCODER);
-        assert_eq!(enc, DEFAULT_ENCODER);
-    }
-
-    #[test]
-    fn test_detect_missing_dir_falls_back_to_constant() {
-        // 目录不存在 → 回退常量名（与 resolve 既有行为一致，报错路径清晰）
-        let enc = detect_default_onnx(Path::new("/nonexistent-kws"), "encoder", DEFAULT_ENCODER);
-        assert_eq!(enc, DEFAULT_ENCODER);
-        assert_eq!(
-            detect_keywords_rel(Path::new("/nonexistent-kws")),
-            DEFAULT_KEYWORDS_REL
-        );
-    }
-
-    #[test]
-    fn test_detect_keywords_candidate_chain() {
-        // 仅根目录 keywords.txt（部分模型包布局）→ 候选链兜底命中
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("keywords.txt"), b"k").unwrap();
-        assert_eq!(detect_keywords_rel(dir.path()), "keywords.txt");
-    }
-
-    #[test]
-    fn test_kws_files_present() {
-        // 完整 epoch 布局目录 → true；缺 encoder → false；空目录 → false
-        let dir = crate::test_util::fake_kws_model_dir(
-            "encoder-epoch-12-avg-2-chunk-16-left-64.onnx",
-            "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
-            "joiner-epoch-12-avg-2-chunk-16-left-64.onnx",
-            "test_wavs/test_keywords.txt",
-            &[],
-        );
-        assert!(kws_files_present(dir.path()));
-        std::fs::remove_file(
-            dir.path()
-                .join("encoder-epoch-12-avg-2-chunk-16-left-64.onnx"),
-        )
-        .unwrap();
-        assert!(!kws_files_present(dir.path()));
-
-        let empty = tempfile::tempdir().unwrap();
-        assert!(!kws_files_present(empty.path()));
-        assert!(!kws_files_present(Path::new("/nonexistent-kws")));
     }
 }

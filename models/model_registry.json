@@ -2,75 +2,6 @@
   "schema_version": 1,
   "models": [
     {
-      "id": "kws-zipformer-zh-en-3m",
-      "name": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
-      "display_name": "Zipformer KWS zh-en 3M",
-      "model_type": "kws",
-      "runtime": "sherpa-onnx",
-      "format": "ONNX",
-      "description": "流式唤醒词检测，中英混合，低延迟、轻量。",
-      "languages": [
-        "zh",
-        "en"
-      ],
-      "tags": [
-        "wake-word",
-        "streaming",
-        "lightweight",
-        "high-accuracy"
-      ],
-      "parameter_count": null,
-      "quantization": null,
-      "version": "2025-12-20",
-      "size_bytes": 32885699,
-      "homepage": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models",
-      "required_assets": [
-        "wake-word"
-      ],
-      "optional_assets": [],
-      "download": {
-        "manifest_role": "wake-word",
-        "extra_roles": [],
-        "kind": "archive"
-      }
-    },
-    {
-      "id": "asr-streaming-bilingual-zh-en",
-      "name": "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20",
-      "display_name": "Streaming Zipformer ASR zh-en",
-      "model_type": "asr",
-      "runtime": "sherpa-onnx",
-      "format": "ONNX",
-      "description": "流式端到端识别，中英双语；标点模型为可选增强。",
-      "languages": [
-        "zh",
-        "en"
-      ],
-      "tags": [
-        "asr",
-        "streaming",
-        "multilingual"
-      ],
-      "parameter_count": null,
-      "quantization": null,
-      "version": "2023-02-20",
-      "size_bytes": 511274346,
-      "homepage": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models",
-      "required_assets": [
-        "asr"
-      ],
-      "optional_assets": [
-        "punctuation"
-      ],
-      "download": {
-        "manifest_role": "asr",
-        "extra_roles": [
-          "punctuation"
-        ],
-        "kind": "archive"
-      }
-    },
-    {
       "id": "asr-qwen3-0.6b-audiocpp",
       "name": "qwen3-asr-0.6b-audiocpp",
       "display_name": "Qwen3-ASR 0.6B (audio.cpp)",
@@ -107,122 +38,6 @@
       }
     },
     {
-      "id": "tts-zipvoice-distill-int8",
-      "name": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
-      "display_name": "ZipVoice TTS zh-en",
-      "model_type": "tts",
-      "tts_kind": "zipvoice",
-      "runtime": "sherpa-onnx",
-      "format": "ONNX",
-      "description": "零样本声音克隆，中英双语；含 Vocos 声码器。",
-      "languages": [
-        "zh",
-        "en"
-      ],
-      "tags": [
-        "tts",
-        "voice-clone",
-        "streaming"
-      ],
-      "parameter_count": null,
-      "quantization": null,
-      "version": "distill-int8",
-      "size_bytes": 163320194,
-      "homepage": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models",
-      "required_assets": [
-        "tts",
-        "tts-vocoder"
-      ],
-      "optional_assets": [],
-      "download": {
-        "manifest_role": "tts",
-        "extra_roles": [
-          "tts-vocoder"
-        ],
-        "kind": "archive"
-      }
-    },
-    {
-      "id": "tts-omnivoice-q8-audiocpp",
-      "name": "omnivoice-audiocpp",
-      "display_name": "OmniVoice 多语种克隆 (audio.cpp)",
-      "model_type": "tts",
-      "tts_kind": "omnivoice",
-      "runtime": "audiocpp",
-      "format": "GGUF",
-      "description": "OmniVoice（Qwen3-0.6B 基座）零样本声音克隆 + 声音设计，600+ 语种，q8_0 量化，24kHz；由 audio.cpp 引擎驱动，GPU 加速（macOS Metal / Windows NVIDIA CUDA），无可用 GPU 时自动回退 CPU（速度显著下降）。体积约 1.26 GiB，建议 8GB 以上内存。",
-      "languages": [
-        "zh",
-        "en"
-      ],
-      "tags": [
-        "tts",
-        "audiocpp",
-        "clone",
-        "multilingual",
-        "cuda"
-      ],
-      "parameter_count": "0.6B",
-      "quantization": "q8_0",
-      "version": "q8_0",
-      "size_bytes": 1350288416,
-      "homepage": "https://huggingface.co/k2-fsa/OmniVoice",
-      "required_assets": [
-        "tts-audiocpp-omnivoice"
-      ],
-      "optional_assets": [],
-      "platforms": [
-        "darwin-aarch64",
-        "windows-x86_64"
-      ],
-      "download": {
-        "manifest_role": "tts-audiocpp-omnivoice",
-        "extra_roles": [],
-        "kind": "raw"
-      }
-    },
-    {
-      "id": "tts-voxcpm2-q8-audiocpp",
-      "name": "voxcpm2-audiocpp",
-      "display_name": "VoxCPM2 高保真克隆 (audio.cpp)",
-      "model_type": "tts",
-      "tts_kind": "voxcpm2",
-      "runtime": "audiocpp",
-      "format": "GGUF",
-      "description": "VoxCPM2（OpenBMB MiniCPM-4 2B 基座）零样本声音克隆 + 声音设计，30 语种免语言标签，q8_0 量化，48kHz 录音室级输出（AudioVAE V2 内置超分）；由 audio.cpp 引擎驱动，支持音频帧级流式（实测首块 0.36s），GPU 加速（macOS Metal / Windows NVIDIA CUDA），无可用 GPU 时自动回退 CPU（速度显著下降）。体积约 2.75 GiB，运行内存峰值约 7.6GB，建议 16GB 以上内存（32GB 更稳）。",
-      "languages": [
-        "zh",
-        "en"
-      ],
-      "tags": [
-        "tts",
-        "audiocpp",
-        "clone",
-        "multilingual",
-        "48khz",
-        "streaming",
-        "cuda"
-      ],
-      "parameter_count": "2B",
-      "quantization": "q8_0",
-      "version": "q8_0",
-      "size_bytes": 2955000480,
-      "homepage": "https://huggingface.co/OpenBMB/VoxCPM2",
-      "required_assets": [
-        "tts-audiocpp-voxcpm2"
-      ],
-      "optional_assets": [],
-      "platforms": [
-        "darwin-aarch64",
-        "windows-x86_64"
-      ],
-      "download": {
-        "manifest_role": "tts-audiocpp-voxcpm2",
-        "extra_roles": [],
-        "kind": "raw"
-      }
-    },
-    {
       "id": "tts-qwen3-06b-base-q8-audiocpp",
       "name": "qwen3-tts-06b-base-audiocpp",
       "display_name": "Qwen3-TTS 0.6B 音色克隆 (audio.cpp)",
@@ -231,16 +46,38 @@
       "runtime": "audiocpp",
       "format": "GGUF",
       "description": "Qwen3-TTS 0.6B Base（12Hz）零样本音色克隆，10 语种，q8_0 量化，24kHz；由 audio.cpp 引擎驱动，GPU 加速（macOS Metal / Windows NVIDIA CUDA），无可用 GPU 时自动回退 CPU（速度显著下降）。体积约 1.86 GiB，建议 8GB 以上内存。需配合音色库克隆音色（Base 版无内置音色）。",
-      "languages": ["zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
-      "tags": ["tts", "audiocpp", "clone", "multilingual", "cuda"],
+      "languages": [
+        "zh",
+        "en",
+        "ja",
+        "ko",
+        "de",
+        "fr",
+        "ru",
+        "pt",
+        "es",
+        "it"
+      ],
+      "tags": [
+        "tts",
+        "audiocpp",
+        "clone",
+        "multilingual",
+        "cuda"
+      ],
       "parameter_count": "0.6B",
       "quantization": "q8_0",
       "version": "q8_0",
       "size_bytes": 1991211136,
       "homepage": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-      "required_assets": ["tts-audiocpp-qwen3-06b"],
+      "required_assets": [
+        "tts-audiocpp-qwen3-06b"
+      ],
       "optional_assets": [],
-      "platforms": ["darwin-aarch64", "windows-x86_64"],
+      "platforms": [
+        "darwin-aarch64",
+        "windows-x86_64"
+      ],
       "download": {
         "manifest_role": "tts-audiocpp-qwen3-06b",
         "extra_roles": [],
@@ -256,16 +93,38 @@
       "runtime": "audiocpp",
       "format": "GGUF",
       "description": "Qwen3-TTS 1.7B Base（12Hz）零样本音色克隆，10 语种，q8_0 量化（_v2 打包），24kHz；由 audio.cpp 引擎驱动。质量优先变体，GPU 加速（macOS Metal / Windows NVIDIA CUDA），无可用 GPU 时自动回退 CPU（速度显著下降）。体积约 2.51 GiB，建议 16GB 以上内存。需配合音色库克隆音色（Base 版无内置音色）。",
-      "languages": ["zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
-      "tags": ["tts", "audiocpp", "clone", "multilingual", "cuda"],
+      "languages": [
+        "zh",
+        "en",
+        "ja",
+        "ko",
+        "de",
+        "fr",
+        "ru",
+        "pt",
+        "es",
+        "it"
+      ],
+      "tags": [
+        "tts",
+        "audiocpp",
+        "clone",
+        "multilingual",
+        "cuda"
+      ],
       "parameter_count": "1.7B",
       "quantization": "q8_0",
       "version": "q8_0_v2",
       "size_bytes": 2695175104,
       "homepage": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-      "required_assets": ["tts-audiocpp-qwen3-17b"],
+      "required_assets": [
+        "tts-audiocpp-qwen3-17b"
+      ],
       "optional_assets": [],
-      "platforms": ["darwin-aarch64", "windows-x86_64"],
+      "platforms": [
+        "darwin-aarch64",
+        "windows-x86_64"
+      ],
       "download": {
         "manifest_role": "tts-audiocpp-qwen3-17b",
         "extra_roles": [],

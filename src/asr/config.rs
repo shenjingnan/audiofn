@@ -346,14 +346,22 @@ pub fn default_model_dir() -> PathBuf {
     )
 }
 
+/// 标点模型历史目录名。
+///
+/// manifest 裁剪后标点资产已下架（audiocpp qwen3_asr 原生输出标点，本字段不参与
+/// 引擎构造），此处仅保留老 settings `punctuation_model` 相对路径的锚定目录与
+/// GUI 徽标语义，不再提供下载入口。
+const LEGACY_PUNCTUATION_DIR_NAME: &str =
+    "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12";
+
 /// 标点模型默认目录：用户目录（`~/.zapmomo/models/<标点名>`）优先，旧根存量兜底。
 fn punctuation_default_dir() -> PathBuf {
-    let new = crate::model_library::asset::punctuation_user_model_dir();
+    let new = crate::config::settings::get_models_dir().join(LEGACY_PUNCTUATION_DIR_NAME);
     if new.join(DEFAULT_PUNCT_MODEL).is_file() {
         return new;
     }
     if let Some(legacy) = crate::config::settings::legacy_models_dir() {
-        let legacy_dir = legacy.join(new.file_name().unwrap_or_default());
+        let legacy_dir = legacy.join(LEGACY_PUNCTUATION_DIR_NAME);
         if legacy_dir.join(DEFAULT_PUNCT_MODEL).is_file() {
             return legacy_dir;
         }
@@ -570,8 +578,8 @@ pub fn asr_files_present_for_kind(model_dir: &Path, kind: AsrModelKind) -> bool 
     }
 }
 
-/// 目录内是否探测得到完整的一套 ASR 模型文件（模型无关 + 族感知，替代按默认文件名
-/// 硬编码的判定，供模型库 external/HF 导入的完整性检查复用；对称 KWS 的 `kws_files_present`）。
+/// 目录内是否探测得到完整的一套 ASR 模型文件（模型无关 + 族感知，供模型库
+/// external/HF 导入的完整性检查复用；对称 TTS 的 `tts::is_installed`）。
 pub fn asr_files_present(model_dir: &Path) -> bool {
     asr_files_present_for_kind(model_dir, detect_kind_from_dir(model_dir))
 }
@@ -992,7 +1000,8 @@ mod tests {
     fn test_punctuation_default_dir_dual_root_fallback() {
         run_with_temp_home(|home| {
             crate::test_util::set_custom_data_dir(home);
-            let new_punct = crate::model_library::asset::punctuation_user_model_dir();
+            let new_punct =
+                crate::config::settings::get_models_dir().join(LEGACY_PUNCTUATION_DIR_NAME);
             let legacy_punct = home
                 .join(".zapmomo")
                 .join("models")
@@ -1171,14 +1180,17 @@ mod tests {
     #[test]
     fn test_default_punctuation_and_hotwords() {
         // 用临时 HOME 隔离，避免与其它 `run_with_temp_home` 测试并行时 HOME 竞态
-        // 导致 default 与 `punctuation_user_model_dir` 两次读取到不同数据目录。
-        run_with_temp_home(|_| {
+        // 导致 default 与 punctuation 目录两次读取到不同数据目录。
+        run_with_temp_home(|home| {
             let cfg = ResolvedAsrConfig::default();
             assert_eq!(cfg.hotwords, None);
             assert!(cfg.enable_punctuation);
+            // 标点资产已随清单裁剪下架：默认仅锚定历史目录名（老 settings 兼容），不 panic
             assert_eq!(
                 cfg.punctuation_model,
-                crate::model_library::asset::punctuation_user_model_dir().join(DEFAULT_PUNCT_MODEL)
+                home.join(".zapmomo/models")
+                    .join(LEGACY_PUNCTUATION_DIR_NAME)
+                    .join(DEFAULT_PUNCT_MODEL)
             );
         });
     }

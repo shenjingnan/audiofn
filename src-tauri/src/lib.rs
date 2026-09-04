@@ -28,9 +28,6 @@ use zapmomo::model_library::{
 };
 use zapmomo::tts::config::TtsParamsPatch;
 
-/// `download_tts_model` 缺省安装的模型库条目（Qwen3-TTS 0.6B，延迟优先档）。
-const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
-
 /// RAII：进入监听时置 `active_model_dir`，无论正常/错误/panic 退出监听线程都会清空。
 struct ActiveModelGuard {
     target: Arc<Mutex<Option<PathBuf>>>,
@@ -740,9 +737,15 @@ async fn download_tts_model(
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let model =
-            zapmomo::model_library::registry::model_for_current_platform(DEFAULT_TTS_REGISTRY_ID)
-                .ok_or_else(|| format!("未知的模型库条目: {DEFAULT_TTS_REGISTRY_ID}"))?;
+        let model = zapmomo::model_library::registry::model_for_current_platform(
+            zapmomo::tts::config::DEFAULT_TTS_REGISTRY_ID,
+        )
+        .ok_or_else(|| {
+            format!(
+                "未知的模型库条目: {}",
+                zapmomo::tts::config::DEFAULT_TTS_REGISTRY_ID
+            )
+        })?;
         let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
                 zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
@@ -1180,18 +1183,11 @@ fn list_model_library(
     let asr_actual = asr_dictate.active_model_dir();
     // TTS 无常驻引擎：actual = 当前 selection（与 current 判定同源，写配置即切换），
     // active = 是否有合成线程在跑。
-    // LLM 已改为远程连接：无本地 runtime，llm 相关 actual 恒 None/false。
     let tts_actual = model_library::selection_path(LibModelType::Tts);
     let actuals = model_library::RuntimeActuals {
-        // KWS 已随伴侣模块删除：RuntimeActual 恒 None（ModelType::Kws 收口在后续任务）
-        kws: None,
         asr: asr_actual.as_deref(),
         tts: tts_actual.as_deref(),
         tts_active: tts.is_synthesizing(),
-        llm: None,
-        llm_switching: false,
-        llm_switch_target: None,
-        llm_load_error_path: None,
     };
     model_library::enrich_runtime_status(&mut models, &actuals);
     Ok(models)
@@ -1321,44 +1317,33 @@ async fn set_current_model(
     let path = PathBuf::from(model.local_path.clone().ok_or("该模型没有可用路径")?);
     let mt = model.model_type;
 
-    // ---- KWS / ASR / TTS：写 selection；ASR 识别中提示重启 ----
-    if mt != LibModelType::Llm {
-        model_library::set_selected_model(mt, &path)?;
+    // ---- ASR / TTS：写 selection；ASR 识别中提示重启 ----
+    model_library::set_selected_model(mt, &path)?;
 
-        let _ = &app;
-        let (action, effective, message) = match mt {
-            // KWS 已随伴侣模块删除：仅保留 selection 写入语义（无 runtime 可重启）
-            LibModelType::Kws => (
-                LibRuntimeAction::None,
-                true,
-                format!("已将 {} 设为当前模型", model.display_name),
+    let _ = &app;
+    let (action, effective, message) = match mt {
+        LibModelType::Asr if asr_dictate.is_dictating() => (
+            LibRuntimeAction::RestartRequired,
+            false,
+            format!(
+                "已将 {} 设为 ASR 当前模型，将在下次启动识别时生效",
+                model.display_name
             ),
-            LibModelType::Asr if asr_dictate.is_dictating() => (
-                LibRuntimeAction::RestartRequired,
-                false,
-                format!(
-                    "已将 {} 设为 ASR 当前模型，将在下次启动识别时生效",
-                    model.display_name
-                ),
-            ),
-            LibModelType::Tts | LibModelType::Llm | LibModelType::Asr => (
-                LibRuntimeAction::None,
-                true,
-                format!("已将 {} 设为当前模型", model.display_name),
-            ),
-        };
-        Ok(SetCurrentResult {
-            model_type: mt,
-            model_id: model.id,
-            path: path.display().to_string(),
-            runtime_action: action,
-            effective_immediately: effective,
-            message,
-        })
-    } else {
-        // LLM：本地推理已移除（远程连接配置在设置页）
-        Err("本地 LLM 模型已移除：LLM 改为远程连接，请在设置页填写 API 地址与 Key".to_string())
-    }
+        ),
+        LibModelType::Tts | LibModelType::Asr => (
+            LibRuntimeAction::None,
+            true,
+            format!("已将 {} 设为当前模型", model.display_name),
+        ),
+    };
+    Ok(SetCurrentResult {
+        model_type: mt,
+        model_id: model.id,
+        path: path.display().to_string(),
+        runtime_action: action,
+        effective_immediately: effective,
+        message,
+    })
 }
 
 /// 删除模型：managed 删文件；external 只移除注册。后端全量安全检查。
