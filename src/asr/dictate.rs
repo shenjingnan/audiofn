@@ -165,7 +165,7 @@ pub fn run_dictate(
                 start_time: Some(segment_start_time_seconds(start_sample)),
                 is_final: true,
             };
-            if reaction.on_result(&result) == crate::kws::reaction::ReactionOutcome::Stop {
+            if reaction.on_result(&result) == crate::asr::ReactionOutcome::Stop {
                 return Ok(true);
             }
         }

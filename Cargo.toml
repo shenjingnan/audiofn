@@ -52,25 +52,11 @@ base64 = "0.23"
 # multipart 供 ASR 转写上传 wav）
 reqwest = { version = "0.13", features = ["blocking", "json", "multipart"] }
 
-# 远程 LLM（OpenAI 兼容 Chat Completions：智谱 GLM / DeepSeek / OpenRouter / llama-server 等）
-# 0.41 起 API 域按 feature 拆分，default 仅 rustls；只需 chat-completion
-async-openai = { version = "0.41", features = ["chat-completion"] }
-
-# Anthropic 原生 Messages API provider（消息/流式/tool use 原语；agent 编排为自研，
-# 只用 genai 的传输层能力，不用其 agent 抽象）
-genai = "0.6"
-
-# 汉字 → 带声调拼音（把用户输入的原始中文关键词转成模型可编码的 ppinyin token）
-pinyin = "0.11"
-
 # 异步运行时
 tokio = { version = "1", features = ["full"] }
 
 # 系统资源检测（audio.cpp sidecar 残留进程按 pid 存活检查与清理）
 sysinfo = "0.39"
-
-# dsh 桥：loopback HTTP 接收 deepseek-harness 插件推送的任务事件
-tiny_http = "0.12"
 
 # 序列化
 serde = { version = "1", features = ["derive"] }
@@ -80,9 +66,6 @@ toml = "1.1"
 # 错误处理
 thiserror = "2"
 anyhow = "1"
-
-# Ctrl-C 信号处理（语音会话 `voice run` 优雅退出）
-ctrlc = "3"
 
 # 时间处理
 chrono = "0.4"
@@ -100,12 +83,8 @@ hex = "0.4"
 tar = { version = "0.4", default-features = false }
 bzip2 = "0.6"
 
-# 角色包分享（导出/导入 .zip）：仅 deflate 读写，不开 aes/lzma/zstd 等重特性
-zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
-
 # --- 可选依赖（按需取消注释） ---
 # url = "2"                                              # URL 解析
-futures-util = "0.3"                                     # 异步流处理（async-openai SSE 流）
 
 # macOS 麦克风权限请求（AVCaptureDevice requestAccess，弹系统授权窗）。
 # 仅 macOS target 编译：cpal 枚举输入设备在未授权时为空，需显式请求权限后恢复。
@@ -116,6 +95,9 @@ objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMedia
 
 [dev-dependencies]
 tempfile = "3"
+
+# audiocpp client 单测的 stub SSE server（生产代码不依赖）
+tiny_http = "0.12"
 
 # 发布构建：减小编译产物/安装包体积
 [profile.release]

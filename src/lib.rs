@@ -3,23 +3,11 @@ pub mod asr;
 pub mod audio;
 pub mod audiocpp;
 pub mod cli;
-pub mod companion;
-pub mod companion_bubble_link;
-pub mod companion_click_through;
-pub mod companion_share;
-pub mod companion_sprites;
-pub mod companion_welcome;
 pub mod config;
 pub mod datetime;
-pub mod dsh;
-pub mod kws;
-pub mod live2d;
-pub mod llm;
 pub mod logging;
 pub mod model_library;
-pub mod speaker;
 pub mod tts;
-pub mod voice;
 
 #[cfg(test)]
 pub(crate) mod test_util {

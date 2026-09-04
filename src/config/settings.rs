@@ -46,28 +46,6 @@ pub fn legacy_models_dir() -> Option<PathBuf> {
     (get_models_dir() != default).then_some(default)
 }
 
-/// 伙伴模型载荷存储目录：`<data_dir>/companions`（未设置时为 `~/.zapmomo/companions`）。
-///
-/// 注意：`library.json` 清单永远留在 `~/.zapmomo/companions`（见 `companion::get_companions_dir`），
-/// 只有模型载荷目录跟随 `data_dir`。
-pub fn get_companions_store_dir() -> PathBuf {
-    get_data_dir()
-        .unwrap_or_else(get_settings_dir)
-        .join("companions")
-}
-
-/// 旧版默认伙伴载荷目录 `~/.zapmomo/companions`：`data_dir` 指向别处时返回 `Some`。
-pub fn legacy_companions_dir() -> Option<PathBuf> {
-    let default = get_settings_dir().join("companions");
-    (get_companions_store_dir() != default).then_some(default)
-}
-
-/// 剥离路径前缀（Windows 大小写不敏感，容忍 `\`/`/` 混合分隔符）。
-///
-/// `path` 以 `prefix` 开头（大小写忽略）且 `prefix` 结束在组件边界（恰好相等，
-/// 或其后紧跟分隔符）时返回剩余相对路径，否则 `None`——防止 `models2` 被
-/// `models` 误剥导致迁移改写出错路径。
-/// 供迁移时改写 settings/伙伴库中的绝对路径引用使用。
 pub fn strip_prefix_ci<'a>(path: &'a Path, prefix: &Path) -> Option<&'a Path> {
     let p = path.as_os_str().to_str()?;
     let q = prefix.as_os_str().to_str()?;
@@ -238,50 +216,28 @@ pub struct AppConfig {
     /// 全局默认麦克风输入设备名（空 = 系统默认），KWS / ASR 共用；重启后免重选
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub microphone: Option<String>,
-    /// 自定义数据目录（绝对路径，支持 ${env.VAR}）：模型与伙伴载荷存放在
-    /// `<data_dir>/models` 与 `<data_dir>/companions`；settings/日志等小文件
-    /// 仍留在 `~/.zapmomo`。缺省 = `~/.zapmomo`。
+    /// 自定义数据目录（绝对路径，支持 ${env.VAR}）：模型存放在 `<data_dir>/models`；
+    /// settings/日志等小文件仍留在 `~/.zapmomo`。缺省 = `~/.zapmomo`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
     /// 「存储位置引导」已确认过（首次下载/导入前的一次性弹窗标记，确认后不再弹）。
     #[serde(default)]
     pub storage_prompt_acknowledged: bool,
-    /// 唤醒词检测（KWS）配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kws: Option<KwsSettings>,
     /// 语音识别（ASR）配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asr: Option<AsrSettings>,
     /// 文本转语音（TTS）配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tts: Option<TtsSettings>,
-    /// Live2D 角色配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub live2d: Option<Live2dSettings>,
-    /// 本地 LLM 配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm: Option<LlmSettings>,
-    /// 语音会话（KWS→ASR→LLM→TTS 全链路）配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice: Option<VoiceSettings>,
-    /// 声纹识别（Speaker Recognition）配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speaker: Option<SpeakerSettings>,
     /// 模型库配置（用户通过「添加本地模型」注册的 external 模型等）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_library: Option<ModelLibrarySettings>,
     /// 全局快捷键配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shortcuts: Option<ShortcutsSettings>,
-    /// dsh 桥配置（接收 deepseek-harness 插件推送的任务事件）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dsh: Option<DshSettings>,
     /// 文字输入条窗口配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chatbox: Option<ChatboxSettings>,
-    /// 语音回复气泡窗口配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bubble: Option<BubbleSettings>,
 }
 
 /// 用户「添加本地模型」注册的模型（external）。
@@ -312,59 +268,6 @@ pub struct LocalModel {
 pub struct ModelLibrarySettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_models: Vec<LocalModel>,
-}
-
-/// 唤醒词检测（KWS）配置。
-///
-/// 全部字段可缺省：未配置的项在解析时回退到 `kws::config` 的内置默认值，
-/// 因此这里用 `Option` 以区分「未配置」与「配置了」。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct KwsSettings {
-    /// 是否启用 KWS（打开开关即持久化；启动时自动监听的前提），缺省 false
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// 会话级自定义唤醒词（原始字符串，多个用 / 分隔；持久化后启动自动监听也使用），缺省 None = 模型内置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custom_keywords: Option<String>,
-    /// 模型目录（支持 ${env.VAR} 引用）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_dir: Option<String>,
-    /// encoder onnx 文件名（缺省用模型目录下 chunk-16 变体）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub encoder: Option<String>,
-    /// decoder onnx 文件名
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub decoder: Option<String>,
-    /// joiner onnx 文件名
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub joiner: Option<String>,
-    /// tokens.txt 文件名
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tokens: Option<String>,
-    /// 关键词文件路径（缺省 = <model_dir>/test_wavs/keywords.txt）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keywords_file: Option<String>,
-    /// 推理后端，缺省 "cpu"
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// 推理线程数，缺省 2
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub num_threads: Option<i32>,
-    /// 每次喂给模型的采样数（@16k），缺省 3200（0.2s）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chunk_size: Option<usize>,
-    /// 模型输入采样率，缺省 16000
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sample_rate: Option<i32>,
-    /// 关键词 boosting 分数，缺省 1.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keywords_score: Option<f32>,
-    /// 触发阈值，缺省 0.25（越大越不容易误触发）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keywords_threshold: Option<f32>,
-    /// 调试输出，缺省 false
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub debug: Option<bool>,
 }
 
 /// 语音识别（ASR）配置。
@@ -551,233 +454,6 @@ pub enum CompanionDragMode {
     Modifier,
 }
 
-/// Live2D 角色配置。
-///
-/// 字段可缺省：未配置时回退到 `live2d::config` 的默认目录。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct Live2dSettings {
-    /// 模型目录（支持 ${env.VAR} 引用）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_dir: Option<String>,
-    /// 角色窗口位置（逻辑像素；缺省表示未记录）。
-    ///
-    /// 现在是**兜底默认值**：伙伴私有布局（library.json `layout.position`）优先；
-    /// 该全局值只在伙伴未单独配置时（以及空库窗口期写入）生效。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_position: Option<CompanionWindowPosition>,
-    /// 角色窗口缩放比例（1.0 = 100%；缺省视为 1.0）。
-    ///
-    /// 同样是兜底默认值：伙伴私有 `layout.scale` 优先（见 `window_position`）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_scale: Option<f64>,
-    /// 角色窗口透明度（1.0 = 不透明；缺省视为 1.0）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_opacity: Option<f64>,
-    /// 角色窗口点击穿透（true = 鼠标事件全部穿透到身后窗口；缺省视为 false）。
-    ///
-    /// 语义为**强制穿透**：优先级最高，开启后无视智能穿透的光标判定，
-    /// 整窗对所有鼠标事件透明（入口只剩设置页与托盘菜单）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub click_through: Option<bool>,
-    /// 角色窗口智能穿透（true = 光标落在角色不透明区域才接收鼠标，其余区域穿透；
-    /// 缺省视为 true）。与 `click_through`（强制穿透）互斥时后者优先。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub smart_click_through: Option<bool>,
-    /// 角色窗口显示层级（置顶/置底；缺省视为置顶）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_layer: Option<CompanionWindowLayer>,
-    /// 角色窗口位置锁定（true = 禁止拖动窗口；滚轮缩放与右键菜单保留；缺省视为 false）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub locked: Option<bool>,
-    /// 角色窗口拖拽模式（direct = 左键直接拖动；modifier = 需按住 cmd/Ctrl；缺省视为 direct）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub drag_mode: Option<CompanionDragMode>,
-}
-
-/// 本地 LLM 配置。
-///
-/// 全部字段可缺省：未配置的项在解析时回退到 `llm::config` 的内置默认值。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct LlmSettings {
-    /// 是否启用 LLM，缺省 false
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// 是否启用 CLI 工具（run_command，允许模型执行 shell 命令），缺省 false。
-    /// 开启前请知悉风险：模型产出的命令会在本机真实执行（有危险命令拦截、
-    /// 超时与输出截断等兜底，但不是安全沙箱）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cli_tools: Option<bool>,
-    /// 是否启用 prompt caching（缓存对话前缀降延迟/成本），缺省 true；
-    /// 仅 provider = "anthropic" 时生效
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt_cache: Option<bool>,
-    /// 是否启用形象切换 subagent（LLM 回复结束后由后台单次调用自动决策切形象），
-    /// 缺省 true。true 时对话内不再注册 set_character_sprite 工具（GUI 文字聊天
-    /// 暂时失去切形象能力，语音链路由 subagent 接管）；false = 恢复对话内工具
-    /// 自主调用的一键回滚开关
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sprite_agent: Option<bool>,
-    /// 是否启用思考（extended thinking 开关），缺省按「是否配置了推理强度」推断：
-    /// 未显式配置时，配过 reasoning_effort 视为 true，否则 false（最快响应）。
-    /// 仅 provider = "anthropic" 时生效
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<bool>,
-    /// 思考力度（"low" / "medium" / "high" / "max"），仅 thinking 生效时发送。
-    /// 开关关闭时该值仍持久化，但运行时忽略；仅 provider = "anthropic" 时生效
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
-    /// provider 标识，缺省 "openai"（OpenAI 兼容 API）；可选 "anthropic"（原生 Messages API）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// 角色 system prompt，缺省用内置默认
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub system_prompt: Option<String>,
-    /// 最多生成 token 数，缺省 512
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<usize>,
-    /// 温度，缺省 0.7
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    /// top_p 采样，缺省 0.8
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
-    /// top_k 采样，缺省 20
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<u32>,
-    /// min_p 采样，缺省 0.05
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_p: Option<f32>,
-    /// 重复惩罚，缺省 1.05
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repeat_penalty: Option<f32>,
-    /// 随机种子，缺省 0（随机）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seed: Option<u32>,
-    /// HTTP provider 的 base URL（如 https://open.bigmodel.cn/api/paas/v4 或 Ollama 地址）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    /// HTTP provider 的 API key（本地 server / Ollama 可留空）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-    /// HTTP provider 的模型名（如 glm-4.7-flash / gpt-4o-mini / claude-haiku-4-5）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-}
-
-/// 语音会话配置（`voice run` 的会话级参数）。
-///
-/// 全部字段可缺省：未配置的项回退到 `voice::config` 的内置默认值。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct VoiceSettings {
-    /// 是否在应用启动时自动启动语音会话（进入待唤醒），缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// 会话唤醒词（原始字符串，多个用 / 分隔），缺省 None = KWS 模型内置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keywords: Option<String>,
-    /// TTS 音色 id（如 leijun-1 / news-female / 自定义音色 id），缺省 None = 配置默认
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice: Option<String>,
-    /// TTS 语速，缺省 1.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speed: Option<f32>,
-    /// 最多对话轮数，缺省 None = 无限（Ctrl-C 退出）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_turns: Option<u32>,
-    /// 传给 LLM 的历史消息条数上限，缺省 12
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_max: Option<usize>,
-    /// 播报/思考中唤醒词打断，缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub barge_in: Option<bool>,
-    /// 回复播完后自动进入 ASR 聆听（免唤醒续聊；空识别保持聆听不回待唤醒），缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub follow_up: Option<bool>,
-    /// 打断用 KWS 触发阈值（高于监听阈值，缓解回声误触发），缺省 0.5
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub barge_in_threshold: Option<f32>,
-    /// 唤醒后的欢迎语文本（TTS 用当前音色合成播放），缺省 "你好，我在。"
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub welcome_text: Option<String>,
-    /// 「真正说话」RMS 音量阈值，缺省 0.02
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vad_silence_threshold: Option<f32>,
-    /// ASR 阶段连续静音多久判定说完（秒），缺省 3.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asr_max_trailing_silence: Option<f32>,
-    /// 单句连续语音时长上限（秒），达到即强制断句进入回复（防无限聆听），缺省 30.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub asr_max_utterance_duration: Option<f32>,
-    /// 欢迎语后等用户真正说话的超时（秒），超时回待唤醒，缺省 8.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub welcome_wait_timeout: Option<f32>,
-    /// 播报/思考中语音打断（ASR 识别到用户说话即打断，仅流式 ASR 后端生效），缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_barge_in: Option<bool>,
-    /// 语音打断的回声比对阈值（字符 bigram Dice，≥ 判回声忽略），缺省 0.5
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub barge_in_similarity_threshold: Option<f32>,
-}
-
-/// dsh 桥配置。
-///
-/// 全部字段可缺省：未配置的项在解析时回退到 `dsh::config` 的内置默认值。
-/// 桥无独立开关，启停跟随插件安装状态（`dsh::integration` 的检测判定）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct DshSettings {
-    /// 监听端口，0 = 随机端口（默认，避免冲突），缺省 0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
-    /// 事件是否语音播报（voice 会话运行中只出气泡），缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_enabled: Option<bool>,
-    /// 事件是否经 LLM 生成播报文案（未连接/生成中/失败回退模板台词），缺省 true；
-    /// 生效前提是 [llm].enabled 且引擎已连接
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm_enabled: Option<bool>,
-    /// 事件是否写入对话记录，缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub record_to_history: Option<bool>,
-}
-
-/// 声纹识别（Speaker Recognition）配置。
-///
-/// 全部字段可缺省：未配置的项在解析时回退到 `speaker::config` 的内置默认值，
-/// 因此这里用 `Option` 以区分「未配置」与「配置了」。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct SpeakerSettings {
-    /// 是否在语音会话中启用声纹识别（ASR 前对用户语音打说话人标签），缺省 false
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// 声纹模型目录（支持 ${env.VAR} 引用），缺省 `~/.zapmomo/models/<模型名>`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_dir: Option<String>,
-    /// 声纹 embedding 模型 onnx 文件名，缺省扫描模型目录探测 campplus 模型
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// 说话人相似度判定阈值（余弦相似度，越大越严格），缺省 0.6
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub threshold: Option<f32>,
-    /// 参与识别的最短语音时长（秒），低于则跳过识别，缺省 1.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_audio_duration_secs: Option<f32>,
-    /// 推理后端，缺省 "cpu"
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// 推理线程数，缺省 1
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub num_threads: Option<i32>,
-    /// 模型缺失时是否自动下载，缺省 true
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_download: Option<bool>,
-    /// 实时会话声纹缓冲上限（秒），超长截断保留最近音频，缺省 20.0
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_buffer_duration_secs: Option<f32>,
-    /// 调试输出，缺省 false
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub debug: Option<bool>,
-}
-
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -795,16 +471,6 @@ pub struct ChatboxSettings {
     pub window_position: Option<CompanionWindowPosition>,
 }
 
-/// 语音回复气泡窗口配置。
-///
-/// 显隐不持久化：气泡窗口跟随角色窗口显隐（无独立开关）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct BubbleSettings {
-    /// 气泡窗口位置（逻辑像素；缺省表示未记录 → 定位到输入条默认位正上方）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_position: Option<CompanionWindowPosition>,
-}
-
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -815,18 +481,11 @@ impl Default for AppConfig {
             microphone: None,
             data_dir: None,
             storage_prompt_acknowledged: false,
-            kws: None,
             asr: None,
             tts: None,
-            live2d: None,
-            llm: None,
-            voice: None,
-            speaker: None,
             model_library: None,
             shortcuts: None,
-            dsh: None,
             chatbox: None,
-            bubble: None,
         }
     }
 }
@@ -1009,18 +668,11 @@ mod tests {
             microphone: Some("内置麦克风".to_string()),
             data_dir: None,
             storage_prompt_acknowledged: false,
-            kws: None,
             asr: None,
             tts: None,
-            live2d: None,
-            llm: None,
-            voice: None,
-            speaker: None,
             model_library: None,
             shortcuts: None,
-            dsh: None,
             chatbox: None,
-            bubble: None,
         };
         let toml_str = toml::to_string(&config).unwrap();
         let deserialized: AppConfig = toml::from_str(&toml_str).unwrap();
@@ -1101,29 +753,6 @@ mod tests {
     }
 
     #[test]
-    fn test_load_settings_with_kws_table() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "[kws]\nnum_threads = 4\nchunk_size = 1600\n");
-            let result = load_settings().unwrap().unwrap();
-            let kws = result.kws.unwrap();
-            assert_eq!(kws.num_threads, Some(4));
-            assert_eq!(kws.chunk_size, Some(1600));
-            // 未配置的字段保持 None
-            assert_eq!(kws.model_dir, None);
-            assert_eq!(kws.keywords_threshold, None);
-        });
-    }
-
-    #[test]
-    fn test_load_settings_without_kws_table() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "debug = true\n");
-            let result = load_settings().unwrap().unwrap();
-            assert!(result.kws.is_none());
-        });
-    }
-
-    #[test]
     fn test_load_settings_with_tts_table() {
         run_with_temp_home(|home| {
             write_toml_settings(home, "[tts]\nnum_threads = 4\nspeed = 1.2\n");
@@ -1196,152 +825,6 @@ mod tests {
     }
 
     #[test]
-    fn test_kws_settings_serde_roundtrip() {
-        let kws = KwsSettings {
-            enabled: Some(false),
-            custom_keywords: Some("你好小智".to_string()),
-            model_dir: Some("${env.KWS_MODEL_DIR}".to_string()),
-            encoder: Some("encoder.onnx".to_string()),
-            decoder: None,
-            joiner: None,
-            tokens: None,
-            keywords_file: Some("kw.txt".to_string()),
-            provider: Some("cpu".to_string()),
-            num_threads: Some(4),
-            chunk_size: Some(1600),
-            sample_rate: Some(16000),
-            keywords_score: Some(1.0),
-            keywords_threshold: Some(0.3),
-            debug: Some(false),
-        };
-        let toml_str = toml::to_string(&kws).unwrap();
-        let deserialized: KwsSettings = toml::from_str(&toml_str).unwrap();
-        assert_eq!(kws, deserialized);
-        // 未配置字段应被 skip_serializing_if 忽略
-        assert!(!toml_str.contains("decoder"));
-    }
-
-    #[test]
-    fn test_kws_settings_env_ref_resolution() {
-        unsafe {
-            std::env::set_var("KWS_MODEL_DIR", "/tmp/kws-model");
-        }
-        let kws = KwsSettings {
-            model_dir: Some("${env.KWS_MODEL_DIR}".to_string()),
-            ..KwsSettings::default()
-        };
-        assert_eq!(
-            resolve_env_ref(kws.model_dir.as_ref().unwrap()).unwrap(),
-            "/tmp/kws-model"
-        );
-        unsafe {
-            std::env::remove_var("KWS_MODEL_DIR");
-        }
-    }
-
-    #[test]
-    fn test_live2d_settings_serde_roundtrip() {
-        let live2d = Live2dSettings {
-            model_dir: Some("/tmp/some-model".to_string()),
-            window_position: Some(CompanionWindowPosition { x: 120, y: 800 }),
-            window_scale: Some(1.5),
-            window_opacity: Some(0.6),
-            click_through: Some(true),
-            smart_click_through: Some(false),
-            window_layer: Some(CompanionWindowLayer::Back),
-            locked: Some(true),
-            drag_mode: Some(CompanionDragMode::Modifier),
-        };
-        let toml_str = toml::to_string(&live2d).unwrap();
-        assert!(toml_str.contains("click_through = true"));
-        assert!(toml_str.contains("window_layer = \"back\""));
-        assert!(toml_str.contains("locked = true"));
-        assert!(toml_str.contains("drag_mode = \"modifier\""));
-        let deserialized: Live2dSettings = toml::from_str(&toml_str).unwrap();
-        assert_eq!(live2d, deserialized);
-        assert_eq!(deserialized.window_layer, Some(CompanionWindowLayer::Back));
-        assert_eq!(deserialized.drag_mode, Some(CompanionDragMode::Modifier));
-        // 未记录位置/比例/穿透/层级时字段应被 skip_serializing_if 忽略
-        let none_pos = Live2dSettings {
-            model_dir: Some("/tmp/some-model".to_string()),
-            window_position: None,
-            window_scale: None,
-            window_opacity: None,
-            click_through: None,
-            smart_click_through: None,
-            window_layer: None,
-            locked: None,
-            drag_mode: None,
-        };
-        let none_toml = toml::to_string(&none_pos).unwrap();
-        assert!(!none_toml.contains("window_position"));
-        assert!(!none_toml.contains("window_scale"));
-        assert!(!none_toml.contains("window_opacity"));
-        assert!(!none_toml.contains("click_through"));
-        assert!(!none_toml.contains("smart_click_through"));
-        assert!(!none_toml.contains("window_layer"));
-        assert!(!none_toml.contains("locked"));
-        assert!(!none_toml.contains("drag_mode"));
-        // 缺省层级为置顶
-        assert_eq!(CompanionWindowLayer::default(), CompanionWindowLayer::Front);
-        // 缺省拖拽模式为直接拖动
-        assert_eq!(CompanionDragMode::default(), CompanionDragMode::Direct);
-    }
-
-    #[test]
-    fn test_load_settings_with_live2d_table() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "[live2d]\nmodel_dir = \"/tmp/model-dir\"\n");
-            let result = load_settings().unwrap().unwrap();
-            let live2d = result.live2d.unwrap();
-            assert_eq!(live2d.model_dir.as_deref(), Some("/tmp/model-dir"));
-            // 旧版配置无 click_through / locked / drag_mode 字段 → 反序列化回退 None（视为关闭/直拖）。
-            assert_eq!(live2d.click_through, None);
-            assert_eq!(live2d.locked, None);
-            assert_eq!(live2d.drag_mode, None);
-        });
-    }
-
-    #[test]
-    fn test_bubble_settings_serde_roundtrip() {
-        let bubble = BubbleSettings {
-            window_position: Some(CompanionWindowPosition { x: 200, y: 600 }),
-        };
-        let toml_str = toml::to_string(&bubble).unwrap();
-        assert!(toml_str.contains("window_position"));
-        let deserialized: BubbleSettings = toml::from_str(&toml_str).unwrap();
-        assert_eq!(bubble, deserialized);
-        // 未记录位置时字段应被 skip_serializing_if 忽略
-        let none_pos = BubbleSettings {
-            window_position: None,
-        };
-        let none_toml = toml::to_string(&none_pos).unwrap();
-        assert!(!none_toml.contains("window_position"));
-    }
-
-    #[test]
-    fn test_load_settings_with_bubble_table() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "[bubble.window_position]\nx = 200\ny = 600\n");
-            let result = load_settings().unwrap().unwrap();
-            let bubble = result.bubble.unwrap();
-            assert_eq!(
-                bubble.window_position,
-                Some(CompanionWindowPosition { x: 200, y: 600 })
-            );
-        });
-    }
-
-    #[test]
-    fn test_live2d_drag_mode_invalid_value_rejected() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "[live2d]\ndrag_mode = \"bogus\"\n");
-            let err = load_settings().unwrap_err();
-            assert!(err.to_string().contains("drag_mode"));
-        });
-    }
-
-    #[test]
     fn test_save_settings_roundtrip() {
         run_with_temp_home(|home| {
             let config = AppConfig {
@@ -1352,21 +835,11 @@ mod tests {
                 microphone: None,
                 data_dir: None,
                 storage_prompt_acknowledged: false,
-                kws: None,
                 asr: None,
                 tts: None,
-                live2d: Some(Live2dSettings {
-                    model_dir: Some("/tmp/model-dir".to_string()),
-                    ..Default::default()
-                }),
-                llm: None,
-                voice: None,
-                speaker: None,
                 model_library: None,
                 shortcuts: None,
-                dsh: None,
                 chatbox: None,
-                bubble: None,
             };
             save_settings(&config).unwrap();
             let loaded = load_settings().unwrap().unwrap();
@@ -1403,8 +876,6 @@ mod tests {
         run_with_temp_home(|home| {
             assert_eq!(get_models_dir(), home.join(".zapmomo/models"));
             assert_eq!(legacy_models_dir(), None);
-            assert_eq!(get_companions_store_dir(), home.join(".zapmomo/companions"));
-            assert_eq!(legacy_companions_dir(), None);
         });
     }
 
@@ -1415,13 +886,8 @@ mod tests {
             write_data_dir_settings(Some(&data.display().to_string()));
             assert_eq!(get_data_dir(), Some(data.clone()));
             assert_eq!(get_models_dir(), data.join("models"));
-            assert_eq!(get_companions_store_dir(), data.join("companions"));
             // 旧根指向默认位置（供双根扫描/迁移定位存量）
             assert_eq!(legacy_models_dir(), Some(home.join(".zapmomo/models")));
-            assert_eq!(
-                legacy_companions_dir(),
-                Some(home.join(".zapmomo/companions"))
-            );
         });
     }
 
@@ -1594,36 +1060,6 @@ mod tests {
             save_settings(&config2).unwrap();
             let loaded = load_settings().unwrap().unwrap();
             assert_eq!(loaded.log_level, "warn");
-        });
-    }
-
-    // ---- dsh（dsh 桥配置段）----
-
-    #[test]
-    fn test_parse_dsh_section() {
-        run_with_temp_home(|_| {
-            std::fs::create_dir_all(get_settings_dir()).unwrap();
-            // enabled 为旧版本遗留键：桥已无独立开关（跟随插件安装状态），
-            // 结构体不再有此字段，serde 须静默忽略、不阻塞整份配置解析
-            std::fs::write(
-                get_settings_path(),
-                "[dsh]\nenabled = false\nport = 47800\nvoice_enabled = false\n",
-            )
-            .unwrap();
-            let cfg = load_settings().unwrap().unwrap();
-            let dsh = cfg.dsh.expect("[dsh] 段应解析");
-            assert_eq!(dsh.port, Some(47800));
-            assert_eq!(dsh.voice_enabled, Some(false));
-            assert_eq!(dsh.record_to_history, None);
-        });
-    }
-
-    #[test]
-    fn test_dsh_section_absent_defaults_none() {
-        run_with_temp_home(|home| {
-            write_toml_settings(home, "debug = true\n");
-            let cfg = load_settings().unwrap().unwrap();
-            assert!(cfg.dsh.is_none());
         });
     }
 }

@@ -3,9 +3,15 @@
 /// `AsrReaction` trait 是可插拔的识别结果钩子：每次 `decode` 产出（部分或最终）
 /// 转写文本后由 ASR 引擎调用。默认 `ConsoleAsrReaction` 打印到控制台；桌面 GUI
 /// （Tauri）实现自己的 `AsrReaction`（发事件给前端显示实时字幕）。
-use crate::kws::reaction::ReactionOutcome;
 use serde::Serialize;
 use sherpa_onnx::RecognizerResult;
+
+/// 反应控制信号：`Continue` = 继续识别，`Stop` = 停止识别。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionOutcome {
+    Continue,
+    Stop,
+}
 
 /// 一次识别结果（owned 结构，避免把 sherpa 类型泄漏到公开 API）。
 ///

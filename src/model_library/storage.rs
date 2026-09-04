@@ -1,7 +1,7 @@
 //! 存储信息与迁移引擎（自定义数据目录）。
 //!
 //! 纯 core（不依赖 Tauri）：提供存储信息查询、目标目录校验、迁移规划与执行。
-//! 迁移粒度 = 旧根下顶层条目（models 每个非 `.install` 目录 / companions 每个 `companion-*` 目录），
+//! 迁移粒度 = 旧根下顶层条目（models 每个非 `.install` 目录），
 //! 每条目原子提交（同卷 rename / 跨卷 staging copy），引用改写随条目提交，
 //! 崩溃恢复 = 重跑即续（无 journal）。
 
@@ -25,16 +25,10 @@ pub struct StorageInfoView {
     pub data_dir: Option<String>,
     /// 模型根目录（当前生效）。
     pub models_dir: String,
-    /// 伙伴载荷根目录（当前生效）。
-    pub companions_dir: String,
     /// 旧默认模型根（data_dir 设置后存在存量时返回，否则 `None`）。
     pub legacy_models_dir: Option<String>,
-    /// 旧默认伙伴载荷根。
-    pub legacy_companions_dir: Option<String>,
     /// 旧根模型占用字节。
     pub legacy_models_bytes: u64,
-    /// 旧根伙伴占用字节。
-    pub legacy_companions_bytes: u64,
     /// 是否有可迁移的存量。
     pub migration_available: bool,
     /// 迁移是否进行中（由命令层填充）。
@@ -81,7 +75,6 @@ pub struct MigrateFailedItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MigrateKind {
     Model,
-    Companion,
 }
 
 /// 单条迁移条目。
@@ -131,12 +124,9 @@ pub fn dir_size(p: &Path) -> u64 {
 pub fn collect_storage_info() -> Result<StorageInfoView, String> {
     let data_dir = settings::get_data_dir().map(|p| p.display().to_string());
     let models_dir = settings::get_models_dir();
-    let companions_dir = settings::get_companions_store_dir();
     let legacy_models = settings::legacy_models_dir();
-    let legacy_companions = settings::legacy_companions_dir();
 
     let legacy_models_bytes = legacy_models.as_deref().map(dir_size).unwrap_or(0);
-    let legacy_companions_bytes = legacy_companions.as_deref().map(dir_size).unwrap_or(0);
 
     let same_volume = legacy_models
         .as_deref()
@@ -147,12 +137,9 @@ pub fn collect_storage_info() -> Result<StorageInfoView, String> {
     Ok(StorageInfoView {
         data_dir,
         models_dir: models_dir.display().to_string(),
-        companions_dir: companions_dir.display().to_string(),
         legacy_models_dir: legacy_models.map(|p| p.display().to_string()),
-        legacy_companions_dir: legacy_companions.map(|p| p.display().to_string()),
         legacy_models_bytes,
-        legacy_companions_bytes,
-        migration_available: legacy_models_bytes > 0 || legacy_companions_bytes > 0,
+        migration_available: legacy_models_bytes > 0,
         migrating: false,
         same_volume,
         disk_total,
@@ -170,8 +157,6 @@ pub struct StoragePromptView {
     pub default_dir: String,
     /// 当前生效模型根目录。
     pub models_dir: String,
-    /// 当前生效伙伴载荷根目录。
-    pub companions_dir: String,
     /// 建议目录（非默认卷中剩余空间最大的固定盘，单盘机器 → `None`）。
     pub suggested_dir: Option<String>,
     /// 建议卷可用字节。
@@ -198,7 +183,6 @@ pub fn collect_prompt_info() -> Result<StoragePromptView, String> {
 
     let default_dir = settings::get_settings_dir().display().to_string();
     let models_dir = settings::get_models_dir();
-    let companions_dir = settings::get_companions_store_dir();
     let default_available = super::sysinfo::available_space(&models_dir);
 
     let (suggested_dir, suggested_available) = if prompt_recommended {
@@ -221,7 +205,6 @@ pub fn collect_prompt_info() -> Result<StoragePromptView, String> {
         prompt_recommended,
         default_dir,
         models_dir: models_dir.display().to_string(),
-        companions_dir: companions_dir.display().to_string(),
         suggested_dir,
         suggested_available,
         default_available,
@@ -318,26 +301,6 @@ pub fn plan_migration() -> Result<Vec<MigrateItem>, String> {
             }
         }
     }
-    if let Some(legacy_comp) = settings::legacy_companions_dir() {
-        let dest_root = settings::get_companions_store_dir();
-        if let Ok(entries) = std::fs::read_dir(&legacy_comp) {
-            for e in entries.flatten() {
-                let p = e.path();
-                let name = e.file_name().to_string_lossy().into_owned();
-                if name == "library.json" || name.starts_with(".tmp-") || !p.is_dir() {
-                    continue; // 清单/临时目录不迁移
-                }
-                let bytes = dir_size(&p);
-                items.push(MigrateItem {
-                    kind: MigrateKind::Companion,
-                    name: name.clone(),
-                    source: p,
-                    dest: dest_root.join(&name),
-                    bytes,
-                });
-            }
-        }
-    }
     // 排序保证迁移顺序确定：read_dir 的目录序依文件系统而异（ext4 哈希序 /
     // tmpfs 哈希序 / NTFS 按名序），不排序会让「取消时机落在哪个条目之后」
     // 变成碰运气——test_migrate_cancel_midway_consistent 在 CI Coverage 上
@@ -377,7 +340,6 @@ pub fn run_migration(
     );
 
     let legacy_models = settings::legacy_models_dir();
-    let legacy_comp = settings::legacy_companions_dir();
 
     for item in &items {
         emit_progress(
@@ -410,7 +372,7 @@ pub fn run_migration(
                 match std::fs::remove_dir_all(&item.source) {
                     Ok(()) => {
                         outcome.skipped.push(item.name.clone());
-                        commit_refs(item, legacy_models.as_deref(), legacy_comp.as_deref());
+                        commit_refs(item, legacy_models.as_deref());
                     }
                     Err(e) => outcome
                         .failed
@@ -438,7 +400,7 @@ pub fn run_migration(
         match result {
             Ok(()) => {
                 outcome.moved.push(item.name.clone());
-                commit_refs(item, legacy_models.as_deref(), legacy_comp.as_deref());
+                commit_refs(item, legacy_models.as_deref());
             }
             Err(e) => outcome.failed.push((item.name.clone(), e)),
         }
@@ -559,31 +521,17 @@ fn copy_dir_with_progress(
     Ok(())
 }
 
-/// dest 完整性判定（models 看 `.zapmomo-lib.json` 或必需文件；companion 看清单）。
+/// dest 完整性判定（看 `.zapmomo-lib.json` 元数据标记）。
 fn dest_complete(item: &MigrateItem) -> bool {
-    match item.kind {
-        MigrateKind::Model => item.dest.join(".zapmomo-lib.json").is_file(),
-        MigrateKind::Companion => crate::live2d::config::find_model_file(&item.dest).is_some(),
-    }
+    let _ = item;
+    item.dest.join(".zapmomo-lib.json").is_file()
 }
 
-/// 条目迁移成功后改写引用（settings 绝对路径字段 / 伙伴 library.json）。
-fn commit_refs(item: &MigrateItem, legacy_models: Option<&Path>, legacy_comp: Option<&Path>) {
-    match item.kind {
-        MigrateKind::Model => {
-            if let Some(old_prefix) = legacy_models {
-                let _ = rewrite_settings_paths(old_prefix, &settings::get_models_dir());
-            }
-        }
-        MigrateKind::Companion => {
-            if let Some(_old_prefix) = legacy_comp {
-                // 把该伙伴条目改写为新 store 根
-                let _ = crate::companion::relocate_payload(
-                    &item.name,
-                    &settings::get_companions_store_dir(),
-                );
-            }
-        }
+/// 条目迁移成功后改写引用（settings 绝对路径字段）。
+fn commit_refs(item: &MigrateItem, legacy_models: Option<&Path>) {
+    let _ = item;
+    if let Some(old_prefix) = legacy_models {
+        let _ = rewrite_settings_paths(old_prefix, &settings::get_models_dir());
     }
 }
 
@@ -593,12 +541,7 @@ fn commit_refs(item: &MigrateItem, legacy_models: Option<&Path>, legacy_comp: Op
 /// 相对路径 / 外部路径不动。
 fn rewrite_settings_paths(old_prefix: &Path, new_prefix: &Path) -> Result<(), String> {
     model_library::update_settings(|cfg| {
-        // kws/asr/tts model_dir、asr punctuation_model（LLM 已改远程连接，无本地路径）
-        if let Some(k) = cfg.kws.as_mut()
-            && let Some(v) = k.model_dir.as_mut()
-        {
-            *v = relocate_in(v, old_prefix, new_prefix);
-        }
+        // asr/tts model_dir、asr punctuation_model（LLM 已改远程连接，无本地路径）
         if let Some(a) = cfg.asr.as_mut() {
             if let Some(v) = a.model_dir.as_mut() {
                 *v = relocate_in(v, old_prefix, new_prefix);
@@ -609,11 +552,6 @@ fn rewrite_settings_paths(old_prefix: &Path, new_prefix: &Path) -> Result<(), St
         }
         if let Some(t) = cfg.tts.as_mut()
             && let Some(v) = t.model_dir.as_mut()
-        {
-            *v = relocate_in(v, old_prefix, new_prefix);
-        }
-        if let Some(l) = cfg.live2d.as_mut()
-            && let Some(v) = l.model_dir.as_mut()
         {
             *v = relocate_in(v, old_prefix, new_prefix);
         }
@@ -746,7 +684,6 @@ mod tests {
             assert!(info.prompt_recommended);
             // 默认根 = ~/.zapmomo（temp home 展开）；路径感知比较（Windows 分隔符为 \）
             assert!(Path::new(&info.models_dir).ends_with(".zapmomo/models"));
-            assert!(Path::new(&info.companions_dir).ends_with(".zapmomo/companions"));
             // 建议目录依赖真实磁盘（单盘机器为 None）；有值则必以 ZapMomo 结尾
             if let Some(dir) = &info.suggested_dir {
                 assert!(dir.ends_with("ZapMomo"), "{dir}");
@@ -786,22 +723,17 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_skips_install_and_library_json() {
+    fn test_plan_skips_install_dir() {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
             let legacy_models = home.join(".zapmomo/models");
             make_model_dir(&legacy_models.join("model-a"), "f.onnx");
             make_model_dir(&legacy_models.join(".install/tmp-x"), "f");
-            let legacy_comp = home.join(".zapmomo/companions");
-            make_model_dir(&legacy_comp.join("companion-abc"), "m.model3.json");
-            std::fs::write(legacy_comp.join("library.json"), "{}").unwrap();
 
             let items = plan_migration().unwrap();
             let names: Vec<_> = items.iter().map(|i| i.name.as_str()).collect();
             assert!(names.contains(&"model-a"));
-            assert!(names.contains(&"companion-abc"));
             assert!(!names.iter().any(|n| n.contains(".install")));
-            assert!(!names.iter().any(|n| n.contains("library")));
         });
     }
 
@@ -812,10 +744,10 @@ mod tests {
             let legacy_models = home.join(".zapmomo/models");
             make_installed_model(&legacy_models.join("model-a"));
 
-            // settings 里指向旧根的绝对路径字段（保留 data_dir）
+            // settings 里指向旧根的绝对路径字段（asr.model_dir；保留 data_dir）
             crate::config::settings::save_settings(&AppConfig {
                 data_dir: Some(data.display().to_string()),
-                kws: Some(crate::config::settings::KwsSettings {
+                asr: Some(crate::config::settings::AsrSettings {
                     model_dir: Some(legacy_models.join("model-a").display().to_string()),
                     ..Default::default()
                 }),
@@ -829,7 +761,7 @@ mod tests {
             assert!(data.join("models/model-a").is_dir());
 
             let cfg = crate::config::settings::load_settings().unwrap().unwrap();
-            let md = cfg.kws.unwrap().model_dir.unwrap();
+            let md = cfg.asr.unwrap().model_dir.unwrap();
             let expected = data.join("models").join("model-a").display().to_string();
             assert_eq!(md, expected);
         });
@@ -909,54 +841,6 @@ mod tests {
                 outcome.skipped.iter().any(|n| n == "dup")
                     || outcome.moved.iter().any(|n| n == "dup")
             );
-        });
-    }
-
-    #[test]
-    fn test_migrate_companion_rewrites_library() {
-        run_with_temp_home(|home| {
-            let data = set_custom_data_dir(home);
-            let comp_dir = home.join(".zapmomo/companions");
-            let id = "companion-abc123";
-            make_model_dir(&comp_dir.join(id), "cat.model3.json");
-            std::fs::write(comp_dir.join(id).join("cat.model3.json"), "{}").unwrap();
-            let lib = crate::companion::CompanionLibrary {
-                schema_version: crate::companion::SCHEMA_VERSION,
-                models: vec![crate::companion::CompanionModel {
-                    id: id.to_string(),
-                    name: "cat".into(),
-                    source_path: None,
-                    model_dir: comp_dir.join(id).display().to_string(),
-                    model_file: comp_dir
-                        .join(id)
-                        .join("cat.model3.json")
-                        .display()
-                        .to_string(),
-                    format: "Cubism3".into(),
-                    imported_at: "t".into(),
-                    voice_id: None,
-                    layout: None,
-                    wake_word: None,
-                    welcome_text: None,
-                }],
-                active_model_id: Some(id.to_string()),
-                completed_migrations: Vec::new(),
-            };
-            std::fs::create_dir_all(&comp_dir).unwrap();
-            std::fs::write(
-                comp_dir.join("library.json"),
-                serde_json::to_string_pretty(&lib).unwrap(),
-            )
-            .unwrap();
-
-            let outcome = run_migration(false, &mut |_| {}, None).unwrap();
-            assert!(outcome.moved.iter().any(|n| n == id));
-
-            // library.json 条目已改写指向新 store
-            let reloaded = crate::companion::load_library_fast().unwrap();
-            let m = reloaded.models.iter().find(|m| m.id == id).unwrap();
-            let expected = data.join("companions").join(id).display().to_string();
-            assert_eq!(m.model_dir, expected);
         });
     }
 }

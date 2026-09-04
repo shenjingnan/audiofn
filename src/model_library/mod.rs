@@ -313,10 +313,8 @@ fn cancelled(cancel: Option<&AtomicBool>) -> bool {
 pub fn current_selections() -> Selections {
     let s = settings::load_settings().ok().flatten();
     Selections {
-        kws: s
-            .as_ref()
-            .and_then(|c| crate::kws::config::resolve(c.kws.as_ref(), None).ok())
-            .map(|c| c.model_dir),
+        // KWS 已随伴侣模块删除，selection 恒 None（ModelType::Kws 收口在后续任务）
+        kws: None,
         asr: s
             .as_ref()
             .and_then(|c| crate::asr::config::resolve(c.asr.as_ref(), None).ok())
@@ -367,17 +365,8 @@ pub fn is_path_current(mt: ModelType, path: &Path) -> bool {
 pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
     let path_str = path.to_string_lossy().to_string();
     update_settings(|cfg| match mt {
-        ModelType::Kws => {
-            let kws = cfg.kws.get_or_insert_with(Default::default);
-            kws.model_dir = Some(path_str);
-            // 切换模型目录时重置文件级覆盖：旧模型的手写覆盖（如 zh-en 的
-            // epoch-13 文件名）会污染新模型的文件探测，交回 resolve 自动探测。
-            kws.encoder = None;
-            kws.decoder = None;
-            kws.joiner = None;
-            kws.tokens = None;
-            kws.keywords_file = None;
-        }
+        // KWS 已随伴侣模块删除：selection 恒 None（ModelType::Kws 收口在后续任务）
+        ModelType::Kws => {}
         ModelType::Asr => {
             let asr = cfg.asr.get_or_insert_with(Default::default);
             asr.model_dir = Some(path_str);
@@ -485,7 +474,8 @@ pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
 /// 恢复之前的选择（回滚用）。`old` 为 `None` 表示恢复为「未配置」。
 pub fn restore_selected_model(mt: ModelType, old: Option<String>) -> Result<(), String> {
     update_settings(|cfg| match mt {
-        ModelType::Kws => cfg.kws.get_or_insert_with(Default::default).model_dir = old,
+        // KWS 已随伴侣模块删除：无 selection 可恢复
+        ModelType::Kws => {}
         ModelType::Asr => cfg.asr.get_or_insert_with(Default::default).model_dir = old,
         ModelType::Tts => cfg.tts.get_or_insert_with(Default::default).model_dir = old,
         ModelType::Llm => {}
@@ -1343,67 +1333,6 @@ mod tests {
     }
 
     #[test]
-    fn test_current_selection_and_set_restore() {
-        run_with_temp_home(|home| {
-            // set/restore KWS selection（LLM 已改远程连接，无本地 selection 语义）
-            // 用临时 HOME 下的绝对路径（不要硬编码 Unix 风格 /tmp，Windows 上 is_absolute 语义不同）。
-            let x = home.join("models/x-kws");
-            set_selected_model(ModelType::Kws, &x).unwrap();
-            let s = current_selections();
-            assert!(paths_equal(s.kws.as_ref().unwrap(), &x));
-            assert!(!s.kws.as_ref().unwrap().is_dir(), "不应要求目录存在");
-
-            let y = home.join("models/y-kws");
-            restore_selected_model(ModelType::Kws, Some(y.display().to_string())).unwrap();
-            let s2 = current_selections();
-            assert!(paths_equal(s2.kws.as_ref().unwrap(), &y));
-
-            let cfg = settings::load_settings().unwrap().unwrap();
-            // set/restore 不触碰 enabled
-            assert_eq!(cfg.kws.unwrap().enabled, None);
-            assert!(cfg.tts.is_none());
-        });
-    }
-
-    #[test]
-    fn test_set_selected_kws_resets_file_overrides() {
-        run_with_temp_home(|home| {
-            // 预写旧模型的文件级覆盖（模拟 zh-en 时代的手写配置）
-            update_settings(|cfg| {
-                let kws = cfg.kws.get_or_insert_with(Default::default);
-                kws.model_dir = Some("old-model".to_string());
-                kws.encoder = Some("old-encoder.onnx".to_string());
-                kws.decoder = Some("old-decoder.onnx".to_string());
-                kws.joiner = Some("old-joiner.onnx".to_string());
-                kws.tokens = Some("old-tokens.txt".to_string());
-                kws.keywords_file = Some("old-keywords.txt".to_string());
-                kws.enabled = Some(true);
-            })
-            .unwrap();
-
-            // 切换到新模型目录
-            let new_dir = home.join("models/new-kws");
-            set_selected_model(ModelType::Kws, &new_dir).unwrap();
-
-            let cfg = settings::load_settings().unwrap().unwrap();
-            let kws = cfg.kws.as_ref().expect("kws 段应存在");
-            assert_eq!(
-                kws.model_dir,
-                Some(new_dir.to_string_lossy().to_string()),
-                "model_dir 应更新"
-            );
-            // 文件级覆盖全部重置：交回 resolve 按目录探测
-            assert_eq!(kws.encoder, None);
-            assert_eq!(kws.decoder, None);
-            assert_eq!(kws.joiner, None);
-            assert_eq!(kws.tokens, None);
-            assert_eq!(kws.keywords_file, None);
-            // enabled 不受切换影响
-            assert_eq!(kws.enabled, Some(true));
-        });
-    }
-
-    #[test]
     fn test_set_selected_asr_resets_file_overrides() {
         run_with_temp_home(|home| {
             // 预写旧模型的文件级覆盖（模拟双语时代的手写配置）
@@ -1966,7 +1895,7 @@ mod tests {
     fn test_legacy_managed_recognition_and_metadata_best_effort() {
         run_with_temp_home(|home| {
             // 用 KWS 资产字段摆一个「完整但无 metadata」的旧目录
-            use crate::kws::config::{
+            use crate::model_library::asset::{
                 DEFAULT_DECODER, DEFAULT_ENCODER, DEFAULT_JOINER, DEFAULT_KEYWORDS_REL,
                 DEFAULT_TOKENS,
             };
@@ -2122,7 +2051,7 @@ mod tests {
         run_with_temp_home(|home| {
             set_custom_data_dir(home);
             // 旧版默认根下摆一个完整 KWS 目录（同 legacy 识别测试的摆法）
-            use crate::kws::config::{
+            use crate::model_library::asset::{
                 DEFAULT_DECODER, DEFAULT_ENCODER, DEFAULT_JOINER, DEFAULT_KEYWORDS_REL,
                 DEFAULT_TOKENS,
             };
@@ -2163,23 +2092,23 @@ mod tests {
         run_with_temp_home(|home| {
             let dir = home.join("models-local");
             std::fs::create_dir_all(&dir).unwrap();
-            let model_dir = dir.join("current-kws");
+            let model_dir = dir.join("current-asr");
             std::fs::create_dir_all(&model_dir).unwrap();
             add_local_model_record(LocalModel {
                 id: "local-current".to_string(),
-                name: "current-kws".to_string(),
-                model_type: "kws".to_string(),
+                name: "current-asr".to_string(),
+                model_type: "asr".to_string(),
                 path: model_dir.display().to_string(),
                 added_at: "2026-08-27T00:00:00Z".to_string(),
                 registry_id: None,
             })
             .unwrap();
-            set_selected_model(ModelType::Kws, &model_dir).unwrap();
-            assert!(is_path_current(ModelType::Kws, &model_dir));
+            set_selected_model(ModelType::Asr, &model_dir).unwrap();
+            assert!(is_path_current(ModelType::Asr, &model_dir));
             // 切换走后不再是 current（供 command 层「移除前需先切换」判定使用）
-            let other = home.join("models-local/other-kws");
-            set_selected_model(ModelType::Kws, &other).unwrap();
-            assert!(!is_path_current(ModelType::Kws, &model_dir));
+            let other = home.join("models-local/other-asr");
+            set_selected_model(ModelType::Asr, &other).unwrap();
+            assert!(!is_path_current(ModelType::Asr, &model_dir));
         });
     }
 

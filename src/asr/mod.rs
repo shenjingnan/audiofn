@@ -19,9 +19,10 @@ use sherpa_onnx::{
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub use crate::kws::reaction::ReactionOutcome;
 pub use crate::model_library::asset::{DownloadProgress, DownloadStage, ModelError, ProgressFn};
-pub use reaction::{AsrReaction, AsrResult, CollectAsrReaction, ConsoleAsrReaction};
+pub use reaction::{
+    AsrReaction, AsrResult, CollectAsrReaction, ConsoleAsrReaction, ReactionOutcome,
+};
 
 /// 语音识别引擎。
 ///

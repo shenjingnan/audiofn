@@ -9,12 +9,6 @@ use serde::{Deserialize, Serialize};
 /// 可绑定全局快捷键的操作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShortcutAction {
-    /// 显示/隐藏桌宠窗口
-    ToggleCompanion,
-    /// 语音会话 开/关
-    ToggleVoiceSession,
-    /// 打断当前回复（停止生成与朗读，回到待唤醒）
-    InterruptReply,
     /// 打开设置窗口
     OpenSettings,
 }
@@ -22,12 +16,6 @@ pub enum ShortcutAction {
 /// 快捷键配置分节（action → accelerator；`None` = 未绑定）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ShortcutsSettings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub toggle_companion: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub toggle_voice_session: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub interrupt_reply: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub open_settings: Option<String>,
 }
@@ -66,19 +54,11 @@ pub fn validate_accelerator(accelerator: &str) -> Result<(), String> {
 
 impl ShortcutAction {
     /// 全部可绑定操作（配置遍历 / 启动注册用）。
-    pub const ALL: [ShortcutAction; 4] = [
-        ShortcutAction::ToggleCompanion,
-        ShortcutAction::ToggleVoiceSession,
-        ShortcutAction::InterruptReply,
-        ShortcutAction::OpenSettings,
-    ];
+    pub const ALL: [ShortcutAction; 1] = [ShortcutAction::OpenSettings];
 
     /// snake_case 标识：配置字段名 / 前端 command 参数。
     pub fn as_str(self) -> &'static str {
         match self {
-            ShortcutAction::ToggleCompanion => "toggle_companion",
-            ShortcutAction::ToggleVoiceSession => "toggle_voice_session",
-            ShortcutAction::InterruptReply => "interrupt_reply",
             ShortcutAction::OpenSettings => "open_settings",
         }
     }
@@ -86,9 +66,6 @@ impl ShortcutAction {
     /// 中文标签（错误文案「已绑定到 XX」用，与设置页展示一致）。
     pub fn label(self) -> &'static str {
         match self {
-            ShortcutAction::ToggleCompanion => "显示/隐藏桌宠",
-            ShortcutAction::ToggleVoiceSession => "语音会话 开/关",
-            ShortcutAction::InterruptReply => "打断播报",
             ShortcutAction::OpenSettings => "打开设置",
         }
     }
@@ -102,18 +79,12 @@ impl ShortcutAction {
 impl ShortcutsSettings {
     pub fn get(&self, action: ShortcutAction) -> Option<&str> {
         match action {
-            ShortcutAction::ToggleCompanion => self.toggle_companion.as_deref(),
-            ShortcutAction::ToggleVoiceSession => self.toggle_voice_session.as_deref(),
-            ShortcutAction::InterruptReply => self.interrupt_reply.as_deref(),
             ShortcutAction::OpenSettings => self.open_settings.as_deref(),
         }
     }
 
     pub fn set(&mut self, action: ShortcutAction, accelerator: Option<String>) {
         let slot = match action {
-            ShortcutAction::ToggleCompanion => &mut self.toggle_companion,
-            ShortcutAction::ToggleVoiceSession => &mut self.toggle_voice_session,
-            ShortcutAction::InterruptReply => &mut self.interrupt_reply,
             ShortcutAction::OpenSettings => &mut self.open_settings,
         };
         *slot = accelerator;
@@ -162,17 +133,17 @@ mod tests {
     #[test]
     fn test_settings_get_set_clear() {
         let mut s = ShortcutsSettings::default();
-        assert_eq!(s.get(ShortcutAction::ToggleCompanion), None);
+        assert_eq!(s.get(ShortcutAction::OpenSettings), None);
         s.set(
-            ShortcutAction::ToggleCompanion,
+            ShortcutAction::OpenSettings,
             Some("CmdOrCtrl+Shift+Z".into()),
         );
         assert_eq!(
-            s.get(ShortcutAction::ToggleCompanion),
+            s.get(ShortcutAction::OpenSettings),
             Some("CmdOrCtrl+Shift+Z")
         );
-        s.set(ShortcutAction::ToggleCompanion, None);
-        assert_eq!(s.get(ShortcutAction::ToggleCompanion), None);
+        s.set(ShortcutAction::OpenSettings, None);
+        assert_eq!(s.get(ShortcutAction::OpenSettings), None);
     }
 
     #[test]
@@ -182,19 +153,9 @@ mod tests {
             ShortcutAction::OpenSettings,
             Some("CmdOrCtrl+Shift+O".into()),
         );
-        // 同键异 action → 命中冲突
-        assert_eq!(
-            s.find_conflict(ShortcutAction::ToggleCompanion, "CmdOrCtrl+Shift+O"),
-            Some(ShortcutAction::OpenSettings)
-        );
         // 同 action 自身 → 不算冲突
         assert_eq!(
             s.find_conflict(ShortcutAction::OpenSettings, "CmdOrCtrl+Shift+O"),
-            None
-        );
-        // 不同键 → 无冲突
-        assert_eq!(
-            s.find_conflict(ShortcutAction::ToggleCompanion, "CmdOrCtrl+Shift+P"),
             None
         );
     }
@@ -204,12 +165,12 @@ mod tests {
         // 含 [shortcuts] 的配置可解析；未写分节时为 None（老配置兼容）
         let with_section = r#"
 [shortcuts]
-toggle_companion = "CmdOrCtrl+Shift+Z"
+open_settings = "CmdOrCtrl+Shift+O"
 "#;
         let cfg: crate::config::settings::AppConfig = toml::from_str(with_section).unwrap();
         assert_eq!(
-            cfg.shortcuts.unwrap().toggle_companion.as_deref(),
-            Some("CmdOrCtrl+Shift+Z")
+            cfg.shortcuts.unwrap().open_settings.as_deref(),
+            Some("CmdOrCtrl+Shift+O")
         );
 
         let empty: crate::config::settings::AppConfig = toml::from_str("").unwrap();
@@ -218,11 +179,10 @@ toggle_companion = "CmdOrCtrl+Shift+Z"
         // 序列化：未绑定字段不落盘
         let mut s = ShortcutsSettings::default();
         s.set(
-            ShortcutAction::InterruptReply,
-            Some("CmdOrCtrl+Shift+X".into()),
+            ShortcutAction::OpenSettings,
+            Some("CmdOrCtrl+Shift+O".into()),
         );
         let out = toml::to_string(&s).unwrap();
-        assert!(out.contains("interrupt_reply"));
-        assert!(!out.contains("toggle_companion"));
+        assert!(out.contains("open_settings"));
     }
 }
