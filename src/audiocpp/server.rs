@@ -252,7 +252,7 @@ fn release_lease(config_hash: u64, generation: u64) {
 ///
 /// `task` 首字段（TTS 与 ASR 即使同 model_dir 也不撞指纹，双任务独立实例并存——
 /// 路线 A 的隔离自证）；`model_id` 覆盖模型族角色（防 external 目录同 dir 不同
-/// kind 的边角）。voice/音色不进指纹——音色随请求传（omnivoice 的 `voice` /
+/// kind 的边角）。voice/音色不进指纹——音色随请求传（具名音色的 `voice` /
 /// `voice_ref`），换音色复用热实例。
 fn config_hash(spec: &ServerInstanceSpec, engine: &std::path::Path) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -579,7 +579,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.path == '/health':
             self._ok(b'{"status":"ok"}')
         elif self.path == '/v1/models':
-            self._ok(json.dumps({"data": [{"id": "omnivoice"}]}).encode())
+            self._ok(json.dumps({"data": [{"id": "qwen3-tts-0.6b"}]}).encode())
         else:
             self.send_error(404)
     def do_POST(self):
@@ -604,20 +604,20 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
         dir
     }
 
-    /// audiocpp 后端测试配置（HOME 隔离 + omnivoice 单文件齐）。
+    /// audiocpp 后端测试配置（HOME 隔离 + qwen3 单文件齐）。
     #[cfg(all(unix, not(target_os = "macos")))]
     fn stub_ready_cfg(home: &std::path::Path) -> crate::tts::config::ResolvedTtsConfig {
         crate::test_util::set_custom_data_dir(home);
-        let model_dir = home.join("models/omnivoice-stub");
+        let model_dir = home.join("models/qwen3-tts-stub");
         std::fs::create_dir_all(&model_dir).unwrap();
         std::fs::write(
-            model_dir.join(super::super::families::OMNIVOICE.gguf_file),
+            model_dir.join(super::super::families::QWEN3_TTS_06B.gguf_file),
             b"x",
         )
         .unwrap();
         let mut cfg = crate::tts::config::ResolvedTtsConfig::default();
         cfg.backend = crate::tts::config::TtsBackendKind::Audiocpp;
-        cfg.model_type = crate::tts::config::TtsModelKind::Omnivoice;
+        cfg.model_type = crate::tts::config::TtsModelKind::Qwen3Tts06;
         cfg.model_dir = model_dir;
         cfg
     }
@@ -695,7 +695,14 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
             let tts = super::super::client::AudiocppTts::new(cfg.clone())
                 .expect("生产构造应成功（stub 健康且模型在列）");
             let samples = tts
-                .synthesize("hello", 1.0, &crate::tts::TtsVoiceParams::Sid(0))
+                .synthesize(
+                    "hello",
+                    1.0,
+                    &crate::tts::TtsVoiceParams::Reference {
+                        wav_path: std::path::PathBuf::from("/r.wav"),
+                        reference_text: "t".into(),
+                    },
+                )
                 .expect("stub 合成应成功");
             assert_eq!(samples.len(), 2400, "stub 返回 2400 样本（静音）");
             assert_eq!(tts.sample_rate(), 24000, "首响应校准采样率");
@@ -712,22 +719,12 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
             let cfg = stub_ready_cfg(home);
             let engine = crate::tts::TtsEngine::new(cfg.clone())
                 .expect("门面 audiocpp 构造（内部 lease stub）");
-            assert_eq!(engine.sample_rate(), 24_000, "初值 omnivoice 固定采样率");
-
-            // Named 音色合成成功（请求体 voice=alba，omnivoice preset 通道透传）
-            let out = engine
-                .synthesize(
-                    "hello",
-                    1.0,
-                    &crate::tts::TtsVoiceParams::Named("alba".into()),
-                )
-                .unwrap();
-            assert_eq!(out.len(), 2400);
+            assert_eq!(engine.sample_rate(), 24_000, "初值 qwen3_tts 固定采样率");
 
             // Reference 克隆音色合成成功（voice_ref + reference_text 映射）
             let out = engine
                 .synthesize(
-                    "x",
+                    "hello",
                     1.0,
                     &crate::tts::TtsVoiceParams::Reference {
                         wav_path: std::path::PathBuf::from("/r.wav"),
@@ -739,7 +736,15 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
 
             // 进度回调返回 false → 请求前取消（不发请求）
             let err = engine
-                .synthesize_with_progress("x", 1.0, &crate::tts::TtsVoiceParams::Sid(0), |_| false)
+                .synthesize_with_progress(
+                    "x",
+                    1.0,
+                    &crate::tts::TtsVoiceParams::Reference {
+                        wav_path: std::path::PathBuf::from("/r.wav"),
+                        reference_text: "t".into(),
+                    },
+                    |_| false,
+                )
                 .unwrap_err();
             assert_eq!(err, "已取消");
 
@@ -749,7 +754,10 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
                 .synthesize_to_wav_with_progress(
                     "hello",
                     1.0,
-                    &crate::tts::TtsVoiceParams::Sid(0),
+                    &crate::tts::TtsVoiceParams::Reference {
+                        wav_path: std::path::PathBuf::from("/r.wav"),
+                        reference_text: "t".into(),
+                    },
                     &wav,
                     |p| p < 0.5,
                 )
@@ -952,7 +960,7 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
     #[test]
     fn test_config_hash_distinguishes_dimensions() {
         let mut cfg = crate::tts::config::ResolvedTtsConfig::default();
-        cfg.model_type = crate::tts::config::TtsModelKind::Voxcpm2;
+        cfg.model_type = crate::tts::config::TtsModelKind::Qwen3Tts06;
         let engine = std::path::Path::new("/engines/audiocpp_server");
         let spec = ServerInstanceSpec::from_tts(&cfg).unwrap();
         let h1 = config_hash(&spec, engine);
@@ -962,7 +970,7 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
         let h2 = config_hash(&spec2, engine);
         assert_ne!(h1, h2);
         // 模型族变更 → 指纹必变（即使 external 目录同名）
-        cfg.model_type = crate::tts::config::TtsModelKind::Omnivoice;
+        cfg.model_type = crate::tts::config::TtsModelKind::Qwen3Tts17;
         let spec3 = ServerInstanceSpec::from_tts(&cfg).unwrap();
         let h3 = config_hash(&spec3, engine);
         assert_ne!(h2, h3);

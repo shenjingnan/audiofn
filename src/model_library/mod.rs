@@ -422,7 +422,7 @@ pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
             let tts = cfg.tts.get_or_insert_with(Default::default);
             tts.model_dir = Some(path_str);
             // 切换时同步持久化模型类型与推理后端：managed 安装目录名 == registry
-            // `name`，据此推导 zipvoice 与 audiocpp（runtime 字段）；
+            // `name`，据此推导 TTS kind 与 audiocpp 后端（runtime 字段）；
             // external/local 目录探测不到时保持原值。
             let mut new_kind = old_kind;
             if let Some(name) = path.file_name() {
@@ -447,8 +447,8 @@ pub fn set_selected_model(mt: ModelType, path: &Path) -> Result<(), String> {
                     tts.engine_path = None;
                 }
             }
-            // 模型族变化时清空默认音色：zipvoice 音色 id（leijun-1 等参考音色）与
-            // omnivoice 具名音色互为无效值，残留会让切换后的首次合成报「未找到音色」。
+            // 模型族变化时清空默认音色：不同模型包的参考音色 id（leijun-1 等）与
+            // 音色库 id 互为无效值，残留会让切换后的首次合成报「未找到音色」。
             if old_kind.is_some() && old_kind != new_kind {
                 tts.voice = None;
             }
@@ -565,7 +565,7 @@ pub fn list_models() -> Vec<LibraryModel> {
     let sel = current_selections();
     let locals = get_local_models();
     let mut out = Vec::new();
-    // 平台受限条目（如仅 Metal 平台的 omnivoice）在此过滤：不可见即不可下载
+    // 平台受限条目（如仅 darwin-aarch64/windows-x86_64 的 audiocpp TTS）在此过滤：不可见即不可下载
     for reg in registry::models_for_current_platform() {
         out.push(build_registry_model(reg, &sel, &locals));
     }
@@ -1419,20 +1419,20 @@ mod tests {
     fn test_set_selected_tts_persists_model_type_from_registry_name() {
         run_with_temp_home(|home| {
             // managed 安装目录名 == registry `name` → 切换时推导并持久化对应 kind
-            let omni = home.join("models/omnivoice-audiocpp");
-            set_selected_model(ModelType::Tts, &omni).unwrap();
+            let q06 = home.join("models/qwen3-tts-06b-base-audiocpp");
+            set_selected_model(ModelType::Tts, &q06).unwrap();
             let cfg = settings::load_settings().unwrap().unwrap();
             assert_eq!(
                 cfg.tts.as_ref().and_then(|t| t.model_type),
-                Some(crate::tts::config::TtsModelKind::Omnivoice)
+                Some(crate::tts::config::TtsModelKind::Qwen3Tts06)
             );
 
-            let zip = home.join("models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia");
-            set_selected_model(ModelType::Tts, &zip).unwrap();
+            let q17 = home.join("models/qwen3-tts-17b-base-audiocpp");
+            set_selected_model(ModelType::Tts, &q17).unwrap();
             let cfg = settings::load_settings().unwrap().unwrap();
             assert_eq!(
                 cfg.tts.as_ref().and_then(|t| t.model_type),
-                Some(crate::tts::config::TtsModelKind::Zipvoice)
+                Some(crate::tts::config::TtsModelKind::Qwen3Tts17)
             );
 
             // 非 registry 目录名：不写错 kind（保持上一次推导值）
@@ -1441,7 +1441,7 @@ mod tests {
             let cfg = settings::load_settings().unwrap().unwrap();
             assert_eq!(
                 cfg.tts.as_ref().and_then(|t| t.model_type),
-                Some(crate::tts::config::TtsModelKind::Zipvoice),
+                Some(crate::tts::config::TtsModelKind::Qwen3Tts17),
                 "未知目录不应覆盖已推导的 kind"
             );
         });
@@ -1450,25 +1450,18 @@ mod tests {
     #[test]
     fn test_set_selected_tts_persists_backend_from_registry_runtime() {
         run_with_temp_home(|home| {
-            // audiocpp managed 目录 → backend = audiocpp + model_type = omnivoice
-            let omni = home.join("models/omnivoice-audiocpp");
-            set_selected_model(ModelType::Tts, &omni).unwrap();
+            // audiocpp managed 目录 → backend = audiocpp + model_type = qwen3 尺寸
+            let q06 = home.join("models/qwen3-tts-06b-base-audiocpp");
+            set_selected_model(ModelType::Tts, &q06).unwrap();
             let cfg = settings::load_settings().unwrap().unwrap();
             let tts = cfg.tts.as_ref().expect("tts 段应存在");
             assert_eq!(tts.backend.as_deref(), Some("audiocpp"));
             assert_eq!(
                 tts.model_type,
-                Some(crate::tts::config::TtsModelKind::Omnivoice)
+                Some(crate::tts::config::TtsModelKind::Qwen3Tts06)
             );
 
-            // 切回 sherpa zipvoice → backend 复位缺省（None）
-            let zip = home.join("models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia");
-            set_selected_model(ModelType::Tts, &zip).unwrap();
-            let cfg = settings::load_settings().unwrap().unwrap();
-            assert_eq!(cfg.tts.as_ref().and_then(|t| t.backend.clone()), None);
-
-            // audiocpp → external/local 目录 → backend 同样复位（不残留 audiocpp 拦合成）
-            set_selected_model(ModelType::Tts, &omni).unwrap();
+            // audiocpp → external/local 目录 → backend 复位（交回 resolve 缺省）
             let unknown = home.join("models/my-local-model");
             set_selected_model(ModelType::Tts, &unknown).unwrap();
             let cfg = settings::load_settings().unwrap().unwrap();
@@ -1479,26 +1472,26 @@ mod tests {
     #[test]
     fn test_set_selected_tts_kind_switch_clears_voice() {
         run_with_temp_home(|home| {
-            // audiocpp registry 目录名 → tts_kind = omnivoice
-            let omni = home.join("models/omnivoice-audiocpp");
-            set_selected_model(ModelType::Tts, &omni).unwrap();
+            // audiocpp registry 目录名 → tts_kind = qwen3_tts_06
+            let q06 = home.join("models/qwen3-tts-06b-base-audiocpp");
+            set_selected_model(ModelType::Tts, &q06).unwrap();
             let cfg = settings::load_settings().unwrap().unwrap();
             assert_eq!(
                 cfg.tts.as_ref().and_then(|t| t.model_type),
-                Some(crate::tts::config::TtsModelKind::Omnivoice)
+                Some(crate::tts::config::TtsModelKind::Qwen3Tts06)
             );
-            // 设置一个 omnivoice 音色后切回 zipvoice：音色 id 互为无效，应被清空
+            // 设置一个音色后切到 1.7B：模型族变化 → 音色 id 应被清空
             update_settings(|c| {
                 c.tts.get_or_insert_with(Default::default).voice = Some("demo_01_man".to_string());
             })
             .unwrap();
-            let zip = home.join("models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia");
-            set_selected_model(ModelType::Tts, &zip).unwrap();
+            let q17 = home.join("models/qwen3-tts-17b-base-audiocpp");
+            set_selected_model(ModelType::Tts, &q17).unwrap();
             let cfg = settings::load_settings().unwrap().unwrap();
             let tts = cfg.tts.as_ref().unwrap();
             assert_eq!(
                 tts.model_type,
-                Some(crate::tts::config::TtsModelKind::Zipvoice)
+                Some(crate::tts::config::TtsModelKind::Qwen3Tts17)
             );
             assert!(
                 tts.voice.is_none(),

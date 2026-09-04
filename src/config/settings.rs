@@ -364,7 +364,7 @@ pub struct TtsSettings {
     /// 是否启用语音合成，缺省 true
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// 模型类型（zipvoice/omnivoice/...；缺省 Zipvoice，未知值回落默认——
+    /// 模型类型（qwen3_tts_06/qwen3_tts_17；缺省 qwen3_tts_06，未知值回落默认——
     /// 兼容老版本 settings 里已移除的模型 kind）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_type: Option<crate::tts::config::TtsModelKind>,
@@ -413,7 +413,8 @@ pub struct TtsSettings {
     /// 调试输出，缺省 false
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<bool>,
-    /// TTS 引擎后端：sherpa（进程内，缺省）| audiocpp（audio.cpp sidecar 进程）
+    /// TTS 引擎后端：audiocpp（audio.cpp sidecar 进程，缺省）；
+    /// 残留 "sherpa" 的老配置由引擎预检明确报错引导迁移
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     /// audiocpp 引擎二进制覆盖路径（开发/调试用；缺省由 locator 自动定位）
@@ -789,7 +790,7 @@ mod tests {
     fn test_tts_settings_serde_roundtrip() {
         let tts = TtsSettings {
             enabled: Some(false),
-            model_type: Some(crate::tts::config::TtsModelKind::Zipvoice),
+            model_type: Some(crate::tts::config::TtsModelKind::Qwen3Tts06),
             model_dir: Some("${env.TTS_MODEL_DIR}".to_string()),
             encoder: Some("encoder.int8.onnx".to_string()),
             decoder: None,

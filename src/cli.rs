@@ -3,6 +3,9 @@ use std::path::PathBuf;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// `tts install-model` 缺省安装的模型库条目（Qwen3-TTS 0.6B，延迟优先档）。
+const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
+
 #[derive(Parser)]
 #[command(
     name = "zapmomo",
@@ -127,7 +130,7 @@ pub enum TtsCmd {
         /// 模型目录（覆盖 settings.toml 的 tts.model_dir）
         #[arg(long)]
         model_dir: Option<PathBuf>,
-        /// 推理后端（sherpa | audiocpp；覆盖 settings.toml 的 tts.backend）
+        /// 推理后端（audiocpp；残留 "sherpa" 由预检报错引导迁移）
         #[arg(long)]
         backend: Option<String>,
         /// audiocpp 引擎二进制路径（覆盖 locator 自动定位）
@@ -139,12 +142,9 @@ pub enum TtsCmd {
         /// 输出 wav 路径；缺省 ~/.zapmomo/tts/<时间戳>.wav
         #[arg(long)]
         output: Option<PathBuf>,
-        /// 音色 id（zipvoice 内置音色如 leijun-1 / 自定义音色库 id）
+        /// 音色 id（模型包内置参考音色 / 自定义音色库 id）
         #[arg(long)]
         voice: Option<String>,
-        /// sid 模型的说话人编号；优先于 --voice（当前收录模型不使用）
-        #[arg(long)]
-        sid: Option<i32>,
         /// 自定义参考音频 wav（配合 --reference-text 使用）
         #[arg(long)]
         reference_wav: Option<PathBuf>,
@@ -152,20 +152,17 @@ pub enum TtsCmd {
         #[arg(long)]
         reference_text: Option<String>,
     },
-    /// 列出可用的内置音色
+    /// 列出可用音色（模型包内置参考音色 + 自定义音色库）
     Voices {
         /// 模型目录（覆盖 settings.toml 的 tts.model_dir）
         #[arg(long)]
         model_dir: Option<PathBuf>,
-        /// 推理后端（sherpa | audiocpp；覆盖 settings.toml 的 tts.backend）
-        #[arg(long)]
-        backend: Option<String>,
     },
-    /// 下载并安装 TTS 模型（主包 + 声码器，默认 ~/.zapmomo/models/<模型名>）
+    /// 从模型库下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，~/.zapmomo/models/<模型名>）
     InstallModel {
-        /// 安装目标模型目录（默认 ~/.zapmomo/models/<模型名>）
+        /// 模型库 registry 条目 id（如 tts-qwen3-17b-base-q8-audiocpp）
         #[arg(long)]
-        model_dir: Option<PathBuf>,
+        registry_id: Option<String>,
         /// 已安装也强制重新下载
         #[arg(long)]
         force: bool,
@@ -378,7 +375,6 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
             speed,
             output,
             voice,
-            sid,
             reference_wav,
             reference_text,
         } => {
@@ -386,11 +382,10 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
             apply_backend_override(&mut cfg, backend, engine_path)?;
             let engine = crate::tts::TtsEngine::new(cfg.clone())?;
             let speed = speed.unwrap_or(1.0);
-            // 合成音色参数统一解析（克隆 > sid > audiocpp 具名，见 tts::voice）
+            // 合成音色参数统一解析（见 tts::voice）
             let voice_params = crate::tts::voice::resolve_voice_params(
                 &cfg,
                 voice.as_deref(),
-                sid,
                 reference_wav.as_deref(),
                 reference_text.as_deref(),
             )?;
@@ -402,51 +397,51 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
             println!("已合成: {}", out_path.display());
             Ok(())
         }
-        TtsCmd::Voices { model_dir, backend } => {
-            let mut cfg = tts_config(model_dir.as_ref())?;
-            apply_backend_override(&mut cfg, backend, None)?;
-            if cfg.backend == crate::tts::config::TtsBackendKind::Audiocpp {
-                let desc =
-                    crate::audiocpp::families::family_desc(cfg.model_type).ok_or_else(|| {
-                        format!("模型类型 {} 不支持 audiocpp 后端", cfg.model_type.as_str())
-                    })?;
-                match desc.voice_semantics {
-                    crate::audiocpp::families::VoiceSemantics::ReferenceClone => {
-                        println!(
-                            "audiocpp 后端（{}）为克隆模型：用 --reference-wav/--voice 指定参考音色\n（自定义音色库可用 `zapmomo tts voices` 管理，未指定时走 auto voice）",
-                            desc.family
-                        );
-                    }
-                    crate::audiocpp::families::VoiceSemantics::ReferenceCloneRequired => {
-                        println!(
-                            "audiocpp 后端（{}）为必须克隆音色模型：必须用 --reference-wav 指定参考音频（--voice/音色库 id 也可）\n（Base 版无 auto voice 兜底，不可省略参考音色）",
-                            desc.family
-                        );
-                    }
-                }
-                return Ok(());
-            }
+        TtsCmd::Voices { model_dir } => {
+            let cfg = tts_config(model_dir.as_ref())?;
+            let desc = crate::audiocpp::families::family_desc(cfg.model_type).ok_or_else(|| {
+                format!("模型类型 {} 不支持 audiocpp 后端", cfg.model_type.as_str())
+            })?;
+            println!(
+                "audiocpp 后端（{}）为参考音频克隆模型：用 --reference-wav/--reference-text 指定参考音频，或 --voice 选择音色库 id\n（Base 版无 auto voice 兜底，不可省略参考音色）",
+                desc.family
+            );
             let voices = crate::tts::voice::list_builtin_voices(&cfg.model_dir);
-            if voices.is_empty() {
-                if cfg.model_type.uses_reference_audio() {
-                    println!("未找到内置音色（请先运行 `zapmomo tts install-model` 下载模型）。");
-                } else {
-                    println!("该模型为单说话人模型（speaker id 0），无音色列表。");
-                }
-            } else {
-                println!("可用内置音色:");
-                for v in voices {
+            let custom = crate::tts::voice_store::list_custom_voices();
+            if !voices.is_empty() {
+                println!("模型包内置音色:");
+                for v in &voices {
                     println!("  {}  {}", v.id, v.name);
                 }
             }
+            if !custom.is_empty() {
+                println!("自定义音色库:");
+                for v in &custom {
+                    println!("  {}  {}", v.id, v.name);
+                }
+            }
+            if voices.is_empty() && custom.is_empty() {
+                println!(
+                    "未找到可用音色（请先安装模型/在音色库录制音色）。\n{}",
+                    desc.registry_hint
+                );
+            }
             Ok(())
         }
-        TtsCmd::InstallModel { model_dir, force } => {
-            use crate::tts::{
-                DownloadProgress, DownloadStage, install_model_to, install_vocoder_to,
-                user_model_dir,
-            };
-            let dest = model_dir.unwrap_or_else(user_model_dir);
+        TtsCmd::InstallModel { registry_id, force } => {
+            use crate::model_library::asset::{DownloadProgress, DownloadStage};
+            use crate::model_library::{install_managed_model, registry};
+            let id = registry_id.unwrap_or_else(|| DEFAULT_TTS_REGISTRY_ID.to_string());
+            let model = registry::model_for_current_platform(&id)
+                .ok_or_else(|| format!("未知的模型库条目（或当前平台不可用）: {id}"))?;
+            if model.model_type != crate::model_library::registry::ModelType::Tts {
+                return Err(format!("{id} 不是 TTS 模型条目"));
+            }
+            let dest = crate::config::settings::get_models_dir().join(&model.name);
+            if !force && crate::tts::is_installed(&dest) {
+                println!("模型已安装: {}", dest.display());
+                return Ok(());
+            }
             let mut progress = |p: DownloadProgress| {
                 let stage = match p.stage {
                     DownloadStage::Downloading => "下载",
@@ -456,10 +451,9 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
                 };
                 println!("[{stage}] {}", p.message);
             };
-            install_model_to(&dest, force, &mut progress).map_err(|e| e.to_string())?;
-            println!("TTS 主模型已就绪: {}", dest.display());
-            install_vocoder_to(&dest, force, &mut progress).map_err(|e| e.to_string())?;
-            println!("TTS 声码器已就绪: {}", dest.display());
+            let dest =
+                install_managed_model(model, &mut progress, None).map_err(|e| e.to_string())?;
+            println!("TTS 模型已就绪: {}", dest.display());
             Ok(())
         }
     }
@@ -467,11 +461,8 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
 
 /// CLI `--backend` / `--engine-path` 覆盖：校验合法后写入解析后的配置。
 ///
-/// 显式切后端时把 `model_type` 复位为 Zipvoice——settings 里持久化的 kind 属于
-/// 另一后端的模型（如从 audiocpp 切回 sherpa 目录时残留 audiocpp kind 会让
-/// `build_offline_model_config` 走空分支报「Errors in config」）；sherpa 侧当前
-/// 仅收录 Zipvoice 一种 kind。audiocpp 模型的 kind 由 registry 目录名权威写入，
-/// 显式 `--backend audiocpp` 配非 audiocpp 目录时由预检报组合错误。
+/// 一期裁剪后引擎只有 audiocpp 一条路径；老配置残留的 `--backend sherpa` 解析
+/// 不报错（便于构造迁移提示），由 `tts::config::preflight` 明确报「已移除」。
 fn apply_backend_override(
     cfg: &mut crate::tts::config::ResolvedTtsConfig,
     backend: Option<String>,
@@ -479,8 +470,7 @@ fn apply_backend_override(
 ) -> Result<(), String> {
     if let Some(v) = backend.as_deref() {
         cfg.backend = crate::tts::config::TtsBackendKind::parse_str(v)
-            .ok_or_else(|| format!("未知 TTS 后端: {v}（支持 sherpa / audiocpp）"))?;
-        cfg.model_type = crate::tts::config::TtsModelKind::Zipvoice;
+            .ok_or_else(|| format!("未知 TTS 后端: {v}（支持 audiocpp）"))?;
     }
     if let Some(p) = engine_path {
         cfg.engine_path = Some(p);
@@ -825,28 +815,45 @@ mod tests {
                 cmd,
                 TtsCmd::InstallModel {
                     force: true,
-                    model_dir: None,
+                    registry_id: None,
                 }
             )),
+            _ => panic!("Expected InstallModel command"),
+        }
+        // 显式 registry id 透传
+        let cli = Cli::try_parse_from([
+            "test",
+            "tts",
+            "install-model",
+            "--registry-id",
+            "tts-qwen3-17b-base-q8-audiocpp",
+        ])
+        .unwrap();
+        match cli.command.unwrap() {
+            Commands::Tts {
+                cmd: TtsCmd::InstallModel { registry_id, .. },
+            } => {
+                assert_eq!(
+                    registry_id.as_deref(),
+                    Some("tts-qwen3-17b-base-q8-audiocpp")
+                );
+            }
             _ => panic!("Expected InstallModel command"),
         }
     }
 
     #[test]
-    fn test_apply_backend_override_valid_invalid_and_reset_kind() {
+    fn test_apply_backend_override_valid_invalid_and_engine_path() {
         let mut cfg = crate::tts::config::ResolvedTtsConfig::default();
-        // 模拟从 audiocpp 切回 sherpa：残留 Omnivoice kind + Audiocpp 后端
-        cfg.model_type = crate::tts::config::TtsModelKind::Omnivoice;
-        cfg.backend = crate::tts::config::TtsBackendKind::Audiocpp;
 
         // 非法后端报错（含支持列表）
         let err = apply_backend_override(&mut cfg, Some("vllm".to_string()), None).unwrap_err();
         assert!(err.contains("未知 TTS 后端"), "err: {err}");
 
-        // 合法切回 sherpa：backend 复位 + model_type 复位 Zipvoice（sherpa 唯一收录 kind）
-        apply_backend_override(&mut cfg, Some("sherpa".to_string()), None).unwrap();
-        assert_eq!(cfg.backend, crate::tts::config::TtsBackendKind::Sherpa);
-        assert_eq!(cfg.model_type, crate::tts::config::TtsModelKind::Zipvoice);
+        // audiocpp 显式覆盖生效（缺省同为 audiocpp，不改变 model_type）
+        apply_backend_override(&mut cfg, Some("audiocpp".to_string()), None).unwrap();
+        assert_eq!(cfg.backend, crate::tts::config::TtsBackendKind::Audiocpp);
+        assert_eq!(cfg.model_type, crate::tts::config::TtsModelKind::Qwen3Tts06);
 
         // engine_path 透传
         let p = PathBuf::from("/opt/audiocpp_server");

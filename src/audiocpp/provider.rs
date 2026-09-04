@@ -4,8 +4,8 @@
 //!
 //! | triple | 引擎编入后端 | 缺省 provider |
 //! |---|---|---|
-//! | `darwin-aarch64` | Metal | `metal`（omnivoice 0.6B 实测 CPU RTF 6.6 不可用、Metal 0.41 达标，技术方案阶段 1 实测 2026-08-23） |
-//! | `windows-x86_64` | CUDA | `cuda`（上游 VoxCPM2 CUDA 实测 RTF 0.23~0.55；无 N 卡 / 驱动过旧时由 `server::lease` 自动回退 CPU） |
+//! | `darwin-aarch64` | Metal | `metal`（audio.cpp 0.6B 族实测 CPU RTF 6.6 不可用、Metal 0.41 达标，技术方案阶段 1 实测 2026-08-23） |
+//! | `windows-x86_64` | CUDA | `cuda`（上游 CUDA 实测 RTF 0.23~0.55；无 N 卡 / 驱动过旧时由 `server::lease` 自动回退 CPU） |
 //! | `darwin-x86_64` / linux | CPU | `cpu` |
 //!
 //! 用户显式配置（`[tts].provider` / `[asr].provider`）永远优先于本缺省。

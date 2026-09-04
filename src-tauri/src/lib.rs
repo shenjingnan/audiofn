@@ -30,6 +30,9 @@ use zapmomo::model_library::{
 };
 use zapmomo::tts::config::TtsParamsPatch;
 
+/// `download_tts_model` 缺省安装的模型库条目（Qwen3-TTS 0.6B，延迟优先档）。
+const DEFAULT_TTS_REGISTRY_ID: &str = "tts-qwen3-06b-base-q8-audiocpp";
+
 // 文字输入条的 macOS 非激活面板：聚焦输入框不需要激活整个 App（Spotlight 式），
 // 因此「显隐快捷键呼出输入条并聚焦」不会把本应用其它可见窗口（如设置窗）一并
 // 带到最前。可以成为 key window 以接收键盘与中文 IME 输入，但永不成为 main window。
@@ -656,7 +659,7 @@ impl Default for TtsDownloadState {
 /// GUI 展示用的 TTS 配置信息。
 #[derive(Serialize)]
 struct TtsConfigInfo {
-    /// 模型类型（zipvoice/omnivoice/...），前端据此切换音色语义
+    /// 模型类型（qwen3_tts_06/qwen3_tts_17），前端据此切换音色语义
     model_type: String,
     /// 推理后端（sherpa/audiocpp），前端据此显示引擎徽标
     backend: String,
@@ -751,16 +754,12 @@ fn synthesize_inner(
     Ok(())
 }
 
-/// 列出可用音色：克隆族返回参考音色（模型包内置 + 用户自定义音色库；
-/// omnivoice/voxcpm2 无内置仅自定义库）；非克隆模型返回空列表。
+/// 列出可用音色：参考音频克隆模型返回参考音色（模型包内置 + 用户自定义音色库）。
 #[tauri::command]
 fn list_tts_voices() -> Result<Vec<zapmomo::tts::TtsVoice>, String> {
     let settings = zapmomo::config::settings::load_settings()?;
     let tts_settings = settings.as_ref().and_then(|s| s.tts.clone());
     let cfg = zapmomo::tts::config::resolve(tts_settings.as_ref(), None)?;
-    if !cfg.model_type.uses_reference_audio() {
-        return Ok(Vec::new());
-    }
     let mut voices = zapmomo::tts::voice::list_builtin_voices(&cfg.model_dir);
     voices.extend(zapmomo::tts::voice_store::list_custom_voices());
     Ok(voices)
@@ -825,14 +824,12 @@ async fn transcribe_reference_audio(wav_path: String) -> Result<String, String> 
 ///
 /// 校验模型文件后启动独立线程合成，进度经 `tts-progress` 事件推给前端；
 /// 完成后发 `tts-result`（含 wav 路径），线程末发 `tts-stopped`。
-#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 fn synthesize_tts(
     app: AppHandle,
     state: State<'_, TtsSynthesizeState>,
     text: String,
     speed: Option<f32>,
-    sid: Option<i32>,
     voice: Option<String>,
     reference_wav: Option<String>,
     reference_text: Option<String>,
@@ -862,13 +859,12 @@ fn synthesize_tts(
         )
     })?;
 
-    // 合成音色参数统一解析（克隆 > sid > audiocpp 具名，见 zapmomo::tts::voice）。
-    // 用户显式参数（音色/自定义参考音频）优先；在后台线程外解析，尽早报错。
+    // 合成音色参数统一解析（见 zapmomo::tts::voice）。用户显式参数
+    // （音色/自定义参考音频）优先；在后台线程外解析，尽早报错。
     let custom_wav = reference_wav.map(std::path::PathBuf::from);
     let voice_params = zapmomo::tts::voice::resolve_voice_params(
         &cfg,
         voice.as_deref(),
-        sid,
         custom_wav.as_deref(),
         reference_text.as_deref(),
     )?;
@@ -924,7 +920,7 @@ fn is_tts_synthesizing(state: State<'_, TtsSynthesizeState>) -> bool {
     state.is_synthesizing()
 }
 
-/// 下载并安装 TTS 模型（主包 + 声码器，默认 `~/.zapmomo/models/<模型名>`）。
+/// 下载并安装 TTS 模型（缺省 Qwen3-TTS 0.6B，`~/.zapmomo/models/<模型名>`）。
 ///
 /// 防重入；下载在阻塞线程池执行，进度经 `tts-model-download-progress` 事件推给前端。
 #[tauri::command]
@@ -936,16 +932,18 @@ async fn download_tts_model(
     if flag.swap(true, Ordering::SeqCst) {
         return Err("模型下载已在进行中，请稍候".to_string());
     }
-    let dest = zapmomo::tts::user_model_dir();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let mut progress = |p: zapmomo::tts::DownloadProgress| {
+        let model =
+            zapmomo::model_library::registry::model_for_current_platform(DEFAULT_TTS_REGISTRY_ID)
+                .ok_or_else(|| format!("未知的模型库条目: {DEFAULT_TTS_REGISTRY_ID}"))?;
+        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
-                zapmomo::tts::DownloadStage::Downloading => "downloading",
-                zapmomo::tts::DownloadStage::Verifying => "verifying",
-                zapmomo::tts::DownloadStage::Extracting => "extracting",
-                zapmomo::tts::DownloadStage::Done => "done",
+                zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
+                zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
+                zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
+                zapmomo::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
                 "tts-model-download-progress",
@@ -956,8 +954,8 @@ async fn download_tts_model(
                 },
             );
         };
-        zapmomo::tts::install_model_to(&dest, false, &mut progress).map_err(|e| e.to_string())?;
-        zapmomo::tts::install_vocoder_to(&dest, false, &mut progress).map_err(|e| e.to_string())?;
+        zapmomo::model_library::install_managed_model(model, &mut progress, None)
+            .map_err(|e| e.to_string())?;
         Ok(())
     })
     .await

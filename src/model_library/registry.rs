@@ -60,7 +60,7 @@ pub struct RegistryModel {
     pub display_name: String,
     #[serde(rename = "model_type")]
     pub model_type: ModelType,
-    /// TTS 子类型（zipvoice/omnivoice/...；仅 `model_type == Tts` 有意义，其余为 None）
+    /// TTS 子类型（qwen3_tts_06/qwen3_tts_17；仅 `model_type == Tts` 有意义，其余为 None）
     #[serde(default)]
     pub tts_kind: Option<TtsModelKind>,
     /// ASR 子类型（zipformer/sensevoice/whisper；仅 `model_type == Asr` 有意义，其余为 None）
@@ -220,10 +220,6 @@ pub fn required_files_for_role(role: &str) -> &'static [&'static str] {
         // 所有 streaming zipformer ASR（含每个 ASR 的唯一 role）共用同一组 4 文件
         r if r == "asr" || r.starts_with("asr-") => &crate::asr::config::REQUIRED_FILES,
         "punctuation" => &crate::asr::config::PUNCT_REQUIRED_FILES,
-        "tts" => &crate::tts::config::REQUIRED_FILES,
-        "tts-vocoder" => &[crate::tts::config::DEFAULT_VOCODER],
-        "tts-audiocpp-omnivoice" => &[crate::audiocpp::families::OMNIVOICE.gguf_file],
-        "tts-audiocpp-voxcpm2" => &[crate::audiocpp::families::VOXCPM2.gguf_file],
         // Qwen3-TTS 两尺寸（音色克隆）：钉死各自 gguf 主文件名
         "tts-audiocpp-qwen3-06b" => &[crate::audiocpp::families::QWEN3_TTS_06B.gguf_file],
         "tts-audiocpp-qwen3-17b" => &[crate::audiocpp::families::QWEN3_TTS_17B.gguf_file],
@@ -314,8 +310,6 @@ mod tests {
     fn test_required_files_for_role() {
         assert_eq!(required_files_for_role("asr").len(), 4);
         assert_eq!(required_files_for_role("punctuation").len(), 1);
-        assert_eq!(required_files_for_role("tts").len(), 5); // 含 vocoder
-        assert_eq!(required_files_for_role("tts-vocoder").len(), 1);
         assert_eq!(required_files_for_role("wake-word").len(), 5);
         // 新离线 ASR：精确 role 优先于 asr-* 通配
         assert_eq!(required_files_for_role("asr-sensevoice").len(), 2);
@@ -365,14 +359,6 @@ mod tests {
     #[test]
     fn test_registry_tts_kind() {
         assert_eq!(
-            registry_tts_kind("tts-zipvoice-distill-int8"),
-            Some(TtsModelKind::Zipvoice)
-        );
-        assert_eq!(
-            registry_tts_kind("tts-omnivoice-q8-audiocpp"),
-            Some(TtsModelKind::Omnivoice)
-        );
-        assert_eq!(
             registry_tts_kind("tts-qwen3-06b-base-q8-audiocpp"),
             Some(TtsModelKind::Qwen3Tts06)
         );
@@ -380,7 +366,20 @@ mod tests {
             registry_tts_kind("tts-qwen3-17b-base-q8-audiocpp"),
             Some(TtsModelKind::Qwen3Tts17)
         );
-        // 已移除的 vits/matcha/kokoro/pocket 条目不再收录
+        // 一期已移除、但 JSON 尚未裁剪的 TTS 条目（JSON 裁剪在模型清单任务）：
+        // kind 反序列化回落默认 0.6B（与 settings 老值迁移语义一致）
+        for id in [
+            "tts-zipvoice-distill-int8",
+            "tts-omnivoice-q8-audiocpp",
+            "tts-voxcpm2-q8-audiocpp",
+        ] {
+            assert_eq!(
+                model_by_id(id).and_then(|m| m.tts_kind),
+                Some(TtsModelKind::Qwen3Tts06),
+                "{id} 已移除条目回落默认 kind"
+            );
+        }
+        // 更早已从 registry 移除的 vits/matcha/kokoro/pocket 条目：查不到 → None
         for id in [
             "tts-vits-melo-zh-en",
             "tts-matcha-zh-baker",

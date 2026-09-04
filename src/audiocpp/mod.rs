@@ -1,4 +1,4 @@
-/// audio.cpp sidecar 集成（TTS/ASR 第二后端）。
+/// audio.cpp sidecar 集成（TTS/ASR 统一推理后端）。
 ///
 /// audio.cpp（Apache-2.0，ggml 系）作为独立进程 `audiocpp_server` 运行，暴露
 /// OpenAI 风格 HTTP API（`/health`、`/v1/models`、`/v1/audio/speech`、
@@ -6,9 +6,8 @@
 /// config 生成（server_config）、进程生命周期管理（server，lease + 按配置指纹
 /// 多实例并存 + 健康轮询 + 懒重启）、HTTP 客户端与 wav 编解码（client）。
 ///
-/// 与 sherpa-onnx 进程内引擎的边界：[`crate::tts::TtsEngine`] 门面按
-/// `ResolvedTtsConfig.backend` 分派，ASR 侧由 `voice::asr_backend::AsrBackend`
-/// 按 `ResolvedAsrConfig.backend` 分派，本模块不接触 sherpa 类型。
+/// 引擎边界：[`crate::tts::TtsEngine`] 门面（TTS）与 `asr::offline`（ASR）都经
+/// 本模块的客户端发起推理，本模块不接触具体推理实现。
 ///
 /// 模型族差异统一收敛在描述表：TTS 见 [`families`]（音色语义等），ASR 见
 /// [`asr_families`]；任务中立的实例规格见 [`server_config::ServerInstanceSpec`]。

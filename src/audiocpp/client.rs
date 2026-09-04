@@ -93,7 +93,7 @@ impl AudiocppTts {
             "model": self.desc.model_id,
             "input": text,
         });
-        // 族差异请求选项（voxcpm2 的 retry_badcase 对整段路径同样是硬约束）
+        // 族差异请求选项（当前收录族为空对象；二期加族在此收敛硬约束）
         let options = self.desc.request_options();
         if options.as_object().is_some_and(|m| !m.is_empty()) {
             body["options"] = options;
@@ -148,7 +148,7 @@ impl AudiocppTts {
                 self.desc.model_id.to_string(),
             ));
         }
-        // 流式 options = 族差异项（voxcpm2 的 retry_badcase 等）+ 文本分块粒度
+        // 流式 options = 族差异项（当前收录族为空对象）+ 文本分块粒度
         // （粒度是伪流式族的收益充要条件；帧级流式族忽略亦无害）
         let mut options = self.desc.request_options();
         options["text_chunk_size"] = serde_json::json!(STREAM_TEXT_CHUNK_SIZE);
@@ -337,10 +337,10 @@ pub(crate) fn encode_wav(samples: &[f32], sample_rate: i32) -> Result<Vec<u8>, A
 
 /// 把音色参数按族语义映射进请求体（整段与流式两条路径共用）。
 ///
-/// - 参考音频克隆（omnivoice/voxcpm2）：`Reference` → `voice_ref`+`reference_text`
+/// - 参考音频克隆（二期加族的语义分支）：`Reference` → `voice_ref`+`reference_text`
 ///   （本地路径，sidecar 同机可读）；`Named` → 视 `allows_named_voice` 透传
-///   `voice`（omnivoice 走 server 端 preset/voice_dir 通道）或提前拦截（voxcpm2
-///   上游仅接受 speaker reference）；`Sid` → 省略 voice 字段（server auto voice）；
+///   `voice`（server 端 preset/voice_dir 通道）或提前拦截（上游仅接受 speaker
+///   reference）；`Sid` → 省略 voice 字段（server auto voice）；
 /// - 强制参考音频克隆（qwen3_tts Base）：`Reference` → 同款 `voice_ref`+
 ///   `reference_text` 映射；`Sid`/`Named` 一律提前拦截给中文文案（上游无 auto
 ///   voice、仅接受 speaker reference，放过即 server 端报错）。
@@ -481,27 +481,27 @@ mod tests {
     use super::*;
     use crate::tts::config::TtsBackendKind;
 
-    fn omnivoice_cfg() -> ResolvedTtsConfig {
-        ResolvedTtsConfig {
-            backend: TtsBackendKind::Audiocpp,
-            model_type: crate::tts::config::TtsModelKind::Omnivoice,
-            ..ResolvedTtsConfig::default()
-        }
-    }
-
-    fn voxcpm2_cfg() -> ResolvedTtsConfig {
-        ResolvedTtsConfig {
-            backend: TtsBackendKind::Audiocpp,
-            model_type: crate::tts::config::TtsModelKind::Voxcpm2,
-            ..ResolvedTtsConfig::default()
-        }
-    }
-
     fn qwen3_06_cfg() -> ResolvedTtsConfig {
         ResolvedTtsConfig {
             backend: TtsBackendKind::Audiocpp,
             model_type: crate::tts::config::TtsModelKind::Qwen3Tts06,
             ..ResolvedTtsConfig::default()
+        }
+    }
+
+    fn qwen3_17_cfg() -> ResolvedTtsConfig {
+        ResolvedTtsConfig {
+            backend: TtsBackendKind::Audiocpp,
+            model_type: crate::tts::config::TtsModelKind::Qwen3Tts17,
+            ..ResolvedTtsConfig::default()
+        }
+    }
+
+    /// 克隆族参考音色参数（Base 版必须，请求体只携带路径字符串，无需真实文件）。
+    fn clone_voice() -> TtsVoiceParams {
+        TtsVoiceParams::Reference {
+            wav_path: std::path::PathBuf::from("/voices/me.wav"),
+            reference_text: "参考转写".into(),
         }
     }
 
@@ -587,62 +587,33 @@ mod tests {
     #[test]
     fn test_synthesize_against_stub_full_request_flow() {
         let (base_url, received, _handle) = spawn_stub();
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
-        let out = tts
-            .synthesize(
-                "hello world",
-                1.0,
-                &TtsVoiceParams::Named("demo_01_man".into()),
-            )
-            .unwrap();
+        let tts = AudiocppTts::new_with_base_url(qwen3_06_cfg(), &base_url);
+        let out = tts.synthesize("hello world", 1.0, &clone_voice()).unwrap();
         assert_eq!(out.len(), 2400);
         assert_eq!(tts.sample_rate(), 24000, "首响应校准采样率");
-        // 请求体断言：OpenAI 风格三件套（具名音色经 omnivoice preset 通道透传）
+        // 请求体断言：model/input + voice_ref/reference_text（克隆族映射）
         let reqs = received.lock().unwrap();
         let last = reqs.last().unwrap();
-        assert_eq!(last["model"], "omnivoice");
+        assert_eq!(last["model"], "qwen3-tts-0.6b");
         assert_eq!(last["input"], "hello world");
-        assert_eq!(last["voice"], "demo_01_man");
-    }
-
-    /// omnivoice（克隆族）请求体三态：Reference → voice_ref+reference_text；
-    /// Named → voice 透传；Sid → 无 voice 字段（server auto voice）。
-    #[test]
-    fn test_synthesize_omnivoice_request_body() {
-        let (base_url, received, _handle) = spawn_stub();
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
-
-        tts.synthesize(
-            "x",
-            1.0,
-            &TtsVoiceParams::Reference {
-                wav_path: std::path::PathBuf::from("/voices/me.wav"),
-                reference_text: "参考转写".into(),
-            },
-        )
-        .unwrap();
-        let reqs = received.lock().unwrap();
-        let last = reqs.last().unwrap();
-        assert_eq!(last["model"], "omnivoice", "model 字段按族");
         assert_eq!(
             last["voice_ref"].as_str().unwrap().replace('\\', "/"),
             "/voices/me.wav"
         );
         assert_eq!(last["reference_text"], "参考转写");
-        assert!(last.get("voice").is_none(), "Reference 不应带 voice 字段");
-        drop(reqs);
+    }
 
-        tts.synthesize("x", 1.0, &TtsVoiceParams::Named("demo_01_man".into()))
-            .unwrap();
-        let last = received.lock().unwrap().last().unwrap().clone();
-        assert_eq!(last["voice"], "demo_01_man", "Named 透传 voice");
-        assert!(last.get("voice_ref").is_none());
-
-        tts.synthesize("x", 1.0, &TtsVoiceParams::Sid(0)).unwrap();
-        let last = received.lock().unwrap().last().unwrap().clone();
+    /// 1.7B 尺寸走族表各自 model_id。
+    #[test]
+    fn test_synthesize_uses_17b_model_id() {
+        let (base_url, received, _handle) = spawn_stub();
+        let tts = AudiocppTts::new_with_base_url(qwen3_17_cfg(), &base_url);
+        tts.synthesize("你好", 1.0, &clone_voice()).unwrap();
+        let body = received.lock().unwrap().last().unwrap().clone();
+        assert_eq!(body["model"], "qwen3-tts-1.7b");
         assert!(
-            last.get("voice").is_none() && last.get("voice_ref").is_none(),
-            "Sid 省略全部音色字段（auto voice）"
+            body.get("options").is_none() || body["options"].get("text_chunk_size").is_none(),
+            "整段路径不携带流式分块粒度"
         );
     }
 
@@ -652,7 +623,7 @@ mod tests {
         let (base_url, received, _handle) = spawn_stub();
         let tts = AudiocppTts::new_with_base_url(qwen3_06_cfg(), &base_url);
 
-        // Reference -> voice_ref + reference_text（与 omnivoice 同款映射）
+        // Reference -> voice_ref + reference_text（克隆族统一映射）
         tts.synthesize(
             "你好",
             1.0,
@@ -683,21 +654,12 @@ mod tests {
         assert!(err.contains("参考音频克隆"), "err: {err}");
     }
 
-    /// 非法组合（sherpa kind + audiocpp 后端）在构造期报错，不发起连接。
-    #[test]
-    fn test_new_rejects_sherpa_kind() {
-        let mut cfg = ResolvedTtsConfig::default();
-        cfg.backend = TtsBackendKind::Audiocpp; // model_type 缺省 Zipvoice
-        let err = lookup_desc(&cfg).unwrap_err();
-        assert!(err.contains("不支持 audiocpp 后端"), "err: {err}");
-    }
-
     #[test]
     fn test_synthesize_speed_applies_resampling() {
         let (base_url, _received, _handle) = spawn_stub();
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
+        let tts = AudiocppTts::new_with_base_url(qwen3_06_cfg(), &base_url);
         // stub 返回 2400 样本（24000Hz 即 0.1s）；speed 2.0 → ≈1200 样本
-        let out = tts.synthesize("x", 2.0, &TtsVoiceParams::Sid(0)).unwrap();
+        let out = tts.synthesize("x", 2.0, &clone_voice()).unwrap();
         assert!(
             (out.len() as i64 - 1200).abs() <= 8,
             "speed 2.0 len={}",
@@ -708,10 +670,8 @@ mod tests {
     #[test]
     fn test_synthesize_connection_refused_reports_connection() {
         // 连一个必然未监听的端口 → Connection 错误文案
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), "http://127.0.0.1:1");
-        let err = tts
-            .synthesize("x", 1.0, &TtsVoiceParams::Sid(0))
-            .unwrap_err();
+        let tts = AudiocppTts::new_with_base_url(qwen3_06_cfg(), "http://127.0.0.1:1");
+        let err = tts.synthesize("x", 1.0, &clone_voice()).unwrap_err();
         assert!(err.contains("无法连接 audiocpp_server"), "err: {err}");
     }
 
@@ -742,197 +702,6 @@ mod tests {
         assert!(e.to_user_message().contains("流式合成被服务端中断"));
     }
 
-    // ---------- SSE 流式（tiny_http stub，事件格式对齐阶段 1 实测 dump） ----------
-
-    /// i16 样本 → SSE delta 事件行（`{"type":"speech.audio.delta","audio":<base64>}`）。
-    fn sse_delta(samples: &[i16]) -> String {
-        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-        format!(
-            "data: {}\n\n",
-            serde_json::json!({"type": "speech.audio.delta", "audio": b64})
-        )
-    }
-
-    /// 起 SSE stub：/v1/audio/speech 返回固定事件流（Content-Type: text/event-stream），
-    /// 记录（请求体, Accept 头）。返回 (base_url, 记录列表, 线程句柄)。
-    fn spawn_stub_sse(
-        events: String,
-    ) -> (
-        String,
-        std::sync::Arc<std::sync::Mutex<Vec<(serde_json::Value, Option<String>)>>>,
-        std::thread::JoinHandle<()>,
-    ) {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let port = match server.server_addr() {
-            tiny_http::ListenAddr::IP(addr) => addr.port(),
-            #[cfg(unix)]
-            tiny_http::ListenAddr::Unix(_) => unreachable!("显式绑定 127.0.0.1"),
-        };
-        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let received_clone = received.clone();
-        let handle = std::thread::spawn(move || {
-            for mut request in server.incoming_requests() {
-                let mut body = String::new();
-                let _ = std::io::Read::read_to_string(request.as_reader(), &mut body);
-                let accept = request
-                    .headers()
-                    .iter()
-                    .find(|h| h.field.equiv("Accept"))
-                    .map(|h| h.value.as_str().to_string());
-                let json: serde_json::Value =
-                    serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
-                received_clone.lock().unwrap().push((json, accept));
-                if request.url() == "/v1/audio/speech" {
-                    let header = tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"text/event-stream"[..],
-                    )
-                    .unwrap();
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(events.clone()).with_header(header),
-                    );
-                } else {
-                    let _ = request
-                        .respond(tiny_http::Response::from_string("nf").with_status_code(404));
-                }
-            }
-        });
-        (format!("http://127.0.0.1:{port}"), received, handle)
-    }
-
-    /// 三块 PCM + done + [DONE] 的标准事件流（块样本数递增便于断言块序）。
-    fn standard_events() -> String {
-        let mut s = String::new();
-        for n in [240u16, 480, 960] {
-            s.push_str(&sse_delta(&vec![100i16; n as usize]));
-        }
-        s.push_str("data: {\"type\":\"speech.audio.done\",\"timing\":{\"ttft_ms\":1}}\n\n");
-        s.push_str("data: [DONE]\n\n");
-        s
-    }
-
-    /// 全链路：请求体（stream 字段/粒度/音色省略）+ Accept 头 + 块序 + 采样率。
-    #[test]
-    fn test_synthesize_streaming_full_flow_omnivoice() {
-        let (base_url, received, _handle) = spawn_stub_sse(standard_events());
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
-        assert!(tts.supports_streaming());
-
-        let mut chunks = Vec::new();
-        tts.synthesize_streaming("你好", &TtsVoiceParams::Sid(0), &mut |samples, rate| {
-            chunks.push((samples.len(), rate));
-            true
-        })
-        .unwrap();
-
-        // 块序即 SSE 事件序，样本数按 i16 归一（每 i16 → 1 f32）
-        assert_eq!(
-            chunks,
-            vec![(240, 24000), (480, 24000), (960, 24000)],
-            "三块按序回调"
-        );
-        let reqs = received.lock().unwrap();
-        let (body, accept) = reqs.last().unwrap();
-        assert_eq!(body["model"], "omnivoice");
-        assert_eq!(body["input"], "你好");
-        assert_eq!(body["response_format"], "pcm");
-        assert_eq!(body["stream_format"], "sse");
-        assert_eq!(body["options"]["text_chunk_size"], 40, "粒度是收益充要条件");
-        assert!(
-            body.get("voice").is_none() && body.get("voice_ref").is_none(),
-            "Sid 省略全部音色字段"
-        );
-        assert_eq!(accept.as_deref(), Some("text/event-stream"));
-    }
-
-    /// 克隆语义映射复用：Reference → voice_ref + reference_text。
-    #[test]
-    fn test_synthesize_streaming_voice_ref_mapping() {
-        let (base_url, received, _handle) = spawn_stub_sse(standard_events());
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
-        tts.synthesize_streaming(
-            "克隆",
-            &TtsVoiceParams::Reference {
-                wav_path: std::path::PathBuf::from("/voices/me.wav"),
-                reference_text: "参考转写".into(),
-            },
-            &mut |_, _| true,
-        )
-        .unwrap();
-        let (body, _) = received.lock().unwrap().last().unwrap().clone();
-        assert_eq!(
-            body["voice_ref"].as_str().unwrap().replace('\\', "/"),
-            "/voices/me.wav"
-        );
-        assert_eq!(body["reference_text"], "参考转写");
-    }
-
-    /// 协作取消：回调首块返回 false → Ok(()) 且不再回调（drop Response 断连接）。
-    #[test]
-    fn test_synthesize_streaming_cooperative_cancel() {
-        let (base_url, _received, _handle) = spawn_stub_sse(standard_events());
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
-        let mut calls = 0;
-        tts.synthesize_streaming("x", &TtsVoiceParams::Sid(0), &mut |_, _| {
-            calls += 1;
-            false
-        })
-        .unwrap();
-        assert_eq!(calls, 1, "首块取消后不再回调");
-    }
-
-    /// 流内错误事件（busy_timeout 等）→ StreamEvent。
-    #[test]
-    fn test_synthesize_streaming_error_event() {
-        let events = format!(
-            "{}data: {}\n\n",
-            sse_delta(&[0i16; 8]),
-            serde_json::json!({"type": "error", "message": "busy timeout"})
-        );
-        let (base_url, _received, _handle) = spawn_stub_sse(events);
-        let tts = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base_url);
-        let err = tts
-            .synthesize_streaming("x", &TtsVoiceParams::Sid(0), &mut |_, _| true)
-            .unwrap_err();
-        assert!(matches!(err, AudiocppError::StreamEvent(_)));
-        assert!(err.to_user_message().contains("busy timeout"));
-    }
-
-    /// 非 2xx（offline-mode server 拒绝 SSE 的实测形态）→ HttpStatus。
-    #[test]
-    fn test_synthesize_streaming_http_error() {
-        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let port = match server.server_addr() {
-            tiny_http::ListenAddr::IP(addr) => addr.port(),
-            #[cfg(unix)]
-            tiny_http::ListenAddr::Unix(_) => unreachable!("显式绑定 127.0.0.1"),
-        };
-        std::thread::spawn(move || {
-            for request in server.incoming_requests() {
-                let _ = request
-                    .respond(tiny_http::Response::from_string("no stream").with_status_code(500));
-            }
-        });
-        let tts =
-            AudiocppTts::new_with_base_url(omnivoice_cfg(), &format!("http://127.0.0.1:{port}"));
-        let err = tts
-            .synthesize_streaming("x", &TtsVoiceParams::Sid(0), &mut |_, _| true)
-            .unwrap_err();
-        assert!(matches!(err, AudiocppError::HttpStatus { status: 500, .. }));
-    }
-
-    /// 非流式族（qwen3_tts）：连接前拦截 → StreamingUnsupported。
-    #[test]
-    fn test_synthesize_streaming_qwen3_unsupported() {
-        let tts = AudiocppTts::new_with_base_url(qwen3_06_cfg(), "http://127.0.0.1:1");
-        assert!(!tts.supports_streaming());
-        let err = tts
-            .synthesize_streaming("x", &TtsVoiceParams::Sid(0), &mut |_, _| true)
-            .unwrap_err();
-        assert!(matches!(err, AudiocppError::StreamingUnsupported(_)));
-    }
-
     /// pcm 解码往返：已知 i16 LE 字节 → base64 → f32 ≈ v/32768。
     #[test]
     fn test_decode_pcm_chunk_roundtrip() {
@@ -954,51 +723,6 @@ mod tests {
         // "QQ==" = 1 字节 0x41（非 2 字节对齐）
         let err = decode_pcm_chunk("QQ==").unwrap_err();
         assert!(matches!(err, AudiocppError::DecodeWav(_)));
-    }
-
-    // ---------- VoxCPM2：retry_badcase 硬约束 + Named 拦截 + 48kHz ----------
-
-    /// voxcpm2 流式请求体：族选项 retry_badcase=false 与 text_chunk_size 并存，
-    /// 分块回调携带族采样率 48kHz。
-    #[test]
-    fn test_synthesize_streaming_voxcpm2_options() {
-        let (base_url, received, _handle) = spawn_stub_sse(standard_events());
-        let tts = AudiocppTts::new_with_base_url(voxcpm2_cfg(), &base_url);
-        let mut rates = Vec::new();
-        tts.synthesize_streaming("你好", &TtsVoiceParams::Sid(0), &mut |_s, rate| {
-            rates.push(rate);
-            true
-        })
-        .unwrap();
-        assert!(rates.iter().all(|&r| r == 48_000), "voxcpm2 族采样率 48k");
-        let (body, _) = received.lock().unwrap().last().unwrap().clone();
-        assert_eq!(body["model"], "voxcpm2");
-        assert_eq!(body["options"]["retry_badcase"], false, "上游硬约束");
-        assert_eq!(body["options"]["text_chunk_size"], 40);
-        // omnivoice 不应携带 retry_badcase（族差异项隔离）
-        let (base2, recv2, _h2) = spawn_stub_sse(standard_events());
-        let omni = AudiocppTts::new_with_base_url(omnivoice_cfg(), &base2);
-        omni.synthesize_streaming("x", &TtsVoiceParams::Sid(0), &mut |_, _| true)
-            .unwrap();
-        let (body2, _) = recv2.lock().unwrap().last().unwrap().clone();
-        assert!(body2["options"].get("retry_badcase").is_none());
-    }
-
-    /// voxcpm2 整段请求体也带 retry_badcase（streaming-mode server 下非流式
-    /// 同样必须，阶段 1 实测 500）；Named 具名音色提前拦截。
-    #[test]
-    fn test_synthesize_voxcpm2_plain_options_and_named_intercept() {
-        let (base_url, received, _handle) = spawn_stub();
-        let tts = AudiocppTts::new_with_base_url(voxcpm2_cfg(), &base_url);
-        tts.synthesize("你好", 1.0, &TtsVoiceParams::Sid(0))
-            .unwrap();
-        let body = received.lock().unwrap().last().unwrap().clone();
-        assert_eq!(body["options"]["retry_badcase"], false, "整段路径同样必带");
-        // Named → 提前拦截（上游仅接受 speaker reference，阶段 1 实测 server 拒绝）
-        let err = tts
-            .synthesize("x", 1.0, &TtsVoiceParams::Named("demo".into()))
-            .unwrap_err();
-        assert!(err.contains("仅支持参考音频克隆"), "err: {err}");
     }
 
     // ---------- ASR：AudiocppAsr /v1/audio/transcriptions ----------

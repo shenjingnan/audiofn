@@ -310,10 +310,8 @@ pub fn write_wav_f32(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<(
 
 /// 读任意 wav 为 mono f32 样本 + 采样率（`write_wav_f32` 的逆操作）。
 ///
-/// 解码规则与 `companion::convert_reference_to_mono` 一致：Int 按位宽归一、
-/// Float 直读、多声道按帧平均混音。供欢迎语预合成音频等「存盘 wav 再喂播放器」
-/// 的路径使用——`Speaker::play` 只接受 f32 采样，播放时采样率按文件自带值传，
-/// 与合成路径同构（rodio 侧采样率适配行为一致）。
+/// 解码规则：Int 按位宽归一、Float 直读、多声道按帧平均混音。供「存盘 wav
+/// 再读取分析」的路径使用（采样率按文件自带值回传，与合成路径同构）。
 pub fn read_wav_mono(path: &Path) -> Result<(Vec<f32>, u32), String> {
     let mut reader = hound::WavReader::open(path)
         .map_err(|e| format!("无法解码音频（{}）: {e}", path.display()))?;

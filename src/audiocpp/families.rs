@@ -2,16 +2,19 @@
 //!
 //! 每个接入 audio.cpp sidecar 的 TTS 模型族一条 [`AudiocppFamilyDesc`] 记录，
 //! 取代此前散落在 `mod.rs` 常量 / `tts::config::preflight` / `server_config` /
-//! `client` 各处的 pocket 单模型硬编码。新增模型族 = 本表加一条记录 +
-//! registry/manifest 各一个条目 + 前端 preset 一条（技术方案 §4.3）。
+//! `client` 各处的 pocket 单模型硬编码。一期只收录 Qwen3-TTS 两个尺寸；
+//! 新增模型族 = 本表加一条记录 + registry/manifest 各一个条目 + 前端 preset 一条
+//! （技术方案 §4.3）。
 
 use crate::tts::config::TtsModelKind;
+use std::path::Path;
 
 /// 音色语义（决定 [`crate::tts::TtsVoiceParams`] 到请求体字段的映射，见 client）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoiceSemantics {
-    /// 参考音频克隆（omnivoice/voxcpm2）：`Reference` → `voice_ref`+`reference_text`；
-    /// `Named` → 透传 `voice`；`Sid`/缺省 → 省略 voice 字段（server auto voice）。
+    /// 参考音频克隆（当前未收录，为二期加族保留的语义分支）：`Reference` →
+    /// `voice_ref`+`reference_text`；`Named` → 透传 `voice`；
+    /// `Sid`/缺省 → 省略 voice 字段（server auto voice）。
     ReferenceClone,
     /// 强制参考音频克隆（qwen3_tts Base）：与 [`VoiceSemantics::ReferenceClone`]
     /// 同款 `voice_ref`+`reference_text` 映射，但 `Sid`/缺省**必须拦截**--
@@ -36,8 +39,9 @@ pub struct AudiocppFamilyDesc {
     /// 音色语义。
     pub voice_semantics: VoiceSemantics,
     /// 是否透传 `Named` 具名音色（ReferenceClone 族的差异项）：omnivoice 支持
-    /// （server 端 preset/voice_dir 通道）；voxcpm2/qwen3_tts 上游仅接受 speaker
+    /// （server 端 preset/voice_dir 通道）；qwen3_tts 上游仅接受 speaker
     /// reference，具名请求会被 server 拒绝——client 据此提前拦截并给中文文案。
+    /// 当前收录族恒 false，保留字段作为二期加族的差异项扩展点。
     pub allows_named_voice: bool,
     /// 是否支持 SSE 伪流式（server config `mode` 与请求体 `stream_format` 的依据）。
     /// 流式矩阵（audio.cpp release-0.6.1 实测/README）：omnivoice ✅、voxcpm2 ✅、
@@ -45,6 +49,7 @@ pub struct AudiocppFamilyDesc {
     /// （`OfflineTts` 整段合成，无 sidecar 语义）。
     /// offline-mode server 会拒绝 SSE 请求（实测 HTTP 500），故该标记同时决定
     /// server config 的 `mode:"streaming"` 翻转——两者必须同源。
+    /// 当前收录族恒 false，保留字段作为二期加流的差异项扩展点。
     pub supports_streaming: bool,
     /// preflight 缺文件时的安装提示命令。
     pub registry_hint: &'static str,
@@ -59,48 +64,13 @@ impl AudiocppFamilyDesc {
 
     /// 请求体 `options` 的族差异项（整段与流式两路径都携带）。
     ///
-    /// voxcpm2 必须 `"retry_badcase": false`：上游约束（重试已完成 bad case 是
-    /// offline-only 行为），且阶段 1 实测 streaming-mode server 下**非流式请求
-    /// 同样必须携带**（缺省 500）——因此收敛在本方法而非流式专用路径。
+    /// 当前收录的 qwen3_tts 族无族差异项（恒空对象）。此前 voxcpm2 的
+    /// `"retry_badcase": false` 硬约束随该族一并移除——二期加族若上游有类似
+    /// offline-only 约束，收敛在本方法而非流式专用路径。
     pub fn request_options(&self) -> serde_json::Value {
-        match self.family {
-            "voxcpm2" => serde_json::json!({ "retry_badcase": false }),
-            _ => serde_json::json!({}),
-        }
+        serde_json::json!({})
     }
 }
-
-/// OmniVoice q8_0（Qwen3-0.6B 基座，600+ 语种零样本克隆 + 声音设计）。
-///
-/// 单文件 GGUF（generator 与 audio_tokenizer 双权重内嵌，无 embeddings 副件）。
-pub const OMNIVOICE: AudiocppFamilyDesc = AudiocppFamilyDesc {
-    model_id: "omnivoice",
-    family: "omnivoice",
-    gguf_file: "omnivoice-q8_0.gguf",
-    required_files: &["omnivoice-q8_0.gguf"],
-    sample_rate: 24_000,
-    voice_semantics: VoiceSemantics::ReferenceClone,
-    allows_named_voice: true,
-    supports_streaming: true,
-    registry_hint: "zapmomo tts install-model --registry-id tts-omnivoice-q8-audiocpp",
-};
-
-/// VoxCPM2 q8_0（OpenBMB MiniCPM-4 2B 基座，48kHz 录音室级 + 30 语种克隆）。
-///
-/// 单文件 GGUF（权重与 AudioVAE V2 内嵌）。流式为**音频帧级**（实测 0.16s/块连续
-/// 吐出、首块 0.36s），与 omnivoice 的文本块伪流式不同；`options.retry_badcase=false`
-/// 为硬约束（见 [`AudiocppFamilyDesc::request_options`]）。
-pub const VOXCPM2: AudiocppFamilyDesc = AudiocppFamilyDesc {
-    model_id: "voxcpm2",
-    family: "voxcpm2",
-    gguf_file: "voxcpm2-q8_0.gguf",
-    required_files: &["voxcpm2-q8_0.gguf"],
-    sample_rate: 48_000,
-    voice_semantics: VoiceSemantics::ReferenceClone,
-    allows_named_voice: false,
-    supports_streaming: true,
-    registry_hint: "zapmomo tts install-model --registry-id tts-voxcpm2-q8-audiocpp",
-};
 
 /// Qwen3-TTS 0.6B Base q8_0（10 语种 3 秒音色克隆，24kHz）。
 ///
@@ -135,69 +105,57 @@ pub const QWEN3_TTS_17B: AudiocppFamilyDesc = AudiocppFamilyDesc {
     registry_hint: "zapmomo tts install-model --registry-id tts-qwen3-17b-base-q8-audiocpp",
 };
 
-/// 按模型类型查表；sherpa-only kind 返回 None（audiocpp 后端不支持该组合）。
+/// 已收录模型族全表（目录 GGUF 探测与覆盖断言共用）。
+pub const ALL_FAMILIES: &[&AudiocppFamilyDesc] = &[&QWEN3_TTS_06B, &QWEN3_TTS_17B];
+
+/// 按模型类型查表；未收录 kind 返回 None（audiocpp 后端不支持该组合）。
 pub fn family_desc(kind: TtsModelKind) -> Option<&'static AudiocppFamilyDesc> {
     match kind {
-        TtsModelKind::Omnivoice => Some(&OMNIVOICE),
-        TtsModelKind::Voxcpm2 => Some(&VOXCPM2),
         TtsModelKind::Qwen3Tts06 => Some(&QWEN3_TTS_06B),
         TtsModelKind::Qwen3Tts17 => Some(&QWEN3_TTS_17B),
-        _ => None,
     }
+}
+
+/// 目录内按 GGUF 主文件名探测 audiocpp TTS 族（模型库完整性/安装态判断用）。
+///
+/// 与 ASR 的 [`super::asr_families::detect_gguf_in_dir`] 平行：外部导入/手工放置
+/// 目录没有 kind 元数据，只能靠族清单文件名反查。
+pub fn detect_family_in_dir(dir: &Path) -> Option<&'static AudiocppFamilyDesc> {
+    ALL_FAMILIES
+        .iter()
+        .copied()
+        .find(|d| dir.join(d.gguf_file).is_file())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 表覆盖锚点：omnivoice/voxcpm2/qwen3 可查，sherpa 族与 Kitten/Supertonic 不可查。
+    /// 表覆盖锚点：qwen3 两尺寸可查，且全表恰为这两个族（无多余遗留条目）。
     #[test]
     fn test_family_desc_coverage() {
         assert_eq!(
-            family_desc(TtsModelKind::Omnivoice).unwrap().family,
-            "omnivoice"
+            family_desc(TtsModelKind::Qwen3Tts06).unwrap().family,
+            "qwen3_tts"
         );
         assert_eq!(
-            family_desc(TtsModelKind::Voxcpm2).unwrap().family,
-            "voxcpm2"
+            family_desc(TtsModelKind::Qwen3Tts17).unwrap().family,
+            "qwen3_tts"
         );
-        for kind in [
-            TtsModelKind::Zipvoice,
-            TtsModelKind::Kitten,
-            TtsModelKind::Supertonic,
-        ] {
-            assert!(family_desc(kind).is_none(), "{kind:?} 不应有 audiocpp 描述");
-        }
+        assert_eq!(
+            ALL_FAMILIES.len(),
+            2,
+            "一期只收录 qwen3_tts 两尺寸，不应有遗留族"
+        );
     }
 
-    /// omnivoice 单文件清单 / 克隆语义。
+    /// qwen3_tts 两尺寸记录形状：单文件清单 / 强制克隆 / 无流式 / 提示语可执行。
     #[test]
     fn test_family_records_shape() {
-        let omni = family_desc(TtsModelKind::Omnivoice).unwrap();
-        assert_eq!(omni.required_files, &["omnivoice-q8_0.gguf"]);
-        assert_eq!(omni.voice_semantics, VoiceSemantics::ReferenceClone);
-        assert!(omni.supports_streaming, "omnivoice 支持 SSE 伪流式");
-        assert_eq!(omni.load_options(), serde_json::json!({}));
-
-        // model_id 与 registry id 提示一一对应（preflight 提示语可执行）
-        assert!(omni.registry_hint.contains("tts-omnivoice-q8-audiocpp"));
-
-        // voxcpm2：48kHz / 帧级流式 / Named 不透传 / retry_badcase 硬约束
-        let vox = family_desc(TtsModelKind::Voxcpm2).unwrap();
-        assert_eq!(vox.required_files, &["voxcpm2-q8_0.gguf"]);
-        assert_eq!(vox.sample_rate, 48_000, "VoxCPM2 输出 48kHz");
-        assert!(vox.supports_streaming);
-        assert!(!vox.allows_named_voice, "上游仅接受 speaker reference");
-        assert_eq!(
-            vox.request_options(),
-            serde_json::json!({ "retry_badcase": false })
-        );
-        assert_eq!(omni.request_options(), serde_json::json!({}));
-
-        // qwen3_tts 两尺寸：24kHz / 强制克隆 / 无流式 / 单文件清单
         let q06 = family_desc(TtsModelKind::Qwen3Tts06).unwrap();
         assert_eq!(q06.model_id, "qwen3-tts-0.6b");
         assert_eq!(q06.family, "qwen3_tts");
+        assert_eq!(q06.gguf_file, "qwen3-tts-12hz-0.6b-base-q8_0.gguf");
         assert_eq!(q06.required_files, &["qwen3-tts-12hz-0.6b-base-q8_0.gguf"]);
         assert_eq!(q06.sample_rate, 24_000);
         assert_eq!(q06.voice_semantics, VoiceSemantics::ReferenceCloneRequired);
@@ -205,14 +163,37 @@ mod tests {
         assert!(!q06.supports_streaming, "上游 modes 仅 offline");
         assert!(q06.registry_hint.contains("tts-qwen3-06b-base-q8-audiocpp"));
         assert_eq!(q06.load_options(), serde_json::json!({}));
+        assert_eq!(q06.request_options(), serde_json::json!({}));
 
         let q17 = family_desc(TtsModelKind::Qwen3Tts17).unwrap();
         assert_eq!(q17.model_id, "qwen3-tts-1.7b");
+        assert_eq!(
+            q17.gguf_file, "qwen3-tts-12hz-1.7b-base-q8_0_v2.gguf",
+            "1.7B 为上游 _v2 重打包版"
+        );
         assert_eq!(
             q17.required_files,
             &["qwen3-tts-12hz-1.7b-base-q8_0_v2.gguf"]
         );
         assert_eq!(q17.sample_rate, 24_000);
         assert_eq!(q17.voice_semantics, VoiceSemantics::ReferenceCloneRequired);
+        assert!(!q17.allows_named_voice);
+        assert!(!q17.supports_streaming);
+        assert!(q17.registry_hint.contains("tts-qwen3-17b-base-q8-audiocpp"));
+        assert_eq!(q17.load_options(), serde_json::json!({}));
+        assert_eq!(q17.request_options(), serde_json::json!({}));
+    }
+
+    /// 目录 GGUF 探测：命中两尺寸 / 空目录 / 不存在目录。
+    #[test]
+    fn test_detect_family_in_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(detect_family_in_dir(dir.path()).is_none());
+        std::fs::write(dir.path().join(QWEN3_TTS_17B.gguf_file), b"x").unwrap();
+        assert_eq!(
+            detect_family_in_dir(dir.path()).unwrap().model_id,
+            "qwen3-tts-1.7b"
+        );
+        assert!(detect_family_in_dir(Path::new("/nonexistent-tts-gguf")).is_none());
     }
 }

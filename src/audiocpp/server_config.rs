@@ -179,18 +179,18 @@ mod tests {
         }
     }
 
-    fn omnivoice_spec(model_dir: &std::path::Path) -> ServerInstanceSpec {
+    fn qwen3_tts_spec(model_dir: &std::path::Path) -> ServerInstanceSpec {
         let mut cfg = audiocpp_tts_cfg(model_dir);
-        cfg.model_type = crate::tts::config::TtsModelKind::Omnivoice;
+        cfg.model_type = crate::tts::config::TtsModelKind::Qwen3Tts06;
         cfg.provider = "metal".to_string();
         ServerInstanceSpec::from_tts(&cfg).unwrap()
     }
 
-    /// omnivoice 族快照：family/id/gguf 路径/空 load_options/metal provider +
+    /// qwen3_tts 族快照：family/id/gguf 路径/空 load_options/metal provider +
     /// server config 整体形态（host/port/threads/lazy_load）。
     #[test]
-    fn test_spec_from_tts_omnivoice_shape() {
-        let spec = omnivoice_spec(std::path::Path::new("/models/omnivoice-audiocpp"));
+    fn test_spec_from_tts_qwen3_shape() {
+        let spec = qwen3_tts_spec(std::path::Path::new("/models/qwen3-tts-06b-base-audiocpp"));
         assert_eq!(spec.task, "tts");
         let sc = build_server_config(&spec, 18200);
         assert_eq!(sc.host, "127.0.0.1");
@@ -200,37 +200,29 @@ mod tests {
         assert!(!sc.lazy_load, "默认 eager，模型缺失前移到健康检查");
         assert_eq!(sc.models.len(), 1);
         let m = &sc.models[0];
-        assert_eq!(m.id, "omnivoice");
-        assert_eq!(m.family, "omnivoice");
+        assert_eq!(m.id, "qwen3-tts-0.6b");
+        assert_eq!(m.family, "qwen3_tts");
         // 路径分隔符按平台归一后断言（Windows 的 PathBuf::join 产生 `\`，
         // server 侧同为原生程序读取，分隔符不影响运行时）
         assert_eq!(
             m.path.replace('\\', "/"),
-            "/models/omnivoice-audiocpp/omnivoice-q8_0.gguf"
+            "/models/qwen3-tts-06b-base-audiocpp/qwen3-tts-12hz-0.6b-base-q8_0.gguf"
         );
         assert_eq!(m.task, "tts");
-        // 流式族 mode 翻转为 streaming（offline server 拒绝 SSE 请求，实测 HTTP 500）
-        assert_eq!(m.mode, "streaming");
+        // qwen3_tts 上游 modes 仅 offline → mode 恒 offline（族静态能力决定）
+        assert_eq!(m.mode, "offline");
         assert_eq!(m.load_options, serde_json::json!({}));
     }
 
     /// provider 原样透传为 server config `backend`（Windows CUDA 解锁依赖此语义）。
     #[test]
     fn test_spec_provider_passthrough_to_backend() {
-        let mut cfg = audiocpp_tts_cfg(std::path::Path::new("/models/voxcpm2-audiocpp"));
-        cfg.model_type = crate::tts::config::TtsModelKind::Voxcpm2;
+        let mut cfg = audiocpp_tts_cfg(std::path::Path::new("/models/qwen3-tts-06b-base-audiocpp"));
+        cfg.model_type = crate::tts::config::TtsModelKind::Qwen3Tts17;
         cfg.provider = "cuda".to_string();
         let spec = ServerInstanceSpec::from_tts(&cfg).unwrap();
         assert_eq!(spec.provider, "cuda");
         assert_eq!(build_server_config(&spec, 18400).backend, "cuda");
-    }
-
-    /// sherpa kind（默认 Zipvoice）配 audiocpp 后端 → 明确报错。
-    #[test]
-    fn test_spec_from_tts_rejects_sherpa_kind() {
-        let cfg = audiocpp_tts_cfg(std::path::Path::new("/m")); // model_type 缺省 Zipvoice
-        let err = ServerInstanceSpec::from_tts(&cfg).unwrap_err();
-        assert!(err.contains("不支持 audiocpp 后端"), "err: {err}");
     }
 
     /// ASR 入口快照：task=asr / mode=offline / 空 load_options / GGUF 路径；
@@ -271,7 +263,7 @@ mod tests {
     #[test]
     fn test_server_config_json_keys() {
         // 序列化键名与上游 example.json 对齐（schema 快照）
-        let spec = omnivoice_spec(std::path::Path::new("/m"));
+        let spec = qwen3_tts_spec(std::path::Path::new("/m"));
         let json = serde_json::to_value(build_server_config(&spec, 1)).unwrap();
         for key in ["host", "port", "backend", "threads", "lazy_load", "models"] {
             assert!(json.get(key).is_some(), "missing key: {key}");
@@ -288,7 +280,7 @@ mod tests {
         crate::test_util::run_with_temp_home(|home| {
             crate::test_util::set_custom_data_dir(home);
             // 写入前 engines 目录不存在也能创建
-            let spec = omnivoice_spec(base.path());
+            let spec = qwen3_tts_spec(base.path());
             let path = write_server_config(&spec, 19999, 42).unwrap();
             assert!(path.is_file());
             assert!(

@@ -6,76 +6,47 @@ use crate::config::settings::{TtsSettings, resolve_env_ref};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// 模型包内默认文件名（sherpa-onnx 官方 zipvoice distill int8 打包版）。
+/// 旧 sherpa 模型包内默认文件名（zipvoice distill int8 打包版）。
+///
+/// 仅作老配置字段（`[tts].encoder` 等）与默认模型目录探测的兜底值：audiocpp
+/// 引擎不消费这些 onnx/词表文件，模型文件校验一律走族表（`audiocpp::families`）。
 pub const DEFAULT_ENCODER: &str = "encoder.int8.onnx";
 pub const DEFAULT_DECODER: &str = "decoder.int8.onnx";
-/// 声码器（独立发布，`tts install-model` 时与主包一并下载）。
+/// 声码器（独立发布的单文件，已随 zipvoice 收录移除下载路径）。
 pub const DEFAULT_VOCODER: &str = "vocos_24khz.onnx";
 pub const DEFAULT_TOKENS: &str = "tokens.txt";
 pub const DEFAULT_LEXICON: &str = "lexicon.txt";
 /// espeak-ng 数据目录（相对模型目录）。
 pub const DEFAULT_DATA_DIR: &str = "espeak-ng-data";
-/// 默认参考音频（零样本声音克隆的音色来源）。
+/// 默认参考音频（声音克隆的音色来源，相对模型目录）。
 pub const DEFAULT_REFERENCE_WAV: &str = "test_wavs/leijun-1.wav";
 /// 默认参考音频的逐字转写（来自模型包内 test_wavs/prompt.txt）。
 pub const DEFAULT_REFERENCE_TEXT: &str = "那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.";
 
-/// ZipVoice 官方示例推荐参数（Rust 的 `Default` 全为 0，需显式设置）。
-pub const DEFAULT_FEAT_SCALE: f32 = 0.1;
-pub const DEFAULT_T_SHIFT: f32 = 0.5;
-pub const DEFAULT_TARGET_RMS: f32 = 0.1;
-pub const DEFAULT_GUIDANCE_SCALE: f32 = 1.0;
-
-/// 模型安装完成所需的文件（相对目标目录；espeak-ng-data 目录与参考 wav 由引擎单独校验）。
-pub const REQUIRED_FILES: [&str; 5] = [
-    DEFAULT_ENCODER,
-    DEFAULT_DECODER,
-    DEFAULT_VOCODER,
-    DEFAULT_TOKENS,
-    DEFAULT_LEXICON,
-];
-
-/// TTS 模型类型（sherpa-onnx `OfflineTtsModelConfig` 的分支）。
+/// TTS 模型类型（audio.cpp 后端收录的 Qwen3-TTS 尺寸）。
 ///
 /// 全链路显式传递：`[tts].model_type`（持久化）→ `ResolvedTtsConfig.model_type` →
-/// `TtsEngine` 构造分支 + 合成参数分支。默认 Zipvoice（零样本声音克隆）。
+/// audiocpp 族表（`crate::audiocpp::families`）。默认 0.6B（延迟优先，1.7B 质量优先）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsModelKind {
-    /// ZipVoice：参考音频零样本声音克隆（当前默认）
-    #[default]
-    Zipvoice,
-    Kitten,
-    /// OmniVoice：audio.cpp 后端专用（600+ 语种零样本克隆，Qwen3-0.6B 基座）。
-    /// 「audiocpp-only kind」：仅由 `set_selected_model` 权威写入，目录内容不探测
-    /// （族差异见 `crate::audiocpp::families` 表）。
-    Omnivoice,
-    /// VoxCPM2：audio.cpp 后端专用（OpenBMB 2B，48kHz 录音室级 + 30 语种克隆）。
-    /// 同款「audiocpp-only kind」语义（见 `Omnivoice` 注释）。
-    Voxcpm2,
-    /// Qwen3-TTS 0.6B Base：audio.cpp 后端专用（10 语种音色克隆，24kHz）。
-    /// 同款「audiocpp-only kind」语义（见 `Omnivoice` 注释）。
+    /// Qwen3-TTS 0.6B Base：10 语种音色克隆，24kHz。
     /// Base 版必须提供克隆参考音频（上游无 auto voice）。
     /// 显式 serde rename：派生 snake_case 会得到 `qwen3_tts06`，与 as_str/parse_str 不一致
     #[serde(rename = "qwen3_tts_06")]
+    #[default]
     Qwen3Tts06,
-    /// Qwen3-TTS 1.7B Base：audio.cpp 后端专用（质量优先变体）。
+    /// Qwen3-TTS 1.7B Base：质量优先变体。
     #[serde(rename = "qwen3_tts_17")]
     Qwen3Tts17,
-    Supertonic,
 }
 
 impl TtsModelKind {
     /// snake_case 字符串（配置/JSON 直传）。
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Zipvoice => "zipvoice",
-            Self::Kitten => "kitten",
-            Self::Omnivoice => "omnivoice",
-            Self::Voxcpm2 => "voxcpm2",
             Self::Qwen3Tts06 => "qwen3_tts_06",
             Self::Qwen3Tts17 => "qwen3_tts_17",
-            Self::Supertonic => "supertonic",
         }
     }
 
@@ -83,37 +54,18 @@ impl TtsModelKind {
     /// `std::str::FromStr` 混淆）。
     pub fn parse_str(s: &str) -> Option<Self> {
         match s {
-            "zipvoice" => Some(Self::Zipvoice),
-            "kitten" => Some(Self::Kitten),
-            "omnivoice" => Some(Self::Omnivoice),
-            "voxcpm2" => Some(Self::Voxcpm2),
             "qwen3_tts_06" => Some(Self::Qwen3Tts06),
             "qwen3_tts_17" => Some(Self::Qwen3Tts17),
-            "supertonic" => Some(Self::Supertonic),
             _ => None,
         }
     }
-
-    /// 是否使用参考音频（声音克隆）语义：ZipVoice（sherpa）与 OmniVoice/VoxCPM2/
-    /// Qwen3-TTS（audiocpp）支持克隆，其余（未收录的二期占位 kind）不支持。
-    pub fn uses_reference_audio(&self) -> bool {
-        matches!(
-            self,
-            Self::Zipvoice | Self::Omnivoice | Self::Voxcpm2 | Self::Qwen3Tts06 | Self::Qwen3Tts17
-        )
-    }
-
-    /// 是否需要 espeak-ng 数据目录：仅 ZipVoice（包内 `espeak-ng-data/`）。
-    pub fn requires_data_dir(&self) -> bool {
-        matches!(self, Self::Zipvoice)
-    }
 }
 
-/// 手写 Deserialize：未知 kind 回落默认 Zipvoice。
+/// 手写 Deserialize：未知 kind 回落默认 Qwen3-TTS 0.6B。
 ///
-/// 历史版本曾收录 vits/matcha/kokoro/pocket 等模型并持久化进 `settings.toml`，
-/// 收录移除后老配置里的这些值若走派生反序列化会让**整份** settings 加载失败。
-/// 回落默认值让升级用户平滑迁移到 Zipvoice（模型目录不匹配时预检会给出
+/// 历史版本曾收录 zipvoice/omnivoice/voxcpm2/kitten/supertonic 等模型并持久化进
+/// `settings.toml`，收录移除后老配置里的这些值若走派生反序列化会让**整份** settings
+/// 加载失败。回落默认值让升级用户平滑迁移到 Qwen3-TTS（模型目录不匹配时预检会给出
 /// install-model 提示，引导重新选择受支持的模型）。
 impl<'de> Deserialize<'de> for TtsModelKind {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -125,17 +77,17 @@ impl<'de> Deserialize<'de> for TtsModelKind {
     }
 }
 
-/// TTS 推理后端：sherpa-onnx（进程内）或 audio.cpp（sidecar HTTP）。
+/// TTS 推理后端。
 ///
-/// 与 [`TtsModelKind`] 正交：模型类型描述「什么模型」，后端描述「谁推理」。
-/// 当前 audiocpp 后端服务 OmniVoice/VoxCPM2/Qwen3-TTS 克隆族。
+/// 一期裁剪后引擎只保留 audio.cpp sidecar 一条路径；`Sherpa` 变体仅为老配置
+/// （`[tts].backend = "sherpa"`）保留解析入口，构造引擎时明确报错引导迁移。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TtsBackendKind {
-    /// sherpa-onnx 进程内 `OfflineTts`（默认，行为不变）
-    #[default]
+    /// sherpa-onnx 进程内 `OfflineTts`（一期裁剪后已移除，仅老配置可达）
     Sherpa,
-    /// audio.cpp sidecar 进程（audiocpp_server，OpenAI 风格 HTTP）
+    /// audio.cpp sidecar 进程（audiocpp_server，OpenAI 风格 HTTP；缺省）
+    #[default]
     Audiocpp,
 }
 
@@ -158,26 +110,14 @@ impl TtsBackendKind {
     }
 }
 
-/// 各模型类型安装完成所需文件（相对模型目录；`data_dir`/参考音频由引擎单独校验）。
-pub fn required_files(kind: TtsModelKind) -> &'static [&'static str] {
-    match kind {
-        TtsModelKind::Zipvoice => &REQUIRED_FILES,
-        // 二期模型（kitten/supertonic）：registry 尚未收录，暂无下载路径；
-        // audiocpp 族由 families 表校验，不消费 sherpa 清单
-        _ => &[],
-    }
-}
-
 /// 解析后的完整 TTS 配置。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTtsConfig {
     /// 是否启用语音合成
     pub enabled: bool,
-    /// 模型类型（决定引擎构造分支与合成参数语义；默认 Zipvoice）
+    /// 模型类型（决定 audiocpp 族表条目；默认 Qwen3-TTS 0.6B）
     pub model_type: TtsModelKind,
     pub model_dir: PathBuf,
-    /// Kitten 主模型文件（zipvoice 无单一主模型，为 None）
-    pub model: Option<PathBuf>,
     pub encoder: PathBuf,
     pub decoder: PathBuf,
     pub vocoder: PathBuf,
@@ -186,7 +126,7 @@ pub struct ResolvedTtsConfig {
     pub data_dir: PathBuf,
     pub reference_wav: PathBuf,
     pub reference_text: String,
-    /// 默认音色 id（zipvoice 如 `leijun-1`/自定义音色 id）。
+    /// 默认音色 id（模型包内置参考音色 / 自定义音色库 id）。
     pub voice: Option<String>,
     /// 扩散解码步数（质量/速度权衡）
     pub num_steps: i32,
@@ -195,7 +135,7 @@ pub struct ResolvedTtsConfig {
     pub provider: String,
     pub num_threads: i32,
     pub debug: bool,
-    /// 推理后端（决定 `TtsEngine` 内部分派；缺省 Sherpa，向后兼容）
+    /// 推理后端（缺省 Audiocpp；`Sherpa` 为老配置入口，构造引擎时明确报错）
     pub backend: TtsBackendKind,
     /// audiocpp 引擎二进制覆盖路径（开发/调试用；None = locator 自动定位）
     pub engine_path: Option<PathBuf>,
@@ -207,8 +147,7 @@ impl Default for ResolvedTtsConfig {
         let join = |name: &str| model_dir.join(name);
         Self {
             enabled: true,
-            model_type: TtsModelKind::Zipvoice,
-            model: None,
+            model_type: TtsModelKind::Qwen3Tts06,
             encoder: join(DEFAULT_ENCODER),
             decoder: join(DEFAULT_DECODER),
             vocoder: join(DEFAULT_VOCODER),
@@ -224,71 +163,36 @@ impl Default for ResolvedTtsConfig {
             provider: "cpu".to_string(),
             num_threads: 2,
             debug: false,
-            backend: TtsBackendKind::Sherpa,
+            backend: TtsBackendKind::Audiocpp,
             engine_path: None,
         }
     }
 }
 
-impl ResolvedTtsConfig {
-    /// 是否使用参考音频（声音克隆）语义：sherpa 后端仅 ZipVoice，audiocpp 后端
-    /// 为 OmniVoice/VoxCPM2/Qwen3-TTS 克隆族。
-    ///
-    /// 编排层（voice 会话 / GUI / CLI）应调此方法而非裸
-    /// `model_type.uses_reference_audio()`——保持 backend 感知，防「audiocpp
-    /// 后端 + 目录探测误判 Zipvoice」的老场景误走 Reference 路径。
-    pub fn uses_reference_audio(&self) -> bool {
-        match self.backend {
-            TtsBackendKind::Sherpa => self.model_type == TtsModelKind::Zipvoice,
-            TtsBackendKind::Audiocpp => {
-                matches!(
-                    self.model_type,
-                    TtsModelKind::Omnivoice
-                        | TtsModelKind::Voxcpm2
-                        | TtsModelKind::Qwen3Tts06
-                        | TtsModelKind::Qwen3Tts17
-                )
-            }
-        }
-    }
-}
-
-/// TTS 就绪预检（backend 感知的单一权威入口）。
+/// TTS 就绪预检（单一权威入口）。
 ///
-/// - sherpa：按 [`required_files`] 逐文件 + `requires_data_dir` 校验 espeak-ng-data；
-/// - audiocpp：按模型族描述表（`crate::audiocpp::families`）的 `required_files`
-///   逐文件校验（不查 sherpa 五件套）；sherpa-only kind 配 audiocpp 后端的非法
-///   组合在此明确报错。
+/// 按模型族描述表（`crate::audiocpp::families`）的 `required_files` 逐文件校验；
+/// 老配置的 `backend = "sherpa"` 在此明确报错引导迁移（引擎已无进程内路径）。
 pub fn preflight(cfg: &ResolvedTtsConfig) -> Result<(), String> {
-    let (files, hint): (&[&str], &str) = match cfg.backend {
-        TtsBackendKind::Sherpa => {
-            if cfg.model_type.requires_data_dir() && !cfg.data_dir.is_dir() {
-                return Err(format!(
-                    "缺少数据目录 data_dir: {}\n请运行 `zapmomo tts install-model` 下载模型。",
-                    cfg.data_dir.display()
-                ));
-            }
-            (
-                required_files(cfg.model_type),
-                "zapmomo tts install-model" as &str,
-            )
-        }
-        TtsBackendKind::Audiocpp => {
-            let desc = crate::audiocpp::families::family_desc(cfg.model_type).ok_or_else(|| {
-                format!(
-                    "模型类型 {} 不支持 audiocpp 后端（请检查 [tts].model_type 与 backend 组合）",
-                    cfg.model_type.as_str()
-                )
-            })?;
-            (desc.required_files, desc.registry_hint)
-        }
-    };
-    for name in files {
+    if cfg.backend == TtsBackendKind::Sherpa {
+        return Err(
+            "TTS 后端 sherpa 已移除：请改用 audiocpp 后端（在模型库选择 Qwen3-TTS 模型）。"
+                .to_string(),
+        );
+    }
+    let desc = crate::audiocpp::families::family_desc(cfg.model_type).ok_or_else(|| {
+        format!(
+            "模型类型 {} 不支持 audiocpp 后端（请检查 [tts].model_type 与 backend 组合）",
+            cfg.model_type.as_str()
+        )
+    })?;
+    for name in desc.required_files {
         let p = cfg.model_dir.join(name);
         if !p.is_file() {
             return Err(format!(
-                "缺少模型文件 {name}: {}\n请运行 `{hint}` 下载模型。",
-                p.display()
+                "缺少模型文件 {name}: {}\n请运行 `{}` 下载模型。",
+                p.display(),
+                desc.registry_hint
             ));
         }
     }
@@ -394,8 +298,8 @@ pub fn resolve(
 
     let s = settings;
     cfg.enabled = s.and_then(|s| s.enabled).unwrap_or(true);
-    // 模型类型：settings 显式 > 默认 Zipvoice（managed 目录名 → kind 的权威写入
-    // 在 `set_selected_model`；无字段的老配置 → Zipvoice，行为不变）
+    // 模型类型：settings 显式 > 默认 Qwen3-TTS 0.6B（managed 目录名 → kind 的权威
+    // 写入在 `set_selected_model`；无字段或残留已移除 kind 的老配置 → 默认 0.6B）
     cfg.model_type = s.and_then(|s| s.model_type).unwrap_or_default();
 
     let file = |field: &str, default_name: &str| {
@@ -420,11 +324,6 @@ pub fn resolve(
     cfg.data_dir = file("data_dir", DEFAULT_DATA_DIR)?;
     cfg.reference_wav = file("reference_wav", DEFAULT_REFERENCE_WAV)?;
 
-    // 按模型类型填主模型（zipvoice 无主模型；非 zipvoice 的旧 zipvoice 字段保持
-    // 默认但由预检/引擎按 `required_files(kind)` 分支跳过，不参与消费）。
-    if cfg.model_type == TtsModelKind::Kitten {
-        cfg.model = Some(cfg.model_dir.join("model.onnx"));
-    }
     // audiocpp 族不消费 sherpa 文件字段：GGUF 定位由 `AudiocppTts` 内部经
     // families 表完成（model_dir + gguf_file）。
 
@@ -436,15 +335,15 @@ pub fn resolve(
     cfg.speed = s.and_then(|s| s.speed).unwrap_or(1.0);
     cfg.num_threads = s.and_then(|s| s.num_threads).unwrap_or(2);
     cfg.debug = s.and_then(|s| s.debug).unwrap_or(false);
-    // 推理后端：缺省 sherpa（老用户无字段行为不变），非法值显式报错
+    // 推理后端：缺省 audiocpp（唯一在册引擎），非法值显式报错
     cfg.backend = match s.and_then(|s| s.backend.as_deref()) {
         Some(v) => TtsBackendKind::parse_str(v)
-            .ok_or_else(|| format!("未知 TTS 后端: {v}（支持 sherpa / audiocpp）"))?,
+            .ok_or_else(|| format!("未知 TTS 后端: {v}（支持 audiocpp）"))?,
         None => TtsBackendKind::default(),
     };
     // 推理设备：用户显式配置优先；缺省时 audiocpp 后端按平台取默认
     // （见 `audiocpp::provider`：macOS Metal / Windows CUDA / 其余 CPU，
-    // 无可用 GPU 由 server 层自动回退 CPU），sherpa 恒 cpu。
+    // 无可用 GPU 由 server 层自动回退 CPU）。
     cfg.provider = match s.and_then(|s| s.provider.clone()) {
         Some(p) => p,
         None => {
@@ -556,6 +455,9 @@ mod tests {
                 .map(|s| s.to_string_lossy().to_string()),
             Some(crate::model_library::asset::tts_asset().name.clone())
         );
+        // 缺省即 Qwen3-TTS 0.6B + audiocpp 后端（唯一在册引擎）
+        assert_eq!(cfg.model_type, TtsModelKind::Qwen3Tts06);
+        assert_eq!(cfg.backend, TtsBackendKind::Audiocpp);
         assert_eq!(cfg.encoder.file_name().unwrap(), DEFAULT_ENCODER);
         assert_eq!(cfg.decoder.file_name().unwrap(), DEFAULT_DECODER);
         assert_eq!(cfg.vocoder.file_name().unwrap(), DEFAULT_VOCODER);
@@ -625,7 +527,15 @@ mod tests {
         // 导致 `resolve` 与 `ResolvedTtsConfig::default` 两次读取到不同 HOME。
         run_with_temp_home(|_| {
             let cfg = resolve(None, None).unwrap();
-            assert_eq!(cfg, ResolvedTtsConfig::default());
+            // 缺省 provider 按 audiocpp 平台取默认（mac Metal / Windows CUDA / 其余 CPU），
+            // 与 `Default` 的中性 "cpu" 不同
+            assert_eq!(
+                cfg,
+                ResolvedTtsConfig {
+                    provider: crate::audiocpp::provider::current_default_provider().to_string(),
+                    ..ResolvedTtsConfig::default()
+                }
+            );
         });
     }
 
@@ -690,57 +600,50 @@ mod tests {
     }
 
     #[test]
-    fn test_required_files_count_and_content() {
-        assert_eq!(REQUIRED_FILES.len(), 5);
-        assert!(REQUIRED_FILES.contains(&DEFAULT_VOCODER));
-        assert!(REQUIRED_FILES.contains(&DEFAULT_LEXICON));
+    fn test_resolve_model_kind_default_and_legacy_fallback() {
+        // 无字段 → 默认 Qwen3-TTS 0.6B
+        assert_eq!(
+            resolve(None, None).unwrap().model_type,
+            TtsModelKind::Qwen3Tts06
+        );
+        // settings 显式 1.7B → 生效
+        let settings = TtsSettings {
+            model_type: Some(TtsModelKind::Qwen3Tts17),
+            ..TtsSettings::default()
+        };
+        assert_eq!(
+            resolve(Some(&settings), None).unwrap().model_type,
+            TtsModelKind::Qwen3Tts17
+        );
     }
 
-    #[test]
-    fn test_required_files_by_kind() {
-        assert_eq!(required_files(TtsModelKind::Zipvoice).len(), 5);
-        // 二期模型尚无下载路径
-        assert!(required_files(TtsModelKind::Kitten).is_empty());
-        assert!(required_files(TtsModelKind::Supertonic).is_empty());
-    }
-
-    #[test]
-    fn test_model_kind_str_and_semantics() {
-        for (s, kind) in [
-            ("zipvoice", TtsModelKind::Zipvoice),
-            ("kitten", TtsModelKind::Kitten),
-        ] {
-            assert_eq!(TtsModelKind::parse_str(s), Some(kind), "{s}");
-            assert_eq!(kind.as_str(), s);
-        }
-        assert_eq!(TtsModelKind::parse_str("unknown"), None);
-        // 参考音频克隆语义仅 zipvoice（sherpa 侧）
-        assert!(TtsModelKind::Zipvoice.uses_reference_audio());
-        assert!(!TtsModelKind::Kitten.uses_reference_audio());
-        // espeak-ng-data 需求仅 zipvoice
-        assert!(TtsModelKind::Zipvoice.requires_data_dir());
-        assert!(!TtsModelKind::Kitten.requires_data_dir());
-    }
-
-    /// 老版本 settings 里的已移除 kind（vits/matcha/kokoro/pocket）反序列化
-    /// 不炸整份配置，回落默认 Zipvoice（升级迁移路径）。
+    /// 老版本 settings 里的已移除 kind（zipvoice/omnivoice/kokoro 等）反序列化
+    /// 不炸整份配置，回落默认 Qwen3-TTS 0.6B（升级迁移路径）。
     #[test]
     fn test_kind_deserialize_unknown_falls_back_to_default() {
-        let toml_str = r#"
+        for legacy in ["kokoro", "zipvoice", "omnivoice", "voxcpm2", "kitten"] {
+            let toml_str = format!(
+                r#"
 enabled = true
-model_type = "kokoro"
-"#;
-        let settings: TtsSettings = toml::from_str(toml_str).unwrap();
-        assert_eq!(settings.model_type, Some(TtsModelKind::Zipvoice));
+model_type = "{legacy}"
+"#
+            );
+            let settings: TtsSettings = toml::from_str(&toml_str).unwrap();
+            assert_eq!(
+                settings.model_type,
+                Some(TtsModelKind::Qwen3Tts06),
+                "{legacy} 应回落默认 kind"
+            );
+        }
         // 合法值照常解析
         let toml_str = r#"
-model_type = "omnivoice"
+model_type = "qwen3_tts_17"
 "#;
         let settings: TtsSettings = toml::from_str(toml_str).unwrap();
-        assert_eq!(settings.model_type, Some(TtsModelKind::Omnivoice));
+        assert_eq!(settings.model_type, Some(TtsModelKind::Qwen3Tts17));
     }
 
-    /// qwen3_tts 两尺寸 kind 解析/序列化往返 + 克隆语义。
+    /// qwen3_tts 两尺寸 kind 解析/序列化往返；未知串不解析。
     #[test]
     fn test_qwen3_tts_kind_semantics() {
         for (s, kind) in [
@@ -750,8 +653,9 @@ model_type = "omnivoice"
             assert_eq!(TtsModelKind::parse_str(s), Some(kind), "{s}");
             assert_eq!(kind.as_str(), s);
         }
-        assert!(TtsModelKind::Qwen3Tts06.uses_reference_audio());
-        assert!(TtsModelKind::Qwen3Tts17.uses_reference_audio());
+        assert_eq!(TtsModelKind::parse_str("zipvoice"), None);
+        assert_eq!(TtsModelKind::parse_str("omnivoice"), None);
+        assert_eq!(TtsModelKind::default(), TtsModelKind::Qwen3Tts06);
     }
 
     #[test]
@@ -831,13 +735,17 @@ model_type = "omnivoice"
             assert_eq!(kind.as_str(), s);
         }
         assert_eq!(TtsBackendKind::parse_str("unknown"), None);
-        assert_eq!(TtsBackendKind::default(), TtsBackendKind::Sherpa);
+        // 缺省 audiocpp（唯一在册引擎）
+        assert_eq!(TtsBackendKind::default(), TtsBackendKind::Audiocpp);
     }
 
     #[test]
     fn test_resolve_backend_default_explicit_and_invalid() {
-        // 缺省 → sherpa（老用户行为不变）
-        assert_eq!(resolve(None, None).unwrap().backend, TtsBackendKind::Sherpa);
+        // 缺省 → audiocpp（唯一在册引擎）
+        assert_eq!(
+            resolve(None, None).unwrap().backend,
+            TtsBackendKind::Audiocpp
+        );
         // 显式 audiocpp → 生效
         let settings = TtsSettings {
             backend: Some("audiocpp".to_string()),
@@ -847,6 +755,15 @@ model_type = "omnivoice"
             resolve(Some(&settings), None).unwrap().backend,
             TtsBackendKind::Audiocpp
         );
+        // 老配置残留 sherpa：解析不炸（引擎层明确报错引导迁移）
+        let settings = TtsSettings {
+            backend: Some("sherpa".to_string()),
+            ..TtsSettings::default()
+        };
+        assert_eq!(
+            resolve(Some(&settings), None).unwrap().backend,
+            TtsBackendKind::Sherpa
+        );
         // 非法值 → 报错（含支持列表）
         let settings = TtsSettings {
             backend: Some("vllm".to_string()),
@@ -854,7 +771,7 @@ model_type = "omnivoice"
         };
         let err = resolve(Some(&settings), None).unwrap_err();
         assert!(err.contains("未知 TTS 后端"), "err: {err}");
-        assert!(err.contains("sherpa / audiocpp"), "err: {err}");
+        assert!(err.contains("支持 audiocpp"), "err: {err}");
     }
 
     #[test]
@@ -875,88 +792,33 @@ model_type = "omnivoice"
     #[test]
     fn test_resolve_provider_platform_default_and_explicit_override() {
         // audiocpp 族缺省 provider 按平台取值（mac Metal / Windows CUDA / 其余 CPU）
-        let settings = TtsSettings {
-            backend: Some("audiocpp".to_string()),
-            model_type: Some(TtsModelKind::Voxcpm2),
-            ..TtsSettings::default()
-        };
-        let cfg = resolve(Some(&settings), None).unwrap();
+        let cfg = resolve(None, None).unwrap();
         assert_eq!(
             cfg.provider,
             crate::audiocpp::provider::current_default_provider(),
             "audiocpp 缺省 provider 按平台取值"
         );
-        // 显式 provider 永远优先（含显式 cpu——无 N 卡用户的手动兜底）
+        // 显式 provider 永远优先（含显式 cpu——无 GPU 用户的手动兜底）
         let settings = TtsSettings {
-            backend: Some("audiocpp".to_string()),
-            model_type: Some(TtsModelKind::Voxcpm2),
             provider: Some("cpu".to_string()),
             ..TtsSettings::default()
         };
         assert_eq!(resolve(Some(&settings), None).unwrap().provider, "cpu");
-        // sherpa 后端恒 cpu（即便 settings 残留 provider 缺省）
-        let cfg = resolve(None, None).unwrap();
-        assert_eq!(cfg.provider, "cpu");
     }
 
+    /// qwen3 0.6B：空目录报缺 base gguf（提示语指向 qwen3 registry id），
+    /// 单文件齐 → 通过；1.7B 校验各自的 _v2 gguf。
     #[test]
-    fn test_uses_reference_audio_backend_aware() {
-        // sherpa + zipvoice → true（默认组合）
-        assert!(ResolvedTtsConfig::default().uses_reference_audio());
-        // sherpa + 未收录二期 kind → false
-        let mut cfg = ResolvedTtsConfig::default();
-        cfg.model_type = TtsModelKind::Kitten;
-        assert!(!cfg.uses_reference_audio());
-        // audiocpp 后端 + sherpa kind（settings 残留）→ false（非法组合由预检拦截）
-        let settings = TtsSettings {
-            backend: Some("audiocpp".to_string()),
-            ..TtsSettings::default()
-        };
-        let cfg = resolve(Some(&settings), None).unwrap();
-        assert!(!cfg.uses_reference_audio());
-
-        // audiocpp + qwen3_tts -> true（克隆族，backend 感知）
-        let cfg = ResolvedTtsConfig {
-            backend: TtsBackendKind::Audiocpp,
-            model_type: TtsModelKind::Qwen3Tts06,
-            ..ResolvedTtsConfig::default()
-        };
-        assert!(cfg.uses_reference_audio());
-    }
-
-    /// omnivoice（单文件清单）+ 非法组合（sherpa kind 配 audiocpp 后端）报错。
-    #[test]
-    fn test_preflight_audiocpp_omnivoice_and_invalid_combo() {
+    fn test_preflight_audiocpp_qwen3() {
         let base = tempfile::tempdir().unwrap();
-        let mut cfg = ResolvedTtsConfig {
-            backend: crate::tts::config::TtsBackendKind::Audiocpp,
-            model_type: TtsModelKind::Omnivoice,
-            model_dir: base.path().to_path_buf(),
-            ..ResolvedTtsConfig::default()
-        };
-
-        // 空目录 → 报缺 omnivoice gguf（提示语指向 omnivoice registry id）
-        let err = preflight(&cfg).unwrap_err();
-        assert!(err.contains("omnivoice-q8_0.gguf"), "err: {err}");
-        assert!(err.contains("tts-omnivoice-q8-audiocpp"), "err: {err}");
-
-        // 单文件齐 → 通过（无 embeddings 副件）；models_present 同步为 true
-        std::fs::write(cfg.model_dir.join("omnivoice-q8_0.gguf"), b"x").unwrap();
-        assert!(preflight(&cfg).is_ok());
-        assert!(models_present(&cfg));
-
-        // 非法组合：sherpa kind + audiocpp 后端 → 明确报组合错误
-        cfg.model_type = TtsModelKind::Zipvoice;
-        let err = preflight(&cfg).unwrap_err();
-        assert!(err.contains("不支持 audiocpp 后端"), "err: {err}");
-
-        // qwen3：空目录 -> 报缺 base gguf（提示语指向 qwen3 registry id）
         let cfg = ResolvedTtsConfig {
             backend: crate::tts::config::TtsBackendKind::Audiocpp,
             model_type: TtsModelKind::Qwen3Tts06,
             model_dir: base.path().to_path_buf(),
             ..ResolvedTtsConfig::default()
         };
+
+        // 空目录 -> 报缺 base gguf（提示语指向 qwen3 registry id）
         let err = preflight(&cfg).unwrap_err();
         assert!(
             err.contains("qwen3-tts-12hz-0.6b-base-q8_0.gguf"),
@@ -971,21 +833,39 @@ model_type = "omnivoice"
         )
         .unwrap();
         assert!(preflight(&cfg).is_ok());
+        assert!(models_present(&cfg));
+
+        // 1.7B：0.6B 文件不算数，缺自己的 _v2 gguf
+        let cfg17 = ResolvedTtsConfig {
+            model_type: TtsModelKind::Qwen3Tts17,
+            ..cfg.clone()
+        };
+        let err = preflight(&cfg17).unwrap_err();
+        assert!(
+            err.contains("qwen3-tts-12hz-1.7b-base-q8_0_v2.gguf"),
+            "err: {err}"
+        );
+        assert!(err.contains("tts-qwen3-17b-base-q8-audiocpp"), "err: {err}");
+        std::fs::write(
+            cfg17
+                .model_dir
+                .join("qwen3-tts-12hz-1.7b-base-q8_0_v2.gguf"),
+            b"x",
+        )
+        .unwrap();
+        assert!(preflight(&cfg17).is_ok());
     }
 
+    /// 老配置 `backend = "sherpa"`：预检明确报迁移错误（引擎已无进程内路径）。
     #[test]
-    fn test_preflight_sherpa_keeps_existing_behavior() {
-        // sherpa 缺文件 → 沿用 install-model 文案（既有测试锚点不变）
-        let mut cfg = ResolvedTtsConfig::default();
-        cfg.model_dir = PathBuf::from("/nonexistent/model");
-        // data_dir 显式指向已存在目录：并行下 HOME 可能被 run_with_temp_home 临时
-        // 替换，default() 解析出的 data_dir 会落在临时路径上触发「缺数据目录」分支，
-        // 掩盖本测试要锚定的「缺模型文件」分支
-        let data_dir = tempfile::tempdir().unwrap();
-        cfg.data_dir = data_dir.path().to_path_buf();
+    fn test_preflight_rejects_legacy_sherpa_backend() {
+        let cfg = ResolvedTtsConfig {
+            backend: TtsBackendKind::Sherpa,
+            model_dir: PathBuf::from("/nonexistent/model"),
+            ..ResolvedTtsConfig::default()
+        };
         let err = preflight(&cfg).unwrap_err();
-        assert!(err.contains("install-model"), "err: {err}");
+        assert!(err.contains("sherpa 已移除"), "err: {err}");
         assert!(!models_present(&cfg));
-        assert!(err.contains("encoder.int8.onnx"), "err: {err}");
     }
 }

@@ -1,7 +1,8 @@
 /// TTS 音色（参考音色）列表。
 ///
-/// ZipVoice 是零样本声音克隆模型，音色 = 参考音频 + 参考文本。内置音色来自
-/// 模型包内 `test_wavs/prompt.txt`（每行 `<wav文件名> <转写文本>`），运行时解析。
+/// Qwen3-TTS Base 走参考音频克隆：音色 = 参考音频 + 参考文本。内置音色来自
+/// 模型包内 `test_wavs/prompt.txt`（每行 `<wav文件名> <转写文本>`），运行时解析；
+/// 用户自定义音色存音色库（`voice_store`）。
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -107,60 +108,31 @@ pub fn resolve_reference(
     Ok((cfg.reference_wav.clone(), cfg.reference_text.clone()))
 }
 
-/// 合成音色参数的统一解析入口（backend + 模型族感知）。
+/// 合成音色参数的统一解析入口。
 ///
-/// 收敛此前散落 4 处（语音会话 / dsh 播报 / GUI 合成 / CLI speak）的同构
-/// 分支逻辑。三档语义：
-/// - 参考音频克隆（sherpa zipvoice / audiocpp omnivoice / voxcpm2 / qwen3_tts）：
-///   显式音色（`voice_id` > `cfg.voice`）或自定义 wav → `resolve_reference`；
-///   omnivoice/voxcpm2 无任何音色时不回退模型包默认参考（包内无 test_wavs），
-///   返回 `Sid(0)`——client 侧省略音色字段，走 server auto voice；
-///   qwen3_tts Base 无音色时报错（上游无 auto voice，必须克隆音色）；
-/// - audiocpp 后端 + 非克隆族：非法组合（families 表查不到），明确报错；
-/// - sherpa 非克隆 kind（未收录二期占位）：恒 `Sid(sid.max(0))`。
+/// 收敛此前散落多处的同构分支逻辑。当前收录的 Qwen3-TTS Base 仅支持参考音频
+/// 克隆（上游无 auto voice），语义：
+/// - 自定义 wav（必须带逐字转写）或显式音色（`voice_id` > `cfg.voice`）→
+///   `Reference`（经 [`resolve_reference`] 解析自定义音色库 / 模型包内置音色）；
+/// - 无任何音色来源 → 提前报错（放过会在 server 端报错，这里给中文文案）。
 pub fn resolve_voice_params(
     cfg: &ResolvedTtsConfig,
     voice_id: Option<&str>,
-    sid: Option<i32>,
     custom_wav: Option<&Path>,
     custom_text: Option<&str>,
 ) -> Result<crate::tts::TtsVoiceParams, String> {
     use crate::tts::TtsVoiceParams;
-    use crate::tts::config::TtsBackendKind;
-    if cfg.uses_reference_audio() {
-        let has_any = voice_id.is_some() || cfg.voice.is_some() || custom_wav.is_some();
-        if !has_any && cfg.backend == TtsBackendKind::Audiocpp {
-            // 按族分派无音色兜底：omnivoice/voxcpm2 → auto voice（Sid(0)，client
-            // 省略音色字段）；qwen3_tts Base 上游无 auto voice → 提前报错
-            let desc = crate::audiocpp::families::family_desc(cfg.model_type);
-            if desc.is_some_and(|d| {
-                matches!(
-                    d.voice_semantics,
-                    crate::audiocpp::families::VoiceSemantics::ReferenceCloneRequired
-                )
-            }) {
-                return Err(
-                    "Qwen3-TTS 需要克隆音色：请在伙伴页为当前角色绑定音色，或在 TTS 设置页选择默认音色，或切换到 OmniVoice / VoxCPM2（支持自动音色）"
-                        .to_string(),
-                );
-            }
-            return Ok(TtsVoiceParams::Sid(0));
-        }
-        let (wav, text) = resolve_reference(cfg, voice_id, custom_wav, custom_text)?;
-        Ok(TtsVoiceParams::Reference {
-            wav_path: wav,
-            reference_text: text,
-        })
-    } else if cfg.backend == TtsBackendKind::Audiocpp {
-        // 非克隆族不会被 uses_reference_audio() 放行到 audiocpp 路径，此处必为
-        // 非法组合（families 表查不到），明确报错
-        Err(format!(
-            "模型类型 {} 不支持 audiocpp 后端",
-            cfg.model_type.as_str()
-        ))
-    } else {
-        Ok(TtsVoiceParams::Sid(sid.unwrap_or(0).max(0)))
+    if voice_id.is_none() && cfg.voice.is_none() && custom_wav.is_none() {
+        return Err(
+            "Qwen3-TTS 需要克隆音色：请先用 --reference-wav/--reference-text 指定参考音频，或在音色库选择/录制一个音色并设为默认"
+                .to_string(),
+        );
     }
+    let (wav, text) = resolve_reference(cfg, voice_id, custom_wav, custom_text)?;
+    Ok(TtsVoiceParams::Reference {
+        wav_path: wav,
+        reference_text: text,
+    })
 }
 
 #[cfg(test)]
@@ -343,28 +315,6 @@ mod tests {
         assert!(err.contains("参考文本"), "err: {err}");
     }
 
-    /// sherpa 非克隆 kind（未收录占位）：恒 Sid，显式非负 sid 可覆盖、负数钳 0。
-    #[test]
-    fn test_resolve_voice_params_sherpa_non_clone_sid() {
-        use crate::tts::TtsVoiceParams;
-        let mut cfg = ResolvedTtsConfig::default();
-        cfg.model_type = crate::tts::config::TtsModelKind::Kitten;
-        // 无任何指定 → 0
-        assert!(matches!(
-            resolve_voice_params(&cfg, None, None, None, None),
-            Ok(TtsVoiceParams::Sid(0))
-        ));
-        // 显式 sid 可覆盖；负数钳到 0
-        assert!(matches!(
-            resolve_voice_params(&cfg, None, Some(2), None, None),
-            Ok(TtsVoiceParams::Sid(2))
-        ));
-        assert!(matches!(
-            resolve_voice_params(&cfg, None, Some(-1), None, None),
-            Ok(TtsVoiceParams::Sid(0))
-        ));
-    }
-
     fn audiocpp_cfg(kind: crate::tts::config::TtsModelKind) -> ResolvedTtsConfig {
         ResolvedTtsConfig {
             backend: crate::tts::config::TtsBackendKind::Audiocpp,
@@ -373,53 +323,46 @@ mod tests {
         }
     }
 
-    /// omnivoice（克隆族）：自定义音色库命中 → Reference；无任何音色 → Sid(0)
-    /// （client 省略音色字段走 auto voice，不回退模型包默认参考）。
+    /// 自定义音色库命中 → Reference；自定义 wav + 转写 → Reference。
     #[test]
-    fn test_resolve_voice_params_omnivoice() {
+    fn test_resolve_voice_params_reference_sources() {
         crate::test_util::run_with_temp_home(|home| {
             let src = home.join("src.wav");
             std::fs::write(&src, sample_wav_bytes()).unwrap();
             let v = crate::tts::voice_store::save_voice("我的声音", &src, "参考转写").unwrap();
 
-            let cfg = audiocpp_cfg(crate::tts::config::TtsModelKind::Omnivoice);
+            let cfg = audiocpp_cfg(crate::tts::config::TtsModelKind::Qwen3Tts06);
             // 显式音色 id → Reference（voice_store 命中）
-            let out = resolve_voice_params(&cfg, Some(&v.id), None, None, None).unwrap();
+            let out = resolve_voice_params(&cfg, Some(&v.id), None, None).unwrap();
             let crate::tts::TtsVoiceParams::Reference { wav_path, .. } = out else {
                 panic!("应为 Reference: {out:?}");
             };
             assert_eq!(wav_path, v.wav_path);
             // 自定义 wav + 转写 → Reference
             let out =
-                resolve_voice_params(&cfg, None, None, Some(Path::new("/tmp/x.wav")), Some("t"))
-                    .unwrap();
+                resolve_voice_params(&cfg, None, Some(Path::new("/tmp/x.wav")), Some("t")).unwrap();
             assert!(matches!(out, crate::tts::TtsVoiceParams::Reference { .. }));
-            // 无任何音色 → Sid(0)（auto voice 语义）
-            let out = resolve_voice_params(&cfg, None, None, None, None).unwrap();
-            assert!(matches!(out, crate::tts::TtsVoiceParams::Sid(0)));
         });
     }
 
-    /// audiocpp 后端 + 非克隆族（settings 残留 zipvoice）：非法组合明确报错。
-    #[test]
-    fn test_resolve_voice_params_invalid_audiocpp_combo() {
-        let cfg = audiocpp_cfg(crate::tts::config::TtsModelKind::Zipvoice);
-        let err = resolve_voice_params(&cfg, None, None, None, None).unwrap_err();
-        assert!(err.contains("不支持 audiocpp 后端"), "err: {err}");
-    }
-
-    /// qwen3_tts 无音色来源时明确报错（omnivoice 走 Sid(0) auto voice，qwen3 不能）。
+    /// Qwen3-TTS Base 无任何音色来源时明确报错（上游无 auto voice，必须克隆音色）。
     #[test]
     fn test_resolve_voice_params_qwen3_requires_voice() {
-        let cfg = audiocpp_cfg(crate::tts::config::TtsModelKind::Qwen3Tts06);
-        let err = resolve_voice_params(&cfg, None, None, None, None).unwrap_err();
-        assert!(err.contains("克隆音色"), "err: {err}");
+        for kind in [
+            crate::tts::config::TtsModelKind::Qwen3Tts06,
+            crate::tts::config::TtsModelKind::Qwen3Tts17,
+        ] {
+            let cfg = audiocpp_cfg(kind);
+            let err = resolve_voice_params(&cfg, None, None, None).unwrap_err();
+            assert!(err.contains("克隆音色"), "{kind:?} err: {err}");
+        }
 
         // 有自定义音色 -> Reference
+        let cfg = audiocpp_cfg(crate::tts::config::TtsModelKind::Qwen3Tts06);
         let base = tempfile::tempdir().unwrap();
         let wav = base.path().join("my.wav");
         std::fs::write(&wav, sample_wav_bytes()).unwrap();
-        let params = resolve_voice_params(&cfg, None, None, Some(&wav), Some("转写")).unwrap();
+        let params = resolve_voice_params(&cfg, None, Some(&wav), Some("转写")).unwrap();
         match params {
             crate::tts::TtsVoiceParams::Reference {
                 wav_path,
@@ -430,13 +373,5 @@ mod tests {
             }
             other => panic!("应为 Reference，got {other:?}"),
         }
-    }
-
-    /// sherpa 克隆族（zipvoice）经由统一入口行为不变。
-    #[test]
-    fn test_resolve_voice_params_sherpa_passthrough() {
-        let cfg = ResolvedTtsConfig::default(); // zipvoice + sherpa
-        let out = resolve_voice_params(&cfg, None, None, None, None).unwrap();
-        assert!(matches!(out, crate::tts::TtsVoiceParams::Reference { .. }));
     }
 }
