@@ -1,0 +1,58 @@
+---
+title: 常见问题
+description: 安装、模型、性能与数据安全
+---
+
+# 常见问题
+
+## macOS 提示「"AudioFn" 已损坏，无法打开」
+
+应用未做 Apple 签名公证，被 Gatekeeper 拦截，**并非真的损坏**。两种处理方式：
+
+- 双击 dmg 窗口里的 **首次打开修复.command**，自动安装到「应用程序」、清除隔离属性并启动
+- 或手动把 AudioFn 拖入「应用程序」后执行：
+
+  ```bash
+  xattr -cr "/Applications/AudioFn.app"
+  ```
+
+## 有 Windows 版本吗？
+
+没有。当前构建与安装包白名单只有 macOS 13+（arm64 / x86_64）和 Linux x86_64。
+
+## 模型在哪里下载？会随安装包一起装吗？
+
+不随安装包分发。首次使用在应用「模型」页一键下载，或用 CLI
+`audiofn asr install-model` / `audiofn tts install-model`。默认安装到
+`~/.audiofn/models/`，下载后做 sha256 校验，详见[模型库](/docs/models)。
+
+## 数据会上传吗？
+
+不会。推理由本机的 audio.cpp 引擎完成，唯一的网络请求是**下载模型**本身；
+应用没有账号体系，也没有遥测。
+
+## 为什么 Linux 上合成 / 转写比较慢？
+
+Linux 构建的引擎是纯 CPU 后端；macOS（Apple Silicon）走 Metal。可以在
+`[asr] provider` / `[tts] provider` 确认后端，并适当调高 `num_threads`。
+
+## 长音频（小时级）能转写吗？
+
+能跑，但一期不做 VAD 与长音频切分，整段送模型会占用大量内存且无法边下边出。
+建议先用第三方工具把音频切成几分钟一段，再逐段 `audiofn asr transcribe`。
+
+## TTS 能边合成边播放吗？
+
+不能。当前为整段非流式合成：一次请求合成完整文本后输出 wav，长文本耗时随长度
+线性增长。
+
+## 模型装在哪里？怎么挪到别的盘？
+
+- 默认：`~/.audiofn/models/`
+- 自定义：`settings.toml` 的 `data_dir`（整体数据目录）或 `[asr] model_dir` /
+  `[tts] model_dir`（单模型目录）
+
+## 如何参与开发 / 自行构建？
+
+见 [CONTRIBUTING](https://github.com/shenjingnan/audiofn/blob/main/CONTRIBUTING.md)：
+环境搭建、audio.cpp 引擎 sidecar 获取、Tauri 桌面应用与文档站的本地构建。

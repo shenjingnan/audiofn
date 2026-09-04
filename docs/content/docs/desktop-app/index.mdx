@@ -1,30 +1,48 @@
 ---
-title: 桌面应用（Tauri 2）
-description: KWS 控制面板的桌面 GUI，三平台安装包
+title: 桌面端
+description: Tauri 2 桌面面板：安装、页面导览与引擎说明
 ---
 
-# 桌面应用（Tauri 2）
+# 桌面端
 
-复用同一套 KWS / 音频 / 配置逻辑的桌面 GUI：KWS 控制面板（选择麦克风、开始/停止监听、附加关键词直接输中文、实时显示检测结果、查看模型配置与缺失提示）。代码在 `src-tauri/`，前端为原生 HTML/CSS/JS（无构建链）。
+桌面应用基于 Tauri 2，复用 CLI 的同一套 ASR / TTS / 模型库 / 配置逻辑，与 CLI 共享
+`~/.audiofn/` 下的模型、音色库与设置。
 
-```bash
-# 安装 Tauri CLI（首次）
-pnpm install
+## 安装
 
-# 开发模式（热重载，需已下载模型：cargo run -- kws install-model）
-pnpm tauri dev
+从 [README「应用下载」](https://github.com/shenjingnan/audiofn#应用下载)选择对应平台的安装包：
 
-# 构建当前平台的安装包（macOS 产出 .app/.dmg）
-pnpm tauri build
-```
+| 系统 | 包 |
+| ---- | -- |
+| macOS 13+ (Apple Silicon / Intel) | `.dmg` |
+| Linux x86_64 | `.deb` / `.rpm` / `.AppImage` |
 
-> 打包版内置「下载模型」按钮：首次监听时若缺模型，在「配置」面板点击即可自动
-> 下载到 `~/.zapmomo/models/<模型名>`（也可用 `zapmomo kws install-model`）。
-> macOS 未签名 dmg 首次打开若被 Gatekeeper 拦截（提示「已损坏，无法打开」）：
-> Release 产物已内置「首次打开修复.command」，双击即可自动安装并修复（见 README
-> 「macOS 首次打开」）；本地 `pnpm tauri build` 出的 dmg 未经注入，需右键 →「打开」，
-> 或执行 `xattr -dr com.apple.quarantine <应用路径>`。
+安装后首次使用，到「模型」页下载 ASR / TTS 模型即可开始。
 
-## 相关页面
+> **macOS 未签名提示**：首次打开若提示「"AudioFn" 已损坏，无法打开」，并非真的损坏
+> （应用未做 Apple 签名公证，被 Gatekeeper 拦截）。双击 dmg 窗口里的
+> **首次打开修复.command**，自动安装到「应用程序」、清除隔离属性并启动；
+> 或手动执行 `xattr -cr /Applications/AudioFn.app`。
 
-- [deepseek-harness 集成（dsh 桥）](/docs/desktop-app/dsh-bridge) — 桌宠实时感知 dsh 任务状态，气泡 + 语音播报
+## 页面导览
+
+| 页面 | 功能 |
+| ---- | ---- |
+| **概览** | ASR / TTS 当前模型、设备与系统资源状态 |
+| **模型** | 模型库：一键下载、sha256 校验、切换当前模型；含 ASR（转写）与 TTS（合成）两个子页 |
+| **转写（ASR）** | 文件转写与免提听写（录音 → 停止后整段出文本） |
+| **合成（TTS）** | 文本合成 + 音色管理（上传音频或在线录音克隆音色） |
+| **设置** | 麦克风设备、存储位置、快捷键、数据目录、日志与重启 |
+
+## audio.cpp 引擎
+
+推理由 audio.cpp 引擎（`audiocpp_server`）以 sidecar 子进程完成，二进制随安装包分发，
+无需单独安装。macOS（Apple Silicon）走 Metal 加速，Linux 纯 CPU。
+
+自行编译开发版请看 [CONTRIBUTING「audio.cpp sidecar 引擎」](https://github.com/shenjingnan/audiofn/blob/main/CONTRIBUTING.md#audiocpp-sidecar-引擎)。
+
+## 相关链接
+
+- [CLI](/docs/cli) — 与桌面端能力对应的命令行
+- [模型库](/docs/models) — 模型条目与校验机制
+- [音色克隆指南](/docs/voice-clone) — 录出更好克隆效果的参考音频

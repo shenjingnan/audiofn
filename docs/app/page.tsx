@@ -7,9 +7,9 @@ import { ScreenshotSection } from '@/components/home/screenshot-section';
 import { baseOptions } from '@/lib/layout.shared';
 
 export const metadata: Metadata = {
-  title: 'AudioFn — 开源的实时桌面 AI 伙伴',
+  title: 'AudioFn — 开源的本地优先桌面 ASR & TTS 工具',
   description:
-    '开源的实时桌面 AI 伙伴：语音唤醒、语音识别、本地大语言模型与 Live2D 虚拟角色于一体，本地优先，数据不出设备。',
+    '开源的本地优先桌面 ASR & TTS 工具：Qwen3-ASR 离线转写 + Qwen3-TTS 音色克隆，桌面与 CLI 双形态，全部在本地运行，数据不出设备。',
 };
 
 export default function Page() {

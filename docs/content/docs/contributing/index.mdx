@@ -5,80 +5,70 @@ description: 开发环境搭建、常用命令、测试与 Git 工作流
 
 # 参与贡献
 
-欢迎为 ZapMomo 贡献代码！本篇面向想参与开发的同学，介绍从零搭建开发环境到提交 PR 的完整流程；如果你只是想**使用** ZapMomo，请看[快速开始](/docs/getting-started)。
+欢迎为 AudioFn 贡献代码！本篇面向想参与开发的同学，介绍从零搭建开发环境到提交 PR 的完整流程；如果你只是想**使用** AudioFn，请看[介绍](/docs)。
+
+> 完整的 CLI 参数、配置段与 audio.cpp 引擎说明见仓库 [CONTRIBUTING.md](https://github.com/shenjingnan/audiofn/blob/main/CONTRIBUTING.md)。
 
 ## 开发环境
 
 | 工具 | 版本 | 用途 |
 | ---- | ---- | ---- |
 | Rust | 1.97.1（由 `rust-toolchain.toml` 固定） | 编译 / 测试 / Lint / Format |
-| pnpm | 任意现代版本 | Tauri CLI 与文档站依赖管理 |
-| Linux 额外依赖 | webkit2gtk 等 | 构建桌面应用（`zapmomo-app`）需要 |
+| pnpm | 10.x（`packageManager` 固定） | Tauri CLI / 桌面前端 / 文档站依赖管理 |
+| Node | 见 `.node-version` | 文档站与前端工具链 |
+| Linux 额外依赖 | `libasound2-dev`（CLI 音频）、`libwebkit2gtk-4.1-dev` 等（Tauri） | 构建桌面应用需要 |
 
-克隆仓库后，`cargo build` 首次编译会自动拉取 sherpa-onnx 预编译库；如在代理环境下下载失败，可设置 `SHERPA_ONNX_LIB_DIR` 指向已缓存的库目录。
+桌面应用开发前还需放置 audio.cpp 引擎 sidecar：
+
+```bash
+scripts/fetch-audiocpp-dev.sh          # 从 Release 下载；--build 走源码编译
+```
 
 ## 常用命令
 
-### 核心 CLI
+### CLI
 
 ```bash
-# 开发
 cargo run                           # 直接运行（无参进入帮助）
-cargo run -- config                 # 显示配置
+cargo run -- asr install-model      # 下载 ASR 模型
+cargo run -- asr transcribe --wav rec.wav
+cargo run -- tts install-model      # 下载 TTS 模型
+cargo run -- tts voices
 cargo run -- completion bash        # 生成 shell 补全
-
-# 测试
-cargo test
-cargo test -- --test-threads=1      # 单线程测试（避免 env 竞争）
-
-# 代码质量
-cargo fmt                           # 格式化代码
-cargo fmt --check                   # 格式检查
-cargo clippy -- -D warnings         # 严格 Lint 检查
-
-# 完整检查（CI 同款）
-cargo fmt --check && cargo clippy -- -D warnings && cargo test
-
-# 覆盖率
-cargo tarpaulin
 ```
 
 ### 桌面应用（Tauri 2，位于 `src-tauri/`）
 
 ```bash
-# 安装 Tauri CLI（首次）
-pnpm install
-
-# 开发模式（热重载，需已下载模型：cargo run -- kws install-model）
-pnpm tauri dev
-
-# 构建当前平台安装包（macOS: .app/.dmg）
-pnpm tauri build
-
-# 仅检查 / Lint tauri crate（Linux 需 webkit 依赖）
-cargo check -p zapmomo-app
-cargo clippy -p zapmomo-app -- -D warnings
+pnpm install                        # 首次：安装 @tauri-apps/cli
+pnpm tauri dev                      # 开发模式（热重载）
+pnpm tauri build                    # 构建当前平台安装包（macOS: .app/.dmg）
+cargo check -p audiofn-app          # 仅检查 tauri crate（Linux 需 webkit 依赖）
+cargo clippy -p audiofn-app -- -D warnings
 ```
 
-## 测试
+### 文档站（`docs/`）
 
 ```bash
-# 常规测试（不依赖模型）
-cargo test -- --test-threads=1
-
-# 模型相关测试（需先下载模型）
-./scripts/run-kws-model-tests.sh
+pnpm --filter audiofn-docs test     # 平台检测逻辑单测
+pnpm --dir docs build               # 静态导出（CI 校验同款）
 ```
 
-KWS / ASR / TTS / LLM 模型**不入库**，按 `models/manifest.json` 清单下载（详见[模型来源与校验](/docs/kws/model)）：
+## 测试与代码质量
 
 ```bash
-cargo run -- kws install-model      # 或 asr / tts install-model
+cargo test                          # 运行测试
+cargo test -- --test-threads=1      # 单线程测试（避免 env 竞争）
+cargo fmt --check                   # 格式检查
+cargo clippy -- -D warnings         # 严格 Lint
+typos .                             # 拼写检查（typos-cli）
+cargo fmt --check && cargo clippy -- -D warnings && cargo test   # 完整检查（CI 同款）
+cargo tarpaulin                     # 覆盖率报告
+pnpm --dir src-tauri/frontend test:run   # 桌面前端单测（vitest）
+pnpm --dir src-tauri/frontend check      # 桌面前端 Lint（biome）
 ```
 
-## 已知限制（开发模式）
-
-`pnpm tauri dev` 下点击「重启」（设置页 / 右键菜单 / 托盘）后新进程会**白屏**：Tauri 内置重启不重跑 `beforeDevCommand`，而 `tauri dev` 在应用退出时会拆掉 Vite dev server，新进程连不上 `localhost:1420`（[tauri#6163](https://github.com/tauri-apps/tauri/issues/6163)）。需要重启效果时请手动重跑 `pnpm tauri dev`；生产打包版重启正常。
+模型相关测试需要先安装模型（`cargo run -- asr install-model` 等）。
 
 ## Git 工作流
 
@@ -105,7 +95,7 @@ cargo run -- kws install-model      # 或 asr / tts install-model
 | `fix` | Bug 修复 |
 | `docs` | 文档更新 |
 | `style` | 代码格式 |
-| `refactor` | 重构 |
+| `refactor` | 代码重构 |
 | `perf` | 性能优化 |
 | `test` | 测试相关 |
 | `chore` | 构建 / 工具 |
@@ -113,7 +103,7 @@ cargo run -- kws install-model      # 或 asr / tts install-model
 ## 提交 PR
 
 1. 从 `main` 切出符合命名规范的分支。
-2. 开发并确保本地通过完整检查：`cargo fmt --check && cargo clippy -- -D warnings && cargo test`（涉及桌面应用时另跑 `cargo clippy -p zapmomo-app -- -D warnings`）。
+2. 开发并确保本地通过完整检查：`cargo fmt --check && cargo clippy -- -D warnings && cargo test`（涉及桌面应用时另跑 `cargo clippy -p audiofn-app -- -D warnings` 与前端 `check` / `test:run`）。
 3. 按规范提交 commit，推送并向 `main` 发起 PR，描述清楚动机与改动点。
 4. CI 通过、Review 通过后合并；版本发布由 release-plz 自动完成，无需手动 bump。
 
@@ -121,4 +111,4 @@ cargo run -- kws install-model      # 或 asr / tts install-model
 
 - [项目结构](/docs/development/project-structure) — 仓库目录树与各模块职责
 - [依赖说明](/docs/development/dependencies) — 各 crate 依赖的用途
-- [发布流程](/docs/contributing/release) — release-plz + tauri-action 三平台自动构建
+- [发布流程](/docs/contributing/release) — release-plz + tauri-action 自动构建

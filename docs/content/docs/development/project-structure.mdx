@@ -6,74 +6,57 @@ description: 仓库目录树与各目录职责
 # 项目结构
 
 ```
-├── Cargo.toml           # 项目配置和依赖（workspace 根）
+├── Cargo.toml           # workspace 根（crate：audiofn，CLI bin：audiofn-cli）
 ├── rust-toolchain.toml  # Rust 工具链版本（1.97.1）
 ├── src/
 │   ├── main.rs          # 入口文件
 │   ├── lib.rs           # 库入口 + 测试工具（test_util 临时 HOME 隔离）
-│   ├── cli.rs           # CLI 命令定义（kws / asr / tts / llm / voice）
-│   ├── config/
-│   │   ├── mod.rs       # 配置模块入口
-│   │   └── settings.rs  # TOML 配置管理（含 [kws]/[asr]/[tts]/[llm]/[voice]/[live2d] 段）
-│   ├── kws/             # 关键词唤醒词检测（sherpa-onnx）
-│   │   ├── mod.rs       # KwsEngine + 离线/实时检测
-│   │   ├── config.rs    # KWS 配置解析与默认值
-│   │   ├── model.rs     # 模型下载 / sha256 校验 / 解压安装
-│   │   ├── token.rs     # 汉字 → ppinyin token 转换
-│   │   ├── english.rs   # 英文关键词 → ARPAbet 音素
-│   │   └── reaction.rs  # Reaction 可插拔反应（控制台 / GUI / 测试）
-│   ├── asr/             # 语音识别（sherpa-onnx 流式转写）
-│   │   ├── mod.rs       # AsrEngine + 离线/实时转写
-│   │   ├── config.rs    # ASR 配置解析与默认值
-│   │   └── reaction.rs  # Reaction 可插拔反应
-│   ├── tts/             # 文本转语音（sherpa-onnx ZipVoice）
-│   │   ├── mod.rs       # TtsEngine + 离线合成
-│   │   ├── config.rs    # TTS 配置解析与默认值
-│   │   ├── voice.rs     # 内置音色解析
-│   │   └── reaction.rs  # Reaction 可插拔反应
-│   ├── llm/             # 本地大语言模型（llama.cpp）
-│   │   ├── mod.rs       # LlmEngine 门面 + 事件 channel
-│   │   ├── config.rs    # LLM 配置解析与默认值
-│   │   ├── local/       # LocalLlamaProvider（llama.cpp 后端）
-│   │   ├── http.rs      # OpenAI 兼容 Responses API provider
-│   │   ├── agent.rs     # Agent 循环 + 工具调用
-│   │   ├── provider.rs  # LlmProvider trait
-│   │   └── tools.rs     # 工具运行时
-│   ├── voice/           # 语音会话编排（KWS→ASR→LLM→TTS 全链路）
-│   │   ├── mod.rs       # 会话模块入口 + CLI 运行
-│   │   ├── session.rs   # 会话状态机与事件循环（唤醒/聆听/思考/播报）
-│   │   ├── listen.rs    # 唤醒/聆听监听（KWS + ASR）
-│   │   ├── splitter.rs  # LLM 流式 token 断句
-│   │   ├── synthesizer.rs # TTS 句级合成线程
-│   │   ├── player.rs    # 音频播报（rodio Sink）
-│   │   ├── records.rs   # 对话记录持久化
-│   │   ├── events.rs    # 会话事件
-│   │   ├── state.rs     # 会话状态
-│   │   └── config.rs    # [voice] 配置解析
-│   ├── companion.rs     # 伙伴库（Live2D 模型集合 + 当前使用项）
-│   ├── model_library/   # 模型库核心服务（catalog / 安装 / 下载 / 选择）
-│   ├── live2d/          # Live2D 角色模型定位
-│   │   ├── mod.rs
-│   │   └── config.rs    # [live2d] 配置解析
+│   ├── cli.rs           # CLI 命令定义（asr / tts / config / completion）
+│   ├── asr/             # 语音识别（offline 文件转写 + dictate 听写）
+│   ├── tts/             # 语音合成（合成 + 音色解析 + 自定义音色库）
+│   ├── audiocpp/        # audio.cpp sidecar 客户端（定位 / 生命周期 / SSE / 模型族表）
+│   ├── model_library/   # 模型库（registry 预设 / 下载校验 / 安装 / 扫描）
 │   ├── audio.rs         # cpal 麦克风采集 + 重采样
-│   ├── logging.rs       # tracing 双层日志
+│   ├── config/          # settings.toml 配置 + shortcuts
+│   ├── logging.rs       # tracing 双层日志（文件 + stderr）
 │   └── datetime.rs      # 日期时间工具
-├── models/              # 模型资产（本体不入库，按清单下载）
-│   ├── manifest.json    # 模型清单（source / sha256 / license）
+├── models/              # 模型清单（本体不入库，按清单下载）
+│   ├── manifest.json    # 资产清单（source / sha256 / license / 文件名）
+│   ├── model_registry.json # 模型库预设
+│   ├── verified_registry.json # 人工验证记录
 │   └── THIRD_PARTY_NOTICES.md
-├── docs/                # Fumadocs 文档站（Next.js + MDX）
-│   ├── content/docs/    # 中文文档内容
-│   ├── app/             # 页面与布局
-│   └── lib/             # 内容源 loader
 ├── src-tauri/           # Tauri 2 桌面应用（workspace 成员）
-│   ├── src/lib.rs       # commands + 监听线程 + TauriReaction
-│   ├── frontend/        # React + Vite + TypeScript 多页面控制面板（Tailwind + shadcn/ui）
-│   ├── tauri.conf.json  # Tauri 配置（打包目标/图标/权限文案）
+│   ├── src/lib.rs       # Tauri commands + 听写 / 合成线程
+│   ├── frontend/        # React + Vite + TypeScript 控制面板（Tailwind + shadcn/ui）
+│   ├── tauri.conf.json  # Tauri 配置（打包 / externalBin / 权限文案）
 │   ├── capabilities/    # 权限声明
 │   └── icons/           # 应用图标
+├── docs/                # fumadocs 文档站（Next.js + MDX）
+│   ├── content/docs/    # 文档内容
+│   ├── app/             # 页面与布局
+│   └── lib/             # 内容源 loader 与平台检测
 ├── tests/               # 集成测试
 ├── package.json         # Tauri CLI（@tauri-apps/cli）
-├── scripts/             # 模型下载 / 模型测试 / 图标生成等脚本
-├── .github/             # CI / 发布流水线 / Issue 模板
+├── scripts/             # 引擎获取 / dmg 修复注入 / 图标生成等脚本
+├── .github/             # CI / 发布 / 网盘上传流水线
 └── .githooks/           # Git hooks
 ```
+
+## 关键模块说明
+
+| 模块 | 职责 |
+| ---- | ---- |
+| `src/asr/` | Qwen3-ASR 转写入口：`offline.rs`（wav 文件）、`dictate.rs`（麦克风录音 → 停止后整段转写） |
+| `src/tts/` | Qwen3-TTS 合成入口：`voice.rs` 解析音色参数，`voice_store.rs` 管理自定义音色库 |
+| `src/audiocpp/` | audio.cpp 引擎 sidecar：`locator.rs` 定位二进制、`server.rs` 管理子进程、`client.rs` SSE 流式请求 |
+| `src/model_library/` | 模型库：预设过滤、流式下载、sha256 校验、原子落位与已安装扫描 |
+| `src/audio.rs` | cpal 采集、设备枚举、采样率重采样（→ 16k mono） |
+| `src-tauri/` | 桌面面板：Tauri commands + 听写/合成线程，前端 React 页面（概览 / 模型 / 设置） |
+
+用户数据目录：`~/.audiofn/`（`settings.toml`、`models/`、`voices/`、`tts/` 合成输出、日志）。
+
+## 深入了解
+
+- [参与贡献](/docs/contributing) — 环境搭建、测试与 Git 工作流
+- [发布流程](/docs/contributing/release) — release-plz + tauri-action 自动构建
+- [依赖说明](/docs/development/dependencies) — 各 crate 依赖的用途

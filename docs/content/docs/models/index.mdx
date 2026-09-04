@@ -1,0 +1,50 @@
+---
+title: 模型库
+description: 模型预设、下载校验与切换
+---
+
+# 模型库
+
+模型**不随安装包或代码分发**，由内置的模型库按清单下载到本地。桌面端「模型」页与
+CLI `install-model` 共用同一套清单与校验逻辑。
+
+## 可用模型
+
+| 条目 id | 模型 | 用途 | 体积 | 适用平台 |
+| ------- | ---- | ---- | ---- | -------- |
+| `asr-qwen3-0.6b-audiocpp` | Qwen3-ASR 0.6B（q8_0，GGUF） | 语音转写，30 语言自动识别 | 约 1.1 GB | macOS / Linux |
+| `tts-qwen3-06b-base-q8-audiocpp` | Qwen3-TTS 0.6B Base（q8_0） | 音色克隆（默认） | 约 1.9 GB | macOS (Apple Silicon) |
+| `tts-qwen3-17b-base-q8-audiocpp` | Qwen3-TTS 1.7B Base（q8_0） | 音色克隆（质量优先） | 约 2.5 GB | macOS (Apple Silicon) |
+
+TTS 0.6B / 1.7B 建议内存：8GB / 16GB 以上。
+
+## 安装
+
+```bash
+# 桌面端：「模型」页点击下载（带进度与校验状态）
+
+# CLI
+audiofn asr install-model                       # ASR（缺省条目）
+audiofn tts install-model                       # TTS 0.6B（缺省条目）
+audiofn tts install-model --registry-id tts-qwen3-17b-base-q8-audiocpp
+```
+
+模型默认安装到 `~/.audiofn/models/<模型名>/`；`[asr] model_dir` / `[tts] model_dir`
+或 `--model-dir` 可指定其它位置。
+
+## 校验与来源
+
+- 清单随仓库版本管理：`models/manifest.json`（`source / sha256 / license / 文件名`）、
+  `models/model_registry.json`（预设与平台）、`models/verified_registry.json`（人工验证记录）
+- 下载完成后计算 sha256 与清单比对，**不匹配即删除报错**；先落临时文件再原子移动，
+  不会留下损坏的半截模型
+- 幂等：模型已存在且完整则跳过（`--force` 强制重装）
+- 第三方模型来源与许可见 `models/THIRD_PARTY_NOTICES.md`
+
+## 切换当前模型
+
+- 桌面端：「模型」页选择已安装模型设为当前使用
+- CLI：`[asr] model_dir` / `[tts] model_dir` 指向对应模型目录，或临时用 `--model-dir`
+
+`~/.audiofn/models/**/.audiofn-lib.json` 记录库内模型元数据，是「电脑上装了哪些模型」
+的唯一事实来源。

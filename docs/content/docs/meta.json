@@ -2,9 +2,11 @@
   "pages": [
     "index",
     "---指南---",
-    "getting-started",
-    "kws",
     "desktop-app",
+    "cli",
+    "models",
+    "voice-clone",
+    "faq",
     "---开发---",
     "development",
     "contributing",

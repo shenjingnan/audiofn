@@ -8,7 +8,7 @@ export function ScreenshotSection() {
       <div className="relative overflow-hidden rounded-2xl bg-fd-card shadow-2xl ring-1 ring-fd-border">
         <img
           src="/screenshots/home.png"
-          alt="AudioFn 桌面应用概览页"
+          alt="AudioFn 桌面应用"
           width={1600}
           height={1030}
           loading="lazy"
@@ -16,7 +16,7 @@ export function ScreenshotSection() {
         />
       </div>
       <p className="mt-4 text-center text-sm text-fd-muted-foreground">
-        桌面应用「概览」页：展示当前伙伴与 AI 能力状态
+        桌面应用「概览」页：ASR / TTS 模型、设备与系统资源状态
       </p>
     </div>
   );

@@ -50,12 +50,13 @@ export function HomeHero() {
         </div>
 
         <h1 className="text-balance text-4xl font-semibold tracking-tight text-fd-foreground sm:text-6xl">
-          开源的实时桌面 AI 伙伴
+          开源的本地优先桌面 ASR &amp; TTS 工具
         </h1>
 
         <p className="mt-6 text-pretty text-lg/8 text-fd-muted-foreground">
-          语音唤醒、语音识别、本地大语言模型与 Live2D 虚拟角色于一体。所有模型本地运行，数据不出设备；Windows
-          / macOS / Linux 三平台可用。
+          Qwen3-ASR 离线转写，30 语言自动识别；Qwen3-TTS 用 5–30
+          秒参考音频克隆你的音色。桌面与 CLI 双形态，全部在本地运行，数据不出设备；macOS
+          / Linux 可用。
         </p>
 
         <DownloadSection />

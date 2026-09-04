@@ -1,26 +1,38 @@
 ---
-title: ZapMomo
+title: 介绍
+description: AudioFn — 开源的本地优先桌面 ASR & TTS 工具
 ---
 
-<div align="center">
-  <img src="/logo.svg" alt="ZapMomo Logo" width="300" />
-</div>
+**AudioFn** 是一个开源的本地优先桌面 ASR & TTS 工具（An open-source, local-first desktop
+ASR & TTS toolkit with voice cloning）：离线语音转写 + 音色克隆，推理由 audio.cpp 引擎
+（ggml）在本机完成，音频与文本数据不出设备。
 
-An open-source, real-time desktop **AI companion** with voice, memory, and a customizable virtual character.
-
-开源的实时桌面 **AI 伴侣**：语音交互、记忆能力、可定制的虚拟角色。
+提供 **Tauri 2 桌面面板**（概览 / 模型 / 转写 / 合成 / 音色库 / 设置）与 **`audiofn` 命令行**
+两种形态，能力一致、配置共享（`~/.audiofn/settings.toml`）。
 
 ## 特性
 
-- **语音唤醒（KWS）** — 基于 sherpa-onnx 的 zipformer 唤醒词检测，支持实时麦克风监听与离线 wav 检测；自定义关键词直接输中文，自动转拼音 token
-- **桌面应用** — 基于 Tauri 2 的 GUI（KWS 控制面板），Windows / macOS / Linux 三平台安装包
-- **音频采集** — 基于 cpal 的麦克风采集 + 自动重采样（设备采样率 → 16k）
-- **CLI 骨架** — 基于 clap 的命令行参数解析，支持子命令和 Shell 补全生成
-- **异步运行时** — 集成 tokio，开箱即用的 async/await 支持
-- **配置管理** — TOML 格式的配置文件读写，支持 `${env.VAR}` 环境变量引用
-- **双层日志** — 基于 tracing 的日志系统，同时输出到文件和 stderr
-- **日期时间工具** — 基于 chrono 的常用时间格式转换函数
-- **测试支持** — 集成 tempfile 的测试隔离辅助工具
-- **代码质量** — cargo fmt / clippy / typos / tarpaulin / codecov 一站式配置
-- **CI/CD** — GitHub Actions 自动化测试、发布、覆盖率报告
-- **Shell 补全** — 支持 bash / zsh / fish / powershell 自动补全
+- **语音识别（ASR）** — Qwen3-ASR-0.6B 离线转写，30 语言自动识别；文件转写与录音听写两种入口
+- **语音合成（TTS）** — Qwen3-TTS-0.6B / 1.7B 零样本音色克隆：5–30 秒参考音频 + 对应文本，
+  即可用该音色合成任意文本（中英日韩等 10 语种）
+- **模型库** — 应用内一键下载、sha256 校验、切换当前模型；模型本体不入库
+- **本地优先** — 模型与推理全部在本地，无账号、无上传、无遥测
+- **跨平台** — macOS 13+（Apple Silicon / Intel）与 Linux x86_64；不提供 Windows 版本
+
+## 平台与引擎
+
+| 平台 | 引擎后端 | 安装包 |
+| ---- | -------- | ------ |
+| macOS 13+ (Apple Silicon) | Metal（GPU） | `.dmg` |
+| macOS 13+ (Intel) | CPU | `.dmg` |
+| Linux x86_64 | CPU | `.deb` / `.rpm` / `.AppImage` |
+
+模型不随安装包分发：首次使用在应用「模型」页一键下载（ASR 约 1.1GB，TTS 约 1.9GB 起），
+详见[模型库](/docs/models)。
+
+## 下一步
+
+- [桌面端](/docs/desktop-app) — 安装与页面导览
+- [CLI](/docs/cli) — 命令参考
+- [音色克隆指南](/docs/voice-clone) — 录制属于你自己的音色
+- [常见问题](/docs/faq) — macOS 未签名、Linux CPU 速度、长音频等
