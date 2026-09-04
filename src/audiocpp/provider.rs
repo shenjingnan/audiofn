@@ -5,7 +5,6 @@
 //! | triple | 引擎编入后端 | 缺省 provider |
 //! |---|---|---|
 //! | `darwin-aarch64` | Metal | `metal`（audio.cpp 0.6B 族实测 CPU RTF 6.6 不可用、Metal 0.41 达标，技术方案阶段 1 实测 2026-08-23） |
-//! | `windows-x86_64` | CUDA | `cuda`（上游 CUDA 实测 RTF 0.23~0.55；无 N 卡 / 驱动过旧时由 `server::lease` 自动回退 CPU） |
 //! | `darwin-x86_64` / linux | CPU | `cpu` |
 //!
 //! 用户显式配置（`[tts].provider` / `[asr].provider`）永远优先于本缺省。
@@ -13,7 +12,6 @@
 /// 平台三元组 → 缺省推理后端。
 pub fn default_provider_for(triple: &str) -> &'static str {
     match triple {
-        "windows-x86_64" => "cuda",
         "darwin-aarch64" => "metal",
         _ => "cpu",
     }
@@ -31,7 +29,6 @@ mod tests {
     /// 全三元组映射表（宿主平台无关，CI 三平台同断言）。
     #[test]
     fn test_default_provider_by_triple() {
-        assert_eq!(default_provider_for("windows-x86_64"), "cuda");
         assert_eq!(default_provider_for("darwin-aarch64"), "metal");
         assert_eq!(default_provider_for("darwin-x86_64"), "cpu");
         assert_eq!(default_provider_for("linux-x86_64"), "cpu");

@@ -244,7 +244,6 @@ async fn cmd_asr(cmd: AsrCmd) -> Result<(), String> {
                 let stage = match p.stage {
                     DownloadStage::Downloading => "下载",
                     DownloadStage::Verifying => "校验",
-                    DownloadStage::Extracting => "解压",
                     DownloadStage::Done => "完成",
                 };
                 println!("[{stage}] {}", p.message);
@@ -422,7 +421,6 @@ fn cmd_tts(cmd: TtsCmd) -> Result<(), String> {
                 let stage = match p.stage {
                     DownloadStage::Downloading => "下载",
                     DownloadStage::Verifying => "校验",
-                    DownloadStage::Extracting => "解压",
                     DownloadStage::Done => "完成",
                 };
                 println!("[{stage}] {}", p.message);

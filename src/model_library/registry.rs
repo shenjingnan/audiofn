@@ -188,7 +188,7 @@ pub fn asset_for(model: &RegistryModel) -> Option<&'static ModelAsset> {
 
 /// manifest role 对应的必需文件清单。
 ///
-/// 安装（`install_asset_to` 的幂等/校验）与完整性判断使用**同一份**定义，
+/// 安装（`install_raw_file_to_cancellable` 的幂等/校验）与完整性判断使用**同一份**定义，
 /// 避免出现「安装要求 A+B、完整性只查 A」的不一致。
 ///
 /// 一期裁剪后 manifest 只剩 qwen3 三资产（单文件 GGUF），必需文件名统一从
@@ -352,12 +352,12 @@ mod tests {
         assert_eq!(registry_tts_kind("不存在"), None);
     }
 
-    /// 平台过滤：audiocpp qwen3 家族 = darwin-aarch64 + windows-x86_64（Windows CUDA
-    /// 解锁）；无 platforms 的条目全平台可见。本机命中解锁平台时条目在列；
+    /// 平台过滤：audiocpp qwen3 家族 = darwin-aarch64（Windows 构建随一期裁剪移除，
+    /// 不再在册）；无 platforms 的条目全平台可见。本机命中解锁平台时条目在列；
     /// 其它平台的 CI 通过「显式三元组判定函数」覆盖，不依赖宿主平台。
     #[test]
     fn test_platforms_filter() {
-        let expected = ["darwin-aarch64", "windows-x86_64"];
+        let expected = ["darwin-aarch64"];
         for id in [
             "tts-qwen3-06b-base-q8-audiocpp",
             "tts-qwen3-17b-base-q8-audiocpp",
@@ -369,11 +369,11 @@ mod tests {
                 "{id} 平台清单"
             );
         }
-        // 显式判定（不依赖宿主平台）：解锁 darwin-aarch64 / windows-x86_64，
-        // darwin-x86_64（引擎无 Metal）/ linux（CPU-only 引擎）保持隐藏
+        // 显式判定（不依赖宿主平台）：解锁 darwin-aarch64；darwin-x86_64（引擎无
+        // Metal）/ linux（CPU-only 引擎）/ windows（已移除）保持隐藏
         let q06 = model_by_id("tts-qwen3-06b-base-q8-audiocpp").unwrap();
         assert!(platform_allows(q06, "darwin-aarch64"));
-        assert!(platform_allows(q06, "windows-x86_64"));
+        assert!(!platform_allows(q06, "windows-x86_64"));
         assert!(!platform_allows(q06, "darwin-x86_64"));
         assert!(!platform_allows(q06, "linux-x86_64"));
         // ASR 条目无平台约束（CPU 可跑，GPU 只是加速）
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn test_model_for_current_platform() {
         let triple = current_platform_triple();
-        let unlocked = triple == "darwin-aarch64" || triple == "windows-x86_64";
+        let unlocked = triple == "darwin-aarch64";
         let q06 = model_for_current_platform("tts-qwen3-06b-base-q8-audiocpp");
         assert_eq!(q06.is_some(), unlocked, "{triple} 上 Qwen3-TTS 可见性");
         // 无平台约束的 ASR 全平台可见

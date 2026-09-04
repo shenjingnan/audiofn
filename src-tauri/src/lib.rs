@@ -406,7 +406,6 @@ async fn download_asr_model(
             let stage = match p.stage {
                 zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
                 zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
-                zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
                 zapmomo::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
@@ -750,7 +749,6 @@ async fn download_tts_model(
             let stage = match p.stage {
                 zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
                 zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
-                zapmomo::model_library::asset::DownloadStage::Extracting => "extracting",
                 zapmomo::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
@@ -1146,7 +1144,6 @@ fn download_stage_str(stage: zapmomo::model_library::asset::DownloadStage) -> &'
     match stage {
         Downloading => "downloading",
         Verifying => "verifying",
-        Extracting => "extracting",
         Done => "done",
     }
 }

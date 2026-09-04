@@ -501,7 +501,7 @@ pub fn list_models() -> Vec<LibraryModel> {
     let sel = current_selections();
     let locals = get_local_models();
     let mut out = Vec::new();
-    // 平台受限条目（如仅 darwin-aarch64/windows-x86_64 的 audiocpp TTS）在此过滤：不可见即不可下载
+    // 平台受限条目（如仅 darwin-aarch64 的 audiocpp TTS）在此过滤：不可见即不可下载
     for reg in registry::models_for_current_platform() {
         out.push(build_registry_model(reg, &sel));
     }
@@ -844,7 +844,7 @@ fn is_empty_dir(p: &Path) -> bool {
 /// 安装 managed 模型：全部 required assets → staging → 整体校验 → commit → 写 metadata。
 ///
 /// 原子提交单位是整个模型；任何 required asset 失败/校验失败/取消都会删除 staging，
-/// 正式目录绝不出现半安装状态。optional assets（如 punctuation）在 commit 后 best-effort 安装。
+/// 正式目录绝不出现半安装状态。optional assets 在 commit 后 best-effort 安装。
 pub fn install_managed_model(
     model: &RegistryModel,
     on_progress: &mut ProgressFn,
@@ -868,21 +868,19 @@ pub fn install_managed_model(
     let final_dir = stage_and_commit(model, &assets, total_bytes, on_progress, cancel)?;
 
     // optional assets best-effort（失败仅 warn，不回滚主模型）。
-    // 当前 qwen3 三条目均无 optional 资产，循环保留为二期加族（独立目录资产）的扩展点。
+    // 当前 qwen3 三条目均无 optional 资产，循环保留为二期加族（独立资产）的扩展点。
     let mut progress = on_progress;
     for role in &model.optional_assets {
         let asset = match crate::model_library::asset::asset_by_role(role) {
             Some(a) => a,
             None => continue,
         };
-        let dest = final_dir.clone();
-        let required = registry::required_files_for_role(role);
-        if let Err(e) = crate::model_library::asset::install_asset_to_cancellable(
+        let dest = final_dir.join(&asset.archive);
+        if let Err(e) = crate::model_library::asset::install_raw_file_to_cancellable(
             asset,
             &dest,
             false,
             &mut progress,
-            required,
             cancel,
         ) {
             tracing::warn!("安装可选组件 {role} 失败（不影响主模型）: {e}");
@@ -892,19 +890,14 @@ pub fn install_managed_model(
     Ok(final_dir)
 }
 
-/// staging 安装清单条目：（资产, 安装完成所需文件名清单）。
-type StagedAsset = (
-    &'static crate::model_library::asset::ModelAsset,
-    &'static [&'static str],
-);
+/// staging 安装清单条目。
+type StagedAsset = &'static crate::model_library::asset::ModelAsset;
 
 /// 收集 staging 安装清单与总字节：required 资产进清单，optional 资产只计入字节。
 ///
-/// optional（如 ASR 的 punctuation）是独立目录的 tar.bz2，绝不能进 staging——
-/// `extract_and_place` 的原子落位是「目标已存在先移除」，第二个 tar.bz2 落到同一
-/// staging 目录会摧毁先解压的主模型文件，导致安装后完整性校验必然失败（ASR 模型库
-/// 下载必失败的根因）。optional 的实际安装由 [`install_managed_model`] commit 后的
-/// best-effort 循环装到各自独立目录。
+/// optional 资产不进 staging：staging 目录在 commit 时整体 rename 为正式目录，
+/// optional 属 commit 后单独落位的组件，进度总量却须一并计入（否则进度会跳变）。
+/// 实际安装由 [`install_managed_model`] commit 后的 best-effort 循环完成。
 fn staged_assets(model: &RegistryModel) -> Result<(Vec<StagedAsset>, u64), ModelError> {
     let mut total_bytes: u64 = 0;
     let mut assets: Vec<StagedAsset> = Vec::new();
@@ -917,16 +910,16 @@ fn staged_assets(model: &RegistryModel) -> Result<(Vec<StagedAsset>, u64), Model
             .ok_or_else(|| ModelError::Download(format!("未知资产 role：{role}")))?;
         total_bytes += asset.size_bytes;
         if model.required_assets.contains(role) {
-            assets.push((asset, registry::required_files_for_role(role)));
+            assets.push(asset);
         }
     }
     Ok((assets, total_bytes))
 }
 
 /// staging + 整体校验 + commit 的可测试核心：给定具体资产（可注入本地测试服务器）。
-fn stage_and_commit<'a>(
+fn stage_and_commit(
     model: &RegistryModel,
-    assets: &[(&'a crate::model_library::asset::ModelAsset, &'a [&'a str])],
+    assets: &[&crate::model_library::asset::ModelAsset],
     total_bytes: u64,
     on_progress: &mut ProgressFn,
     cancel: Option<&AtomicBool>,
@@ -960,28 +953,17 @@ fn stage_and_commit<'a>(
         }
     };
 
-    // 1. required assets 安装到 staging
+    // 1. required assets 安装到 staging（清单全部为裸单文件，直接落到 <staging>/<archive>）
     let install_result = (|| -> Result<(), ModelError> {
-        for (asset, required) in assets {
-            if asset.is_raw() {
-                let dest = staging_model.join(&asset.archive);
-                crate::model_library::asset::install_raw_file_to_cancellable(
-                    asset,
-                    &dest,
-                    false,
-                    &mut progress,
-                    cancel,
-                )?;
-            } else {
-                crate::model_library::asset::install_asset_to_cancellable(
-                    asset,
-                    &staging_model,
-                    false,
-                    &mut progress,
-                    required,
-                    cancel,
-                )?;
-            }
+        for asset in assets {
+            let dest = staging_model.join(&asset.archive);
+            crate::model_library::asset::install_raw_file_to_cancellable(
+                asset,
+                &dest,
+                false,
+                &mut progress,
+                cancel,
+            )?;
             done_bytes.fetch_add(asset.size_bytes, Ordering::Relaxed);
         }
         // 2. 整体完整性校验（staging）：必需文件按 required_assets 的 role 清单推导
@@ -1552,8 +1534,9 @@ mod tests {
 
     /// 回归：optional 资产绝不能进 staging 安装清单。
     ///
-    /// 进了会因 extract_and_place「目标已存在先移除」的原子落位摧毁主模型文件，
-    /// 曾导致模型库下载任何 ASR 模型都在「安装后完整性校验失败」处必败。
+    /// staging 目录在 commit 时整体 rename 为正式目录，optional 是 commit 后
+    /// best-effort 单独落位的组件；进 staging 会把进度总量与落位时机搅在一起，
+    /// 且在册条目语义上 required 必须先行完整校验。
     /// （在册 qwen3 三条目均无 optional 资产，此处用「借另一 role 作伪 optional」
     /// 的合成条目保留该回归语义。）
     #[test]
@@ -1565,7 +1548,7 @@ mod tests {
         synthetic.optional_assets = vec!["tts-audiocpp-qwen3-06b".into()];
         let (assets, total) = staged_assets(&synthetic).unwrap();
         assert_eq!(assets.len(), 1, "optional 资产不得进 staging 清单");
-        assert_eq!(assets[0].0.role, "asr-audiocpp-qwen3-06b");
+        assert_eq!(assets[0].role, "asr-audiocpp-qwen3-06b");
         let req = crate::model_library::asset::asset_by_role("asr-audiocpp-qwen3-06b")
             .unwrap()
             .size_bytes;
@@ -1582,9 +1565,9 @@ mod tests {
         ] {
             let (assets, total) = staged_assets(registry::model_by_id(id).unwrap()).unwrap();
             assert_eq!(assets.len(), 1, "{id} 应为单资产条目");
-            assert!(assets[0].0.is_raw(), "{id} 资产应为裸单文件");
+            assert!(assets[0].is_raw(), "{id} 资产应为裸单文件");
             assert_eq!(
-                total, assets[0].0.size_bytes,
+                total, assets[0].size_bytes,
                 "{id} 无 optional，总量应等于单资产"
             );
         }
@@ -1643,8 +1626,7 @@ mod tests {
             reg.required_assets = vec!["asr-test-raw".into()];
 
             let final_dir =
-                stage_and_commit(&reg, &[(&asset, &[])], asset.size_bytes, &mut |_| {}, None)
-                    .unwrap();
+                stage_and_commit(&reg, &[&asset], asset.size_bytes, &mut |_| {}, None).unwrap();
             let final_file = final_dir.join(gguf_name);
             assert!(
                 final_file.is_file(),
@@ -1659,23 +1641,23 @@ mod tests {
 
     /// staging 保证：任一 required asset 失败，正式模型目录不得出现半安装状态。
     ///
-    /// 归档内容按在册 role（asr-audiocpp-qwen3-06b）的完整性清单摆放，
+    /// 资产按在册同构方式构造（裸单文件 GGUF，archive 取在册 role 的真实文件名），
     /// 使「逐资产幂等清单」与「整体完整性校验」走同一份真实定义。
     #[test]
     fn test_install_staging_failure_leaves_no_partial() {
-        use crate::model_library::asset::tests::{serve_many, sha256_hex, tarbz2_with};
+        use crate::model_library::asset::tests::{serve_many, sha256_hex};
         use crate::model_library::asset::{ModelAsset, has_required_files};
 
         run_with_temp_home(|_| {
             let gguf = crate::audiocpp::asr_families::QWEN3_ASR_06B.gguf_file;
-            let bytes = tarbz2_with("test-model", &[gguf]);
+            let bytes = b"GGUF-test-payload".to_vec();
             let url = serve_many(bytes.clone());
-            let mk_asset = |sha: String, archive: &str| ModelAsset {
+            let mk_asset = |sha: String| ModelAsset {
                 name: "test-model".into(),
                 role: "asr-audiocpp-qwen3-06b".into(),
                 version: "test".into(),
-                kind: None,
-                archive: archive.into(),
+                kind: Some("raw".into()),
+                archive: gguf.into(),
                 source: url.clone(),
                 sha256: sha,
                 size_bytes: bytes.len() as u64,
@@ -1683,30 +1665,18 @@ mod tests {
             };
 
             // 成功：完整安装 + 写 metadata
-            let good = mk_asset(sha256_hex(&bytes), "mini.tar.bz2");
+            let good = mk_asset(sha256_hex(&bytes));
             let reg_ok = test_reg_model("test-model", "test-ok");
-            let dest = stage_and_commit(
-                &reg_ok,
-                &[(&good, &[gguf])],
-                good.size_bytes,
-                &mut |_| {},
-                None,
-            )
-            .unwrap();
+            let dest =
+                stage_and_commit(&reg_ok, &[&good], good.size_bytes, &mut |_| {}, None).unwrap();
             assert!(has_required_files(&dest, &[gguf]));
             assert!(dest.join(".zapmomo-lib.json").is_file());
 
             // 失败：sha 不匹配 → 正式目录绝不能出现，staging 被清理
-            let bad = mk_asset("0".repeat(64), "mini.tar.bz2");
+            let bad = mk_asset("0".repeat(64));
             let reg_bad = test_reg_model("test-model-bad", "test-bad");
-            let err = stage_and_commit(
-                &reg_bad,
-                &[(&bad, &[gguf])],
-                bad.size_bytes,
-                &mut |_| {},
-                None,
-            )
-            .unwrap_err();
+            let err =
+                stage_and_commit(&reg_bad, &[&bad], bad.size_bytes, &mut |_| {}, None).unwrap_err();
             assert!(matches!(err, ModelError::Sha256Mismatch { .. }));
             let final_bad = crate::config::settings::get_models_dir().join("test-model-bad");
             assert!(!final_bad.exists(), "失败不得留下正式目录");

@@ -66,14 +66,12 @@ chrono = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 
-# 模型下载安装（HTTP + sha256 校验 + tar.bz2 解压）
+# 模型下载安装（HTTP 流式下载 + sha256 校验 + 原子落位；清单只含裸单文件 GGUF）
 # platform-verifier：用系统证书存储校验 TLS——国内用户常开杀软/代理的 HTTPS
 # 解密（CA 只装在系统存储），ureq 默认的打包根证书（WebPki）会验证失败。
 ureq = { version = "3", features = ["socks-proxy", "platform-verifier"] }
 sha2 = "0.11"
 hex = "0.4"
-tar = { version = "0.4", default-features = false }
-bzip2 = "0.6"
 
 # --- 可选依赖（按需取消注释） ---
 # url = "2"                                              # URL 解析

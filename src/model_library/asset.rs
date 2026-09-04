@@ -3,11 +3,12 @@
 //! 模型元数据编译期嵌入（`include_str!`），运行时从用户目录
 //! `~/.zapmomo/models/<name>` 安装/查找，供 asr / tts / model_library、
 //! CLI（`asr/tts install-model`）及 GUI（下载按钮）复用。流程：
-//! 下载 → sha256 校验 → 落位（裸文件原子改名 / 归档解压），幂等可重跑。
+//! 下载 → sha256 校验 → 原子落位，幂等可重跑。
 //!
-//! 一期裁剪后清单只含 qwen3 三资产（单文件 GGUF），各能力的「默认装哪个模型、
-//! 装到哪个目录」由各能力模块的 registry 常量解析（`asr::config::DEFAULT_ASR_REGISTRY_ID`
-//! / `tts::config::DEFAULT_TTS_REGISTRY_ID`），本模块只提供通用下载/校验/落位。
+//! 一期裁剪后清单只含 qwen3 三资产（裸单文件 GGUF，无归档包），各能力的
+//! 「默认装哪个模型、装到哪个目录」由各能力模块的 registry 常量解析
+//! （`asr::config::DEFAULT_ASR_REGISTRY_ID` / `tts::config::DEFAULT_TTS_REGISTRY_ID`），
+//! 本模块只提供通用下载/校验/落位。
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -33,7 +34,8 @@ pub struct ModelAsset {
     pub role: String,
     #[serde(default)]
     pub version: String,
-    /// 资产类型：`archive`（默认，tar.bz2 解压落位）或 `raw`（单文件直接落位）。
+    /// 资产类型：`raw` = 裸单文件（下载校验后直接原子落位）。一期清单全部为 raw，
+    /// 归档（tar.bz2）类型及其解压链路已随清单裁剪移除。
     #[serde(default)]
     pub kind: Option<String>,
     pub archive: String,
@@ -46,7 +48,7 @@ pub struct ModelAsset {
 }
 
 impl ModelAsset {
-    /// 是否为「裸文件」资产（单文件下载，无需解压）。
+    /// 是否为「裸文件」资产（单文件下载，无需解压）。当前清单全部为 raw。
     pub fn is_raw(&self) -> bool {
         self.kind.as_deref() == Some("raw")
     }
@@ -81,7 +83,6 @@ pub fn user_models_dir() -> PathBuf {
 pub enum DownloadStage {
     Downloading,
     Verifying,
-    Extracting,
     Done,
 }
 
@@ -107,8 +108,8 @@ pub enum ModelError {
     Download(String),
     #[error("sha256 校验失败（期望 {expected}，实际 {actual}）")]
     Sha256Mismatch { expected: String, actual: String },
-    #[error("解压失败: {0}")]
-    Extract(String),
+    #[error("落位失败: {0}")]
+    Place(String),
     #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
     #[error("磁盘空间不足：{0}")]
@@ -122,93 +123,17 @@ pub fn has_required_files(dest_dir: &Path, required: &[&str]) -> bool {
     required.iter().all(|f| dest_dir.join(f).is_file())
 }
 
-/// 按指定资产安装（测试/多模型可复用）。`required_files` 用于幂等性判断。
-///
-/// 等价于 `install_asset_to_cancellable(..., None)`（不可取消）。
-pub fn install_asset_to(
-    asset: &ModelAsset,
-    dest_dir: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-    required_files: &[&str],
-) -> Result<(), ModelError> {
-    install_asset_to_cancellable(asset, dest_dir, force, on_progress, required_files, None)
-}
-
-/// 可取消版本的 [`install_asset_to`]。
-///
-/// `cancel` 为 `Some(&AtomicBool)` 时，下载读循环每轮检查；命中即清理临时文件并返回
-/// [`ModelError::Cancelled`]。各阶段前也会再检查一次（下载/校验/解压/落位）。
-pub fn install_asset_to_cancellable(
-    asset: &ModelAsset,
-    dest_dir: &Path,
-    force: bool,
-    on_progress: &mut ProgressFn,
-    required_files: &[&str],
-    cancel: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<(), ModelError> {
-    if cancelled(cancel) {
-        return Err(ModelError::Cancelled);
-    }
-    let parent = dest_dir
-        .parent()
-        .ok_or_else(|| ModelError::Extract("目标目录缺少父目录".to_string()))?;
-
-    if !force && has_required_files(dest_dir, required_files) {
-        on_progress(progress(DownloadStage::Done, 100.0, dest_dir, "模型已安装"));
-        return Ok(());
-    }
-
-    std::fs::create_dir_all(parent)?;
-    let tmp_archive = parent.join(format!(".{}.tmp", asset.archive));
-
-    download_to(
-        &asset.source,
-        &tmp_archive,
-        asset.size_bytes,
-        on_progress,
-        cancel,
-    )?;
-    if cancelled(cancel) {
-        let _ = std::fs::remove_file(&tmp_archive);
-        return Err(ModelError::Cancelled);
-    }
-
-    on_progress(progress(
-        DownloadStage::Verifying,
-        -1.0,
-        dest_dir,
-        "校验 sha256",
-    ));
-    verify_sha256(&tmp_archive, &asset.sha256)?;
-
-    on_progress(progress(
-        DownloadStage::Extracting,
-        -1.0,
-        dest_dir,
-        "解压中",
-    ));
-    extract_and_place(&tmp_archive, dest_dir)?;
-
-    on_progress(progress(
-        DownloadStage::Done,
-        100.0,
-        dest_dir,
-        "模型安装完成",
-    ));
-    Ok(())
-}
-
 /// 取消标志是否已置位。
 fn cancelled(cancel: Option<&std::sync::atomic::AtomicBool>) -> bool {
     cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// 安装「裸文件」资产（单文件，无解压）到 `dest_path`。
+/// 安装「裸文件」资产（单文件）到 `dest_path`。
 ///
 /// 用于 audiocpp 单文件 GGUF 这类独立发布的模型文件。流程：
-/// 幂等检查 → 下载到临时文件 → sha256 校验 → 原子落位（无解压阶段）。
-/// 需要中途取消时用 [`install_raw_file_to_cancellable`]。
+/// 幂等检查 → 下载到临时文件 → sha256 校验 → 原子落位。
+/// `cancel` 为 `Some(&AtomicBool)` 时，下载读循环每轮检查；命中即清理临时文件并
+/// 返回 [`ModelError::Cancelled`]，各阶段前也会再检查一次。
 pub fn install_raw_file_to_cancellable(
     asset: &ModelAsset,
     dest_path: &Path,
@@ -221,7 +146,7 @@ pub fn install_raw_file_to_cancellable(
     }
     let parent = dest_path
         .parent()
-        .ok_or_else(|| ModelError::Extract("目标文件缺少父目录".to_string()))?;
+        .ok_or_else(|| ModelError::Place("目标文件缺少父目录".to_string()))?;
 
     if !force && dest_path.is_file() {
         on_progress(progress(
@@ -459,101 +384,10 @@ pub(crate) fn verify_sha256(path: &Path, expected: &str) -> Result<(), ModelErro
     Ok(())
 }
 
-/// 解压 tar.bz2 到同父目录临时目录，再把顶层模型目录原子移到目标位置。
-fn extract_and_place(tmp_archive: &Path, dest_dir: &Path) -> Result<(), ModelError> {
-    let parent = dest_dir
-        .parent()
-        .ok_or_else(|| ModelError::Extract("目标目录缺少父目录".to_string()))?;
-    let name = dest_dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let tmp_extract = parent.join(format!(".{name}.extract"));
-    std::fs::create_dir_all(&tmp_extract)?;
-
-    let file = std::fs::File::open(tmp_archive)?;
-    let bz = bzip2::read::BzDecoder::new(file);
-    let mut archive = tar::Archive::new(bz);
-    archive
-        .unpack(&tmp_extract)
-        .map_err(|e| ModelError::Extract(e.to_string()))?;
-
-    // 定位顶层模型目录：优先 <name>，否则退化为唯一的顶层项（兼容不同包内布局）。
-    let src = tmp_extract.join(&name);
-    let src = if src.is_dir() {
-        src
-    } else {
-        let mut entries = std::fs::read_dir(&tmp_extract)?.filter_map(Result::ok);
-        let top = entries
-            .next()
-            .map(|e| e.path())
-            .ok_or_else(|| ModelError::Extract("压缩包内容为空".to_string()))?;
-        if entries.next().is_some() {
-            return Err(ModelError::Extract(
-                "压缩包顶层存在多个目录，无法确定模型根目录".to_string(),
-            ));
-        }
-        top
-    };
-
-    // 原子落位：目标已存在先移除（Windows 上 rename 覆盖目录会失败）。
-    if dest_dir.exists() {
-        std::fs::remove_dir_all(dest_dir)?;
-    }
-    std::fs::rename(&src, dest_dir)?;
-    std::fs::remove_dir_all(&tmp_extract)?;
-    let _ = std::fs::remove_file(tmp_archive);
-    Ok(())
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use std::net::TcpListener;
-
-    /// 测试归档内的占位模型文件（形状自定，仅需与安装校验清单一致；
-    /// 真实清单单源 audiocpp 族表，见 `registry::required_files_for_role`）。
-    pub(crate) const TEST_MODEL_FILES: [&str; 2] = ["encoder.onnx", "tokens.txt"];
-
-    pub(crate) fn mini_tarbz2(prefix: &str) -> Vec<u8> {
-        tarbz2_with(prefix, &TEST_MODEL_FILES)
-    }
-
-    /// 归档内容可指定的变体（调用方按其完整性清单摆文件）。
-    pub(crate) fn tarbz2_with(prefix: &str, files: &[&str]) -> Vec<u8> {
-        use bzip2::Compression;
-        use bzip2::write::BzEncoder;
-        let mut bz = BzEncoder::new(Vec::new(), Compression::default());
-        {
-            let mut ar = tar::Builder::new(&mut bz);
-            let base = format!("{prefix}/");
-            let mut dir = tar::Header::new_gnu();
-            dir.set_entry_type(tar::EntryType::Directory);
-            dir.set_size(0);
-            dir.set_mode(0o755);
-            dir.set_username("test").unwrap();
-            dir.set_groupname("test").unwrap();
-            dir.set_cksum();
-            ar.append_data(&mut dir, &base, std::io::empty()).unwrap();
-
-            let mut f = |rel: &str, bytes: &[u8]| {
-                let mut h = tar::Header::new_gnu();
-                h.set_size(bytes.len() as u64);
-                h.set_mode(0o644);
-                h.set_username("test").unwrap();
-                h.set_groupname("test").unwrap();
-                h.set_cksum();
-                ar.append_data(&mut h, format!("{base}{rel}"), bytes)
-                    .unwrap();
-            };
-            for (i, name) in files.iter().enumerate() {
-                f(name, format!("payload-{i}").as_bytes());
-            }
-            ar.finish().unwrap();
-        }
-        bz.finish().unwrap()
-    }
 
     /// 起一个本地 HTTP 服务，每个连接都返回给定字节，返回请求 URL。
     pub(crate) fn serve_many(bytes: Vec<u8>) -> String {
@@ -576,15 +410,16 @@ pub(crate) mod tests {
                 });
             }
         });
-        format!("http://{addr}/model.tar.bz2")
+        format!("http://{addr}/model.gguf")
     }
 
+    /// 在册同构测试资产：裸单文件（与 manifest 三资产同为 raw）。
     fn test_asset(source: &str, sha256: &str, archive: &str) -> ModelAsset {
         ModelAsset {
             name: "test-model".to_string(),
             role: "test-role".to_string(),
             version: "test".to_string(),
-            kind: None,
+            kind: Some("raw".to_string()),
             archive: archive.to_string(),
             source: source.to_string(),
             sha256: sha256.to_string(),
@@ -635,78 +470,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_extract_and_place_mini_archive() {
-        let dir = tempfile::tempdir().unwrap();
-        let archive = dir.path().join("mini.tar.bz2");
-        std::fs::write(&archive, mini_tarbz2("test-model")).unwrap();
-        let dest = dir.path().join("test-model");
-        extract_and_place(&archive, &dest).unwrap();
-        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
-        assert!(!archive.exists());
-        assert!(!dir.path().join(".test-model.extract").exists());
-    }
-
-    #[test]
-    fn test_install_full_flow_via_local_server() {
-        let dir = tempfile::tempdir().unwrap();
-        let bytes = mini_tarbz2("test-model");
-        let url = serve_many(bytes.clone());
-        let asset = test_asset(&url, &sha256_hex(&bytes), "mini.tar.bz2");
-
-        let dest = dir.path().join("test-model");
-        let mut stages = Vec::new();
-        install_asset_to(
-            &asset,
-            &dest,
-            false,
-            &mut |p| stages.push(p.stage),
-            &TEST_MODEL_FILES,
-        )
-        .unwrap();
-        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
-
-        let expected = [
-            DownloadStage::Downloading,
-            DownloadStage::Verifying,
-            DownloadStage::Extracting,
-            DownloadStage::Done,
-        ];
-        assert_eq!(stages, expected);
-    }
-
-    #[test]
-    fn test_install_idempotent_skips_when_installed() {
-        let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("test-model");
-        // 直接摆好必需文件，模拟已安装
-        std::fs::create_dir_all(&dest).unwrap();
-        for f in TEST_MODEL_FILES {
-            std::fs::write(dest.join(f), b"x").unwrap();
-        }
-
-        let mut stages = Vec::new();
-        install_asset_to(
-            &test_asset(
-                "http://127.0.0.1:1/none.tar.bz2",
-                &"0".repeat(64),
-                "mini.tar.bz2",
-            ),
-            &dest,
-            false,
-            &mut |p| stages.push(p.stage),
-            &TEST_MODEL_FILES,
-        )
-        .unwrap();
-        assert_eq!(stages, vec![DownloadStage::Done]);
-    }
-
-    #[test]
     fn test_install_raw_file_via_local_server() {
         let dir = tempfile::tempdir().unwrap();
         let bytes = b"gguf-bytes".to_vec();
         let url = serve_many(bytes.clone());
-        let mut asset = test_asset(&url, &sha256_hex(&bytes), "qwen3-test-q8_0.gguf");
-        asset.kind = Some("raw".to_string());
+        let asset = test_asset(&url, &sha256_hex(&bytes), "qwen3-test-q8_0.gguf");
 
         let dest = dir.path().join("qwen3-test-q8_0.gguf");
         let mut stages = Vec::new();
@@ -731,35 +499,29 @@ pub(crate) mod tests {
     #[test]
     fn test_install_force_reinstalls() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = mini_tarbz2("test-model");
+        let bytes = b"gguf-bytes".to_vec();
         let url = serve_many(bytes.clone());
-        let asset = test_asset(&url, &sha256_hex(&bytes), "mini.tar.bz2");
-        let dest = dir.path().join("test-model");
+        let asset = test_asset(&url, &sha256_hex(&bytes), "qwen3-test-q8_0.gguf");
+        let dest = dir.path().join("qwen3-test-q8_0.gguf");
 
-        // 先装好，再 force 重装 → 应重新走完整流程
-        install_asset_to(&asset, &dest, false, &mut |_| {}, &TEST_MODEL_FILES).unwrap();
+        // 先装好，再 force 重装 → 应重新走完整下载流程
+        install_raw_file_to_cancellable(&asset, &dest, false, &mut |_| {}, None).unwrap();
         let mut stages = Vec::new();
-        install_asset_to(
-            &asset,
-            &dest,
-            true,
-            &mut |p| stages.push(p.stage),
-            &TEST_MODEL_FILES,
-        )
-        .unwrap();
-        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
+        install_raw_file_to_cancellable(&asset, &dest, true, &mut |p| stages.push(p.stage), None)
+            .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), bytes);
         assert!(stages.contains(&DownloadStage::Downloading));
     }
 
     #[test]
     fn test_install_sha256_mismatch_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let bytes = mini_tarbz2("test-model");
+        let bytes = b"gguf-bytes".to_vec();
         let url = serve_many(bytes);
-        let asset = test_asset(&url, &"0".repeat(64), "mini.tar.bz2");
-        let dest = dir.path().join("test-model");
+        let asset = test_asset(&url, &"0".repeat(64), "qwen3-test-q8_0.gguf");
+        let dest = dir.path().join("qwen3-test-q8_0.gguf");
         let err =
-            install_asset_to(&asset, &dest, false, &mut |_| {}, &TEST_MODEL_FILES).unwrap_err();
+            install_raw_file_to_cancellable(&asset, &dest, false, &mut |_| {}, None).unwrap_err();
         assert!(matches!(err, ModelError::Sha256Mismatch { .. }));
         assert!(!dest.exists());
     }
@@ -791,20 +553,19 @@ pub(crate) mod tests {
                 });
             }
         });
-        format!("http://{addr}/slow.tar.bz2")
+        format!("http://{addr}/slow.gguf")
     }
 
+    /// 下载中途取消：临时文件被清理、正式文件不出现；取消复位后可重装成功。
     #[test]
     fn test_install_cancel_cleans_tmp_and_can_redo() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let dir = tempfile::tempdir().unwrap();
-        let payload = vec![0u8; 512 * 1024];
-        let url = serve_slow(15, payload);
-        let asset = test_asset(&url, &"0".repeat(64), "slow.tar.bz2");
-        let dest = dir.path().join("test-model");
-        let parent = dest.parent().unwrap();
-        let tmp_path = parent.join(".slow.tar.bz2.tmp");
+        let url = serve_slow(15, vec![0u8; 512 * 1024]);
+        let asset = test_asset(&url, &"0".repeat(64), "slow.gguf");
+        let dest = dir.path().join("slow.gguf");
+        let tmp_path = dir.path().join(".slow.gguf.tmp");
 
         // 收到第一个中间进度后立即取消（确定性，避免时序竞态）
         let (tx, rx) = std::sync::mpsc::channel();
@@ -814,7 +575,7 @@ pub(crate) mod tests {
         let dest_for_thread = dest.clone();
         let handle = std::thread::spawn(move || {
             let mut stages = Vec::new();
-            let result = install_asset_to_cancellable(
+            let result = install_raw_file_to_cancellable(
                 &asset_for_thread,
                 &dest_for_thread,
                 false,
@@ -824,7 +585,6 @@ pub(crate) mod tests {
                     }
                     stages.push(p.percent);
                 },
-                &TEST_MODEL_FILES,
                 Some(&cancel_clone),
             );
             (result, stages)
@@ -840,26 +600,25 @@ pub(crate) mod tests {
         assert!(matches!(result, Err(ModelError::Cancelled)));
         // 确实观察到了中间进度
         assert!(stages.iter().any(|&p| p > 0.0 && p < 100.0));
-        // 取消后临时文件与正式目录都被清理
+        // 取消后临时文件与正式文件都被清理
         assert!(!tmp_path.exists());
         assert!(!dest.exists());
 
         // 取消后重新下载（cancel 复位）能正常开始并完成
         cancel.store(false, Ordering::Relaxed);
-        let bytes = mini_tarbz2("test-model");
+        let bytes = b"gguf-bytes".to_vec();
         let url2 = serve_many(bytes.clone());
-        let asset2 = test_asset(&url2, &sha256_hex(&bytes), "mini.tar.bz2");
+        let asset2 = test_asset(&url2, &sha256_hex(&bytes), "slow.gguf");
         let mut stages2 = Vec::new();
-        install_asset_to_cancellable(
+        install_raw_file_to_cancellable(
             &asset2,
             &dest,
             false,
             &mut |p| stages2.push(p.stage),
-            &TEST_MODEL_FILES,
             Some(&cancel),
         )
         .unwrap();
-        assert!(has_required_files(&dest, &TEST_MODEL_FILES));
+        assert_eq!(std::fs::read(&dest).unwrap(), bytes);
     }
 
     /// 多资产总体进度聚合：各 asset 下载字节累计后总体百分比单调不减。
@@ -974,7 +733,7 @@ pub(crate) mod tests {
                 });
             }
         });
-        format!("http://{addr}/flaky.tar.bz2")
+        format!("http://{addr}/flaky-gguf.bin")
     }
 
     #[test]
@@ -983,7 +742,7 @@ pub(crate) mod tests {
         // 512KB、每连接最多 192KB：两次中断后第三次连接应完成
         let payload: Vec<u8> = (0..512 * 1024).map(|i| (i % 251) as u8).collect();
         let url = serve_flaky_resumable(payload.clone(), 192 * 1024);
-        let tmp = dir.path().join(".flaky.tar.bz2.tmp");
+        let tmp = dir.path().join(".flaky-gguf.bin.tmp");
         let mut last_percent = -1.0;
         download_to(
             &url,
