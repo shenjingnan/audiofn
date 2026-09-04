@@ -286,6 +286,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "audiofn"
+version = "0.1.28"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "block2",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "cpal",
+ "hex",
+ "hound",
+ "objc2",
+ "objc2-av-foundation",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tiny_http",
+ "tokio",
+ "toml 1.1.4+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+]
+
+[[package]]
+name = "audiofn-app"
+version = "0.1.28"
+dependencies = [
+ "audiofn",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "auto-launch"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6477,53 +6524,6 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
-]
-
-[[package]]
-name = "zapmomo"
-version = "0.1.28"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "block2",
- "chrono",
- "clap",
- "clap_complete",
- "cpal",
- "hex",
- "hound",
- "objc2",
- "objc2-av-foundation",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sysinfo",
- "tempfile",
- "thiserror 2.0.20",
- "tiny_http",
- "tokio",
- "toml 1.1.4+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "ureq",
-]
-
-[[package]]
-name = "zapmomo-app"
-version = "0.1.28"
-dependencies = [
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-single-instance",
- "tempfile",
- "tracing",
- "zapmomo",
 ]
 
 [[package]]

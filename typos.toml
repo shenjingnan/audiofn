@@ -8,6 +8,5 @@ wenetspeech = "wenetspeech"
 ppinyin = "ppinyin"
 arpabet = "arpabet"
 onnxruntime = "onnxruntime"
-zapmomo = "zapmomo"
 # deflate-flate2（zip crate 特性名）/ flate2 crate 的词干
 flate = "flate"

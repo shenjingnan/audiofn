@@ -1,6 +1,6 @@
-use clap::{CommandFactory, Parser};
 /// 集成测试示例
-use zapmomo::cli::{self, Cli};
+use audiofn::cli::{self, Cli};
+use clap::{CommandFactory, Parser};
 
 #[test]
 fn test_cli_config_output() {
@@ -26,7 +26,7 @@ fn test_cli_help_has_no_legacy_brand_or_greet() {
 
 #[test]
 fn test_datetime_iso_format() {
-    let now = zapmomo::datetime::iso_timestamp_now();
+    let now = audiofn::datetime::iso_timestamp_now();
     assert!(
         now.contains('T'),
         "ISO 8601 timestamp should contain T separator"
@@ -36,5 +36,5 @@ fn test_datetime_iso_format() {
 #[test]
 fn test_logging_init() {
     // 初始化日志不应 panic
-    zapmomo::logging::init_logging();
+    audiofn::logging::init_logging();
 }

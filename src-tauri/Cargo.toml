@@ -1,5 +1,5 @@
 [package]
-name = "zapmomo-app"
+name = "audiofn-app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,11 +10,11 @@ publish = false
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-# 可执行文件名与包名解耦：产出 ZapMomo 而非 zapmomo-app，
-# `tauri dev` 裸跑二进制时 Cmd+Tab / 活动监视器显示 ZapMomo。
-# 包名 zapmomo-app 保留，CI / release-plz 的 -p 引用不受影响。
+# 可执行文件名与包名解耦：产出 AudioFn 而非 audiofn-app，
+# `tauri dev` 裸跑二进制时 Cmd+Tab / 活动监视器显示 AudioFn。
+# 包名 audiofn-app 保留，CI / release-plz 的 -p 引用不受影响。
 [[bin]]
-name = "ZapMomo"
+name = "AudioFn"
 path = "src/main.rs"
 
 [dependencies]
@@ -43,7 +43,7 @@ serde_json = "1"
 tracing = "0.1"
 
 # 复用根 crate 的音频 / 配置 / 模型库逻辑
-zapmomo = { path = ".." }
+audiofn = { path = ".." }
 
 [dev-dependencies]
 tempfile = "3"

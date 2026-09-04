@@ -1,12 +1,22 @@
 //! ZapMomo 桌面应用（Tauri 2）。
 //!
-//! 复用根 crate `zapmomo` 的音频 / 配置逻辑：通过 Tauri command 暴露设备列表、
+//! 复用根 crate `audiofn` 的音频 / 配置逻辑：通过 Tauri command 暴露设备列表、
 //! ASR / TTS 配置与模型库管理；识别/合成在独立线程执行，进度与结果经
 //! `asr-*` / `tts-*` 事件推给前端。
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use audiofn::asr::config::AsrParamsPatch;
+use audiofn::asr::{AsrReaction, AsrResult, ReactionOutcome};
+use audiofn::config::settings::{self, AsrSettings, TtsSettings};
+use audiofn::model_library;
+use audiofn::model_library::{
+    InstallState as LibInstallState, LibraryModel, RuntimeAction as LibRuntimeAction,
+    SetCurrentResult, SystemResources, registry::ModelType as LibModelType,
+    storage::StorageInfoView,
+};
+use audiofn::tts::config::TtsParamsPatch;
 use serde::Serialize;
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
@@ -17,16 +27,6 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
-use zapmomo::asr::config::AsrParamsPatch;
-use zapmomo::asr::{AsrReaction, AsrResult, ReactionOutcome};
-use zapmomo::config::settings::{self, AsrSettings, TtsSettings};
-use zapmomo::model_library;
-use zapmomo::model_library::{
-    InstallState as LibInstallState, LibraryModel, RuntimeAction as LibRuntimeAction,
-    SetCurrentResult, SystemResources, registry::ModelType as LibModelType,
-    storage::StorageInfoView,
-};
-use zapmomo::tts::config::TtsParamsPatch;
 
 /// RAII：进入监听时置 `active_model_dir`，无论正常/错误/panic 退出监听线程都会清空。
 struct ActiveModelGuard {
@@ -88,7 +88,7 @@ fn get_app_info() -> AppInfo {
 /// 列出可用麦克风输入设备。
 #[tauri::command]
 fn list_devices() -> Vec<String> {
-    zapmomo::audio::list_input_devices()
+    audiofn::audio::list_input_devices()
 }
 
 /// 请求 macOS 麦克风授权（触发系统授权弹窗）。返回是否已授权。
@@ -97,7 +97,7 @@ fn list_devices() -> Vec<String> {
 /// 调试模式下每次重新编译授权会失效，前端在设备列表为空时引导用户点击。
 #[tauri::command]
 fn request_mic_permission() -> Result<bool, String> {
-    zapmomo::audio::request_mic_permission()
+    audiofn::audio::request_mic_permission()
 }
 
 /// ASR 模型下载状态：防重入标志。
@@ -182,12 +182,12 @@ struct AsrConfigInfo {
 /// 读取合并后的 ASR 配置（settings.toml + 默认值），并给出模型是否就绪。
 #[tauri::command]
 fn get_asr_config(state: State<'_, AsrDownloadState>) -> Result<AsrConfigInfo, String> {
-    let settings = zapmomo::config::settings::load_settings()?;
+    let settings = audiofn::config::settings::load_settings()?;
     let asr_settings = settings.as_ref().and_then(|s| s.asr.clone());
-    let cfg = zapmomo::asr::config::resolve(asr_settings.as_ref(), None)?;
+    let cfg = audiofn::asr::config::resolve(asr_settings.as_ref(), None)?;
 
     // 族 + 后端感知：sherpa 按模型类型清单探测；audiocpp 按族表 GGUF 单文件探测
-    let models_present = zapmomo::asr::config::models_present(&cfg);
+    let models_present = audiofn::asr::config::models_present(&cfg);
     let punctuation_present = cfg.punctuation_model.is_file();
     tracing::info!(
         "get_asr_config: model_type={} backend={} settings.asr.enabled={:?} resolve.enabled={} models_present={}",
@@ -219,7 +219,7 @@ fn get_asr_config(state: State<'_, AsrDownloadState>) -> Result<AsrConfigInfo, S
         models_present,
         punctuation_present,
         model_downloading: state.in_progress.load(Ordering::Relaxed),
-        settings_path: zapmomo::config::settings::get_settings_path()
+        settings_path: audiofn::config::settings::get_settings_path()
             .display()
             .to_string(),
     })
@@ -240,14 +240,14 @@ struct TranscribeResult {
 #[tauri::command]
 async fn transcribe_audio(wav_path: Option<String>) -> Result<TranscribeResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let settings = zapmomo::config::settings::load_settings()?;
+        let settings = audiofn::config::settings::load_settings()?;
         let asr_settings = settings.as_ref().and_then(|s| s.asr.clone());
-        let cfg = zapmomo::asr::config::resolve(asr_settings.as_ref(), None)?;
+        let cfg = audiofn::asr::config::resolve(asr_settings.as_ref(), None)?;
         let wav_path = wav_path
             .map(std::path::PathBuf::from)
-            .or_else(|| zapmomo::asr::default_test_wav(&cfg.model_dir))
+            .or_else(|| audiofn::asr::default_test_wav(&cfg.model_dir))
             .ok_or_else(|| "未指定音频路径，且模型目录没有 test_wavs/*.wav 示例音频".to_string())?;
-        let text = zapmomo::asr::transcribe_wav(&cfg, &wav_path)?;
+        let text = audiofn::asr::transcribe_wav(&cfg, &wav_path)?;
         Ok(TranscribeResult {
             text,
             model_type: cfg.model_type.as_str().to_string(),
@@ -271,9 +271,9 @@ fn start_asr_dictate_impl(
         return Err("已在听写中".to_string());
     }
 
-    let settings = zapmomo::config::settings::load_settings()?;
+    let settings = audiofn::config::settings::load_settings()?;
     let asr_settings = settings.as_ref().and_then(|s| s.asr.clone());
-    let cfg = zapmomo::asr::config::resolve(asr_settings.as_ref(), None)?;
+    let cfg = audiofn::asr::config::resolve(asr_settings.as_ref(), None)?;
 
     // 流式模型不支持听写（离线模型专用）：前端已切走开关，这里双保险拦截
     if cfg.model_type.is_streaming() {
@@ -284,7 +284,7 @@ fn start_asr_dictate_impl(
     }
 
     // ASR 就绪预检（backend 感知：audiocpp 按 GGUF 单文件校验），避免在后台线程里才报错
-    zapmomo::asr::config::preflight(&cfg)?;
+    audiofn::asr::config::preflight(&cfg)?;
 
     let running = state.running.clone();
     running.store(true, Ordering::Relaxed);
@@ -299,7 +299,7 @@ fn start_asr_dictate_impl(
         };
 
         // 整段录音：停止标志置位后转写（耗时数秒），期间仅 reaction 发最终结果事件
-        let result = zapmomo::asr::dictate::run_dictate(
+        let result = audiofn::asr::dictate::run_dictate(
             &cfg,
             device.as_deref(),
             None,
@@ -393,20 +393,20 @@ async fn download_asr_model(
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let model = zapmomo::model_library::registry::model_for_current_platform(
-            zapmomo::asr::config::DEFAULT_ASR_REGISTRY_ID,
+        let model = audiofn::model_library::registry::model_for_current_platform(
+            audiofn::asr::config::DEFAULT_ASR_REGISTRY_ID,
         )
         .ok_or_else(|| {
             format!(
                 "未知的模型库条目: {}",
-                zapmomo::asr::config::DEFAULT_ASR_REGISTRY_ID
+                audiofn::asr::config::DEFAULT_ASR_REGISTRY_ID
             )
         })?;
-        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
+        let mut progress = |p: audiofn::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
-                zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
-                zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
-                zapmomo::model_library::asset::DownloadStage::Done => "done",
+                audiofn::model_library::asset::DownloadStage::Downloading => "downloading",
+                audiofn::model_library::asset::DownloadStage::Verifying => "verifying",
+                audiofn::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
                 "asr-model-download-progress",
@@ -417,7 +417,7 @@ async fn download_asr_model(
                 },
             );
         };
-        zapmomo::model_library::install_managed_model(model, &mut progress, None)
+        audiofn::model_library::install_managed_model(model, &mut progress, None)
             .map_err(|e| e.to_string())?;
         Ok(())
     })
@@ -492,11 +492,11 @@ struct TtsResult {
 /// 读取合并后的 TTS 配置（settings.toml + 默认值），并给出模型是否就绪。
 #[tauri::command]
 fn get_tts_config(state: State<'_, TtsDownloadState>) -> Result<TtsConfigInfo, String> {
-    let settings = zapmomo::config::settings::load_settings()?;
+    let settings = audiofn::config::settings::load_settings()?;
     let tts_settings = settings.as_ref().and_then(|s| s.tts.clone());
-    let cfg = zapmomo::tts::config::resolve(tts_settings.as_ref(), None)?;
+    let cfg = audiofn::tts::config::resolve(tts_settings.as_ref(), None)?;
 
-    let models_present = zapmomo::tts::config::models_present(&cfg);
+    let models_present = audiofn::tts::config::models_present(&cfg);
 
     Ok(TtsConfigInfo {
         model_type: cfg.model_type.as_str().to_string(),
@@ -507,7 +507,7 @@ fn get_tts_config(state: State<'_, TtsDownloadState>) -> Result<TtsConfigInfo, S
         enabled: cfg.enabled,
         models_present,
         model_downloading: state.in_progress.load(Ordering::Relaxed),
-        settings_path: zapmomo::config::settings::get_settings_path()
+        settings_path: audiofn::config::settings::get_settings_path()
             .display()
             .to_string(),
         num_steps: cfg.num_steps,
@@ -520,24 +520,24 @@ fn get_tts_config(state: State<'_, TtsDownloadState>) -> Result<TtsConfigInfo, S
 /// 在后台线程内合成文本，期间发 `tts-progress`，完成后发 `tts-result`。
 fn synthesize_inner(
     app: &AppHandle,
-    cfg: &zapmomo::tts::config::ResolvedTtsConfig,
+    cfg: &audiofn::tts::config::ResolvedTtsConfig,
     text: &str,
     speed: f32,
-    voice: &zapmomo::tts::TtsVoiceParams,
+    voice: &audiofn::tts::TtsVoiceParams,
 ) -> Result<(), String> {
-    let engine = zapmomo::tts::TtsEngine::new(cfg.clone())?;
-    let out_dir = zapmomo::config::settings::get_tts_output_dir();
+    let engine = audiofn::tts::TtsEngine::new(cfg.clone())?;
+    let out_dir = audiofn::config::settings::get_tts_output_dir();
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建输出目录失败: {e}"))?;
     // 放行 asset 协议 scope，前端 <audio> 才能通过 asset:// 播放生成的 wav。
     let _ = app.asset_protocol_scope().allow_directory(&out_dir, true);
-    let out_path = zapmomo::tts::default_output_path();
+    let out_path = audiofn::tts::default_output_path();
 
     let progress_app = app.clone();
     let sample_count =
         engine.synthesize_to_wav_with_progress(text, speed, voice, &out_path, move |p| {
             let _ = progress_app.emit(
                 "tts-progress",
-                zapmomo::tts::reaction::TtsProgress { percent: p },
+                audiofn::tts::reaction::TtsProgress { percent: p },
             );
             true
         })?;
@@ -557,12 +557,12 @@ fn synthesize_inner(
 
 /// 列出可用音色：参考音频克隆模型返回参考音色（模型包内置 + 用户自定义音色库）。
 #[tauri::command]
-fn list_tts_voices() -> Result<Vec<zapmomo::tts::TtsVoice>, String> {
-    let settings = zapmomo::config::settings::load_settings()?;
+fn list_tts_voices() -> Result<Vec<audiofn::tts::TtsVoice>, String> {
+    let settings = audiofn::config::settings::load_settings()?;
     let tts_settings = settings.as_ref().and_then(|s| s.tts.clone());
-    let cfg = zapmomo::tts::config::resolve(tts_settings.as_ref(), None)?;
-    let mut voices = zapmomo::tts::voice::list_builtin_voices(&cfg.model_dir);
-    voices.extend(zapmomo::tts::voice_store::list_custom_voices());
+    let cfg = audiofn::tts::config::resolve(tts_settings.as_ref(), None)?;
+    let mut voices = audiofn::tts::voice::list_builtin_voices(&cfg.model_dir);
+    voices.extend(audiofn::tts::voice_store::list_custom_voices());
     Ok(voices)
 }
 
@@ -572,8 +572,8 @@ fn save_tts_voice(
     name: String,
     source_wav_path: String,
     reference_text: String,
-) -> Result<zapmomo::tts::TtsVoice, String> {
-    zapmomo::tts::voice_store::save_voice(
+) -> Result<audiofn::tts::TtsVoice, String> {
+    audiofn::tts::voice_store::save_voice(
         &name,
         std::path::Path::new(&source_wav_path),
         &reference_text,
@@ -583,7 +583,7 @@ fn save_tts_voice(
 /// 删除一个自定义音色（清单 + wav 文件）。
 #[tauri::command]
 fn delete_tts_voice(id: String) -> Result<(), String> {
-    zapmomo::tts::voice_store::delete_voice(&id)?;
+    audiofn::tts::voice_store::delete_voice(&id)?;
     Ok(())
 }
 
@@ -592,15 +592,15 @@ fn delete_tts_voice(id: String) -> Result<(), String> {
 /// 与 `list_tts_voices` 的区别：后者按当前 TTS 模型过滤（非克隆模型返回空、
 /// 含 builtin 条目），绑定是持久化元数据、跨模型有效，必须看到全量音色库。
 #[tauri::command]
-fn list_voice_library() -> Result<Vec<zapmomo::tts::TtsVoice>, String> {
-    Ok(zapmomo::tts::voice_store::list_custom_voices())
+fn list_voice_library() -> Result<Vec<audiofn::tts::TtsVoice>, String> {
+    Ok(audiofn::tts::voice_store::list_custom_voices())
 }
 
 /// 录制 N 秒麦克风并保存为 16k wav，返回 wav 路径（供后续保存为音色）。
 #[tauri::command]
 async fn record_tts_voice(seconds: u32, device: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        zapmomo::audio::record_voice(seconds, device.as_deref()).map(|p| p.display().to_string())
+        audiofn::audio::record_voice(seconds, device.as_deref()).map(|p| p.display().to_string())
     })
     .await
     .map_err(|e| format!("录音任务异常: {e}"))?
@@ -612,10 +612,10 @@ async fn record_tts_voice(seconds: u32, device: Option<String>) -> Result<String
 #[tauri::command]
 async fn transcribe_reference_audio(wav_path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let settings = zapmomo::config::settings::load_settings()?;
+        let settings = audiofn::config::settings::load_settings()?;
         let asr_settings = settings.as_ref().and_then(|s| s.asr.clone());
-        let cfg = zapmomo::asr::config::resolve(asr_settings.as_ref(), None)?;
-        zapmomo::asr::transcribe_wav(&cfg, Path::new(&wav_path))
+        let cfg = audiofn::asr::config::resolve(asr_settings.as_ref(), None)?;
+        audiofn::asr::transcribe_wav(&cfg, Path::new(&wav_path))
     })
     .await
     .map_err(|e| format!("转写任务异常: {e}"))?
@@ -643,9 +643,9 @@ fn synthesize_tts(
         return Err("文本不能为空".to_string());
     }
 
-    let settings = zapmomo::config::settings::load_settings()?;
+    let settings = audiofn::config::settings::load_settings()?;
     let tts_settings = settings.as_ref().and_then(|s| s.tts.clone());
-    let cfg = zapmomo::tts::config::resolve(tts_settings.as_ref(), None)?;
+    let cfg = audiofn::tts::config::resolve(tts_settings.as_ref(), None)?;
 
     // 启用门控：关闭时直接返回错误，前端据此禁用合成。
     if !cfg.enabled {
@@ -654,16 +654,16 @@ fn synthesize_tts(
 
     // 预检模型文件（backend 感知：sherpa 按模型类型清单、audiocpp 按固定两文件），
     // 失败同步返回清晰错误（避免在后台线程里才报错）
-    zapmomo::tts::config::preflight(&cfg).map_err(|e| {
+    audiofn::tts::config::preflight(&cfg).map_err(|e| {
         format!(
             "{e}\n\n请在「配置」面板点击「选择模型」，或运行 `zapmomo tts install-model` 下载模型。"
         )
     })?;
 
-    // 合成音色参数统一解析（见 zapmomo::tts::voice）。用户显式参数
+    // 合成音色参数统一解析（见 audiofn::tts::voice）。用户显式参数
     // （音色/自定义参考音频）优先；在后台线程外解析，尽早报错。
     let custom_wav = reference_wav.map(std::path::PathBuf::from);
-    let voice_params = zapmomo::tts::voice::resolve_voice_params(
+    let voice_params = audiofn::tts::voice::resolve_voice_params(
         &cfg,
         voice.as_deref(),
         custom_wav.as_deref(),
@@ -736,20 +736,20 @@ async fn download_tts_model(
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = ResetOnDrop(flag);
-        let model = zapmomo::model_library::registry::model_for_current_platform(
-            zapmomo::tts::config::DEFAULT_TTS_REGISTRY_ID,
+        let model = audiofn::model_library::registry::model_for_current_platform(
+            audiofn::tts::config::DEFAULT_TTS_REGISTRY_ID,
         )
         .ok_or_else(|| {
             format!(
                 "未知的模型库条目: {}",
-                zapmomo::tts::config::DEFAULT_TTS_REGISTRY_ID
+                audiofn::tts::config::DEFAULT_TTS_REGISTRY_ID
             )
         })?;
-        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
+        let mut progress = |p: audiofn::model_library::asset::DownloadProgress| {
             let stage = match p.stage {
-                zapmomo::model_library::asset::DownloadStage::Downloading => "downloading",
-                zapmomo::model_library::asset::DownloadStage::Verifying => "verifying",
-                zapmomo::model_library::asset::DownloadStage::Done => "done",
+                audiofn::model_library::asset::DownloadStage::Downloading => "downloading",
+                audiofn::model_library::asset::DownloadStage::Verifying => "verifying",
+                audiofn::model_library::asset::DownloadStage::Done => "done",
             };
             let _ = app.emit(
                 "tts-model-download-progress",
@@ -760,7 +760,7 @@ async fn download_tts_model(
                 },
             );
         };
-        zapmomo::model_library::install_managed_model(model, &mut progress, None)
+        audiofn::model_library::install_managed_model(model, &mut progress, None)
             .map_err(|e| e.to_string())?;
         Ok(())
     })
@@ -810,7 +810,7 @@ fn set_tts_voice(voice: Option<String>) -> Result<(), String> {
 /// 模型），并在切回 sherpa 时复位 backend 覆盖。保存后下一次合成即生效。
 #[tauri::command]
 fn set_tts_backend(backend: String) -> Result<(), String> {
-    let kind = zapmomo::tts::config::TtsBackendKind::parse_str(&backend)
+    let kind = audiofn::tts::config::TtsBackendKind::parse_str(&backend)
         .ok_or_else(|| format!("未知 TTS 后端: {backend}（支持 sherpa / audiocpp）"))?;
     let mut settings = settings::load_settings()?.unwrap_or_default();
     let tts = settings.tts.get_or_insert_with(TtsSettings::default);
@@ -972,8 +972,8 @@ fn open_settings(app: AppHandle) {
 }
 
 /// 全局快捷键触发分发（复用托盘/菜单同款内部函数）。
-fn dispatch_shortcut(app: &AppHandle, action: zapmomo::config::shortcuts::ShortcutAction) {
-    use zapmomo::config::shortcuts::ShortcutAction;
+fn dispatch_shortcut(app: &AppHandle, action: audiofn::config::shortcuts::ShortcutAction) {
+    use audiofn::config::shortcuts::ShortcutAction;
     match action {
         ShortcutAction::OpenSettings => show_settings_window(app),
     }
@@ -982,7 +982,7 @@ fn dispatch_shortcut(app: &AppHandle, action: zapmomo::config::shortcuts::Shortc
 /// 启动时按 `[shortcuts]` 配置注册全局快捷键：单个失败仅告警不阻塞启动
 /// （键位可能已被其他软件占用），其余照常注册。
 fn register_shortcuts_at_startup(app: &AppHandle) {
-    use zapmomo::config::shortcuts::ShortcutAction;
+    use audiofn::config::shortcuts::ShortcutAction;
     let shortcuts = settings::load_settings()
         .ok()
         .flatten()
@@ -1020,7 +1020,7 @@ fn get_shortcuts() -> Result<std::collections::HashMap<String, String>, String> 
         .shortcuts
         .unwrap_or_default();
     let mut map = std::collections::HashMap::new();
-    for action in zapmomo::config::shortcuts::ShortcutAction::ALL {
+    for action in audiofn::config::shortcuts::ShortcutAction::ALL {
         if let Some(acc) = shortcuts.get(action) {
             map.insert(action.as_str().to_string(), acc.to_string());
         }
@@ -1032,7 +1032,7 @@ fn get_shortcuts() -> Result<std::collections::HashMap<String, String>, String> 
 /// 注册失败，配置保持原值，杜绝「界面已绑定但实际不生效」的假状态）。
 #[tauri::command]
 fn set_shortcut(app: AppHandle, action: String, accelerator: String) -> Result<(), String> {
-    use zapmomo::config::shortcuts::{ShortcutAction, validate_accelerator};
+    use audiofn::config::shortcuts::{ShortcutAction, validate_accelerator};
     let action =
         ShortcutAction::from_ident(&action).ok_or_else(|| format!("未知的操作：{action}"))?;
     let accelerator = accelerator.trim().to_string();
@@ -1070,7 +1070,7 @@ fn set_shortcut(app: AppHandle, action: String, accelerator: String) -> Result<(
 /// 清除操作的快捷键绑定（解绑 + 配置置空）。
 #[tauri::command]
 fn clear_shortcut(app: AppHandle, action: String) -> Result<(), String> {
-    use zapmomo::config::shortcuts::ShortcutAction;
+    use audiofn::config::shortcuts::ShortcutAction;
     let action =
         ShortcutAction::from_ident(&action).ok_or_else(|| format!("未知的操作：{action}"))?;
     let mut cfg = settings::load_settings()?.unwrap_or_default();
@@ -1089,14 +1089,14 @@ fn clear_shortcut(app: AppHandle, action: String) -> Result<(), String> {
 /// 退出应用。退出前回收 audio.cpp sidecar 进程。
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    zapmomo::audiocpp::server::shutdown_blocking();
+    audiofn::audiocpp::server::shutdown_blocking();
     app.exit(0);
 }
 
 /// 重启应用（退出后自动重新拉起，供设置页按钮调用）。退出前回收 audio.cpp sidecar 进程。
 #[tauri::command]
 fn restart_app(app: AppHandle) {
-    zapmomo::audiocpp::server::shutdown_blocking();
+    audiofn::audiocpp::server::shutdown_blocking();
     app.request_restart();
 }
 
@@ -1139,8 +1139,8 @@ impl Drop for LibraryDownloadGuard {
     }
 }
 
-fn download_stage_str(stage: zapmomo::model_library::asset::DownloadStage) -> &'static str {
-    use zapmomo::model_library::asset::DownloadStage::*;
+fn download_stage_str(stage: audiofn::model_library::asset::DownloadStage) -> &'static str {
+    use audiofn::model_library::asset::DownloadStage::*;
     match stage {
         Downloading => "downloading",
         Verifying => "verifying",
@@ -1254,7 +1254,7 @@ async fn download_library_model(
             );
         };
         emit("preparing", 0.0, "准备下载…");
-        let mut progress = |p: zapmomo::model_library::asset::DownloadProgress| {
+        let mut progress = |p: audiofn::model_library::asset::DownloadProgress| {
             let _ = app.emit(
                 "model-library-download-progress",
                 ModelLibraryProgressPayload {
@@ -1276,7 +1276,7 @@ async fn download_library_model(
                 emit("done", 100.0, "模型安装完成");
                 Ok(())
             }
-            Err(zapmomo::model_library::asset::ModelError::Cancelled) => {
+            Err(audiofn::model_library::asset::ModelError::Cancelled) => {
                 emit("cancelled", 0.0, "已取消下载");
                 Ok(())
             }
@@ -1456,7 +1456,7 @@ fn check_storage_busy(
 #[tauri::command]
 async fn get_storage_info(mig: State<'_, StorageMigrateState>) -> Result<StorageInfoView, String> {
     let mut info =
-        tauri::async_runtime::spawn_blocking(zapmomo::model_library::storage::collect_storage_info)
+        tauri::async_runtime::spawn_blocking(audiofn::model_library::storage::collect_storage_info)
             .await
             .map_err(|e| e.to_string())??;
     info.migrating = mig.is_running();
@@ -1465,9 +1465,9 @@ async fn get_storage_info(mig: State<'_, StorageMigrateState>) -> Result<Storage
 
 /// 首次下载/导入前的存储位置引导信息（轻量查询，不做旧根全量遍历，可频繁调用）。
 #[tauri::command]
-async fn get_storage_prompt() -> Result<zapmomo::model_library::storage::StoragePromptView, String>
+async fn get_storage_prompt() -> Result<audiofn::model_library::storage::StoragePromptView, String>
 {
-    tauri::async_runtime::spawn_blocking(zapmomo::model_library::storage::collect_prompt_info)
+    tauri::async_runtime::spawn_blocking(audiofn::model_library::storage::collect_prompt_info)
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1476,7 +1476,7 @@ async fn get_storage_prompt() -> Result<zapmomo::model_library::storage::Storage
 #[tauri::command]
 async fn acknowledge_storage_prompt() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(|| {
-        zapmomo::model_library::update_settings(|cfg| {
+        audiofn::model_library::update_settings(|cfg| {
             cfg.storage_prompt_acknowledged = true;
         })
     })
@@ -1508,21 +1508,21 @@ async fn set_data_dir(
 
     let data_dir_value = match &path {
         Some(p) if !p.trim().is_empty() => Some(
-            zapmomo::model_library::storage::validate_data_dir(Path::new(p))?
+            audiofn::model_library::storage::validate_data_dir(Path::new(p))?
                 .display()
                 .to_string(),
         ),
         _ => None,
     };
-    zapmomo::model_library::update_settings(|cfg| {
+    audiofn::model_library::update_settings(|cfg| {
         cfg.data_dir = data_dir_value.clone();
         // 用户已在设置里对存储位置做出明确选择（含恢复默认），引导不再弹
         cfg.storage_prompt_acknowledged = true;
     })?;
-    zapmomo::config::settings::refresh_data_dir_cache();
+    audiofn::config::settings::refresh_data_dir_cache();
     let _ = app.emit("storage-dir-changed", ());
 
-    tauri::async_runtime::spawn_blocking(zapmomo::model_library::storage::collect_storage_info)
+    tauri::async_runtime::spawn_blocking(audiofn::model_library::storage::collect_storage_info)
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1556,7 +1556,7 @@ async fn migrate_storage(
             running: running.clone(),
             cancel: cancel.clone(),
         };
-        let outcome = zapmomo::model_library::storage::run_migration(
+        let outcome = audiofn::model_library::storage::run_migration(
             false,
             &mut |p| {
                 let _ = emit_app.emit("storage-migrate-progress", &p);
@@ -1599,7 +1599,7 @@ fn cancel_storage_migration(mig: State<'_, StorageMigrateState>) -> Result<(), S
 /// 在文件管理器中打开当前模型目录。
 #[tauri::command]
 fn open_storage_dir() -> Result<(), String> {
-    open_path(&zapmomo::config::settings::get_models_dir())
+    open_path(&audiofn::config::settings::get_models_dir())
 }
 
 /// 托盘 id（档位变化后 `tray_by_id` 定位托盘并重建菜单）。
@@ -1636,11 +1636,11 @@ fn handle_menu(app: &AppHandle, id: &str) {
         "show_settings" | "open_settings" => show_settings_window(app),
         // 退出/重启前回收 audio.cpp sidecar 进程（幂等）。
         "restart" => {
-            zapmomo::audiocpp::server::shutdown_blocking();
+            audiofn::audiocpp::server::shutdown_blocking();
             app.request_restart();
         }
         "quit" => {
-            zapmomo::audiocpp::server::shutdown_blocking();
+            audiofn::audiocpp::server::shutdown_blocking();
             app.exit(0);
         }
         // 开机自启动：按当前状态显示相反动作项，点击应用固定值（幂等）。
@@ -1656,7 +1656,7 @@ fn handle_menu(app: &AppHandle, id: &str) {
 
 /// Tauri 应用入口。
 pub fn run() {
-    zapmomo::logging::init_logging();
+    audiofn::logging::init_logging();
     tauri::Builder::default()
         // 单实例防护：官方要求注册为第一个插件。自启常驻后用户再手动点图标时，
         // 回调在已有实例内执行（第二进程自行退出）：前置设置窗。
@@ -1747,8 +1747,8 @@ pub fn run() {
                     search_dirs.push(resource_dir);
                 }
                 tracing::info!(target: "audiocpp", resource_dir = ?app.path().resource_dir().ok(), search_dirs = ?search_dirs, "audiocpp 引擎搜索目录注入");
-                zapmomo::audiocpp::locator::set_search_dirs(search_dirs);
-                zapmomo::audiocpp::server::set_idle_keepalive(Some(
+                audiofn::audiocpp::locator::set_search_dirs(search_dirs);
+                audiofn::audiocpp::server::set_idle_keepalive(Some(
                     std::time::Duration::from_secs(45),
                 ));
             }
@@ -1895,7 +1895,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                zapmomo::audiocpp::server::shutdown_blocking();
+                audiofn::audiocpp::server::shutdown_blocking();
             }
         });
 }

@@ -8,22 +8,22 @@ version = "0.1.28"
 edition = "2024"
 # 统一使用固定工具链 1.97.1（见 rust-toolchain.toml）；最低支持版本 1.97
 rust-version = "1.97"
-description = "An open-source, real-time desktop AI companion with voice, memory, and a customizable virtual character."
+description = "An open-source, local-first desktop ASR & TTS toolkit with voice cloning."
 license = "GPL-3.0-only"
 
 [package]
-name = "zapmomo"
+name = "audiofn"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 
-# 显式命名：默认 bin 名 = 包名 `zapmomo`，与 src-tauri 的 bin `ZapMomo` 仅大小写
-# 不同——Windows 的 target 目录大小写不敏感，二者会互相覆盖（GUI / CLI 变成
-# 对方的二进制，`tauri dev` 启动后打印 CLI 帮助即此症）。
+# bin 名与包名解耦：CLI 产物为 `audiofn-cli`，避免与 src-tauri 的 GUI bin
+# `AudioFn` 撞产物名；面向用户的命令名（`--help` 用法行 / 补全）由 `cli.rs`
+# 固定的 bin_name `audiofn` 决定，与产物文件名无关。
 [[bin]]
-name = "zapmomo-cli"
+name = "audiofn-cli"
 path = "src/main.rs"
 
 [dependencies]

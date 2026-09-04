@@ -1,9 +1,9 @@
+use audiofn::cli::{self, Cli};
 use clap::Parser;
-use zapmomo::cli::{self, Cli};
 
 #[tokio::main]
 async fn main() {
-    zapmomo::logging::init_logging();
+    audiofn::logging::init_logging();
 
     let cli = Cli::parse();
     let result = cli::run(cli).await;

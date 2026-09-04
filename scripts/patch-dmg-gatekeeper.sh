@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 向 dmg 安装镜像注入「首次打开修复.command」。
 #
-# 背景：ZapMomo 未经 Apple 签名公证，macOS 首次打开会被 Gatekeeper 拦截，报
-# 「"ZapMomo" 已损坏，无法打开」（实为隔离属性作祟，并非真损坏），需执行
-#   xattr -cr /Applications/ZapMomo.app
+# 背景：AudioFn 未经 Apple 签名公证，macOS 首次打开会被 Gatekeeper 拦截，报
+# 「"AudioFn" 已损坏，无法打开」（实为隔离属性作祟，并非真损坏），需执行
+#   xattr -cr /Applications/AudioFn.app
 # 把修复命令做成 dmg 里的双击脚本：双击即自动安装到「应用程序」+ 清隔离 + 启动，
 # 用户不必先去阅读 README。
 #
@@ -16,8 +16,8 @@
 set -euo pipefail
 
 DMG="${1:?用法: $0 <dmg 路径>}"
-VOL_NAME="ZapMomo" # Tauri 的 dmg 卷名 = productName，重建时保持一致
-APP_NAME="ZapMomo" # .app 名 = productName
+VOL_NAME="AudioFn" # Tauri 的 dmg 卷名 = productName，重建时保持一致
+APP_NAME="AudioFn" # .app 名 = productName
 FIXER_NAME="首次打开修复.command"
 
 [ -f "$DMG" ] || { echo "!! 找不到 dmg: $DMG" >&2; exit 1; }
@@ -65,18 +65,18 @@ esac
 # 两段写入：头段未加引号注入探测到的架构，主体段加引号避免展开脚本里的 $
 cat > "$STAGE/$FIXER_NAME" <<FIXER_HEADER
 #!/bin/bash
-# 双击本文件：自动把 ZapMomo 安装到「应用程序」，清除 Gatekeeper 隔离属性并启动。
+# 双击本文件：自动把 AudioFn 安装到「应用程序」，清除 Gatekeeper 隔离属性并启动。
 # （应用未做 Apple 签名公证，macOS 会拦截并提示「已损坏，无法打开」——并非真的损坏。）
 DMG_ARCH="$DMG_ARCH"
 FIXER_HEADER
 cat >> "$STAGE/$FIXER_NAME" <<'FIXER_BODY'
 set -u
-APP="/Applications/ZapMomo.app"
+APP="/Applications/AudioFn.app"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC="$SCRIPT_DIR/ZapMomo.app"
+SRC="$SCRIPT_DIR/AudioFn.app"
 
 clear
-echo "==> ZapMomo 首次打开修复"
+echo "==> AudioFn 首次打开修复"
 echo
 
 # --- 1. 架构校验：Intel Mac 装 arm64 包跑不起来，提前拦下 ---
@@ -99,17 +99,17 @@ fi
 # --- 2. 未安装则自动安装（ditto 保留权限/扩展属性，等同 Finder 拖拽） ---
 if [ ! -d "$APP" ]; then
   if [ ! -d "$SRC" ]; then
-    echo "!! 未找到已安装的 ZapMomo，且本文件所在目录也没有 ZapMomo.app。"
+    echo "!! 未找到已安装的 AudioFn，且本文件所在目录也没有 AudioFn.app。"
     echo "    请打开下载的 dmg，双击其中的「首次打开修复.command」。"
     echo
     echo "（按任意键关闭窗口）"
     read -r -n 1 -s
     exit 1
   fi
-  echo "==> 正在把 ZapMomo 安装到「应用程序」（约十几秒）..."
+  echo "==> 正在把 AudioFn 安装到「应用程序」（约十几秒）..."
   if ! ditto "$SRC" "$APP"; then
     echo "!! 自动安装失败（当前账户可能没有「应用程序」的写入权限）。"
-    echo "    请改为手动操作：把 ZapMomo 拖入「应用程序」（Finder 会提示输入管理员"
+    echo "    请改为手动操作：把 AudioFn 拖入「应用程序」（Finder 会提示输入管理员"
     echo "    账户密码），完成后重新双击本文件即可继续修复。"
     echo
     echo "（按任意键关闭窗口）"
@@ -123,7 +123,7 @@ fi
 # --- 3. 清除隔离属性并启动 ---
 echo "==> 正在清除 Gatekeeper 隔离属性..."
 if xattr -cr "$APP"; then
-  echo "==> 修复完成，正在启动 ZapMomo ..."
+  echo "==> 修复完成，正在启动 AudioFn ..."
   sleep 1
   open "$APP"
 else
@@ -134,7 +134,7 @@ echo "（按任意键关闭窗口）"
 read -r -n 1 -s
 # 用完弹出本 dmg（best-effort）。必须在最后执行：bash 增量读脚本文件，
 # 过早 detach 自身所在卷会导致后续行读取失败
-if [ "$(basename "$SCRIPT_DIR")" = "ZapMomo" ] && [ "${SCRIPT_DIR#/Volumes/}" != "$SCRIPT_DIR" ]; then
+if [ "$(basename "$SCRIPT_DIR")" = "AudioFn" ] && [ "${SCRIPT_DIR#/Volumes/}" != "$SCRIPT_DIR" ]; then
   hdiutil detach "$SCRIPT_DIR" -quiet >/dev/null 2>&1 || true
 fi
 FIXER_BODY

@@ -1,8 +1,8 @@
 {
-  "name": "zapmomo",
+  "name": "audiofn",
   "private": true,
   "version": "0.1.0",
-  "description": "ZapMomo 桌面应用（Tauri 2）",
+  "description": "AudioFn 桌面应用（Tauri 2）",
   "packageManager": "pnpm@10.18.2",
   "scripts": {
     "tauri": "tauri"
