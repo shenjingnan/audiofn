@@ -27,8 +27,10 @@ pub(crate) mod test_util {
     /// 写入自定义 data_dir 设置（双根/迁移测试共用），返回数据目录路径。
     pub(crate) fn set_custom_data_dir(home: &std::path::Path) -> std::path::PathBuf {
         let data = home.join("zapdata");
-        let mut config = crate::config::settings::AppConfig::default();
-        config.data_dir = Some(data.display().to_string());
+        let config = crate::config::settings::AppConfig {
+            data_dir: Some(data.display().to_string()),
+            ..crate::config::settings::AppConfig::default()
+        };
         crate::config::settings::save_settings(&config).unwrap();
         data
     }

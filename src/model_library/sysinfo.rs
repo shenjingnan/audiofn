@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_check_space_insufficient_message() {
-        let err = check_disk_space(1 * GB, 5 * GB).unwrap_err();
+        let err = check_disk_space(GB, 5 * GB).unwrap_err();
         assert!(err.contains("磁盘空间不足"), "{err}");
         assert!(err.contains("存储位置"), "{err}");
         assert!(err.contains("GB"), "{err}");

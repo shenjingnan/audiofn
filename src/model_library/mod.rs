@@ -1722,8 +1722,10 @@ mod tests {
     /// 设置自定义 data_dir，返回数据目录。
     fn set_custom_data_dir(home: &Path) -> PathBuf {
         let data = home.join("zapdata");
-        let mut config = crate::config::settings::AppConfig::default();
-        config.data_dir = Some(data.display().to_string());
+        let config = crate::config::settings::AppConfig {
+            data_dir: Some(data.display().to_string()),
+            ..crate::config::settings::AppConfig::default()
+        };
         crate::config::settings::save_settings(&config).unwrap();
         data
     }

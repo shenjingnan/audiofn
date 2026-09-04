@@ -883,13 +883,16 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
             // 引擎目录命中 → 优先于 search_dirs
             std::fs::write(engine_dir.join(core), b"x").unwrap();
             assert_eq!(
-                pick_backend_dir(&engine_dir, &[dll_dir_a.clone()]),
+                pick_backend_dir(&engine_dir, std::slice::from_ref(&dll_dir_a)),
                 Some(engine_dir.clone())
             );
 
             // 引擎目录未命中 → search_dirs 按序首个命中
             std::fs::remove_file(engine_dir.join(core)).unwrap();
-            assert_eq!(pick_backend_dir(&engine_dir, &[dll_dir_a.clone()]), None);
+            assert_eq!(
+                pick_backend_dir(&engine_dir, std::slice::from_ref(&dll_dir_a)),
+                None
+            );
             std::fs::write(dll_dir_b.join(core), b"x").unwrap();
             assert_eq!(
                 pick_backend_dir(&engine_dir, &[dll_dir_a.clone(), dll_dir_b.clone()]),
@@ -900,8 +903,10 @@ http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()
 
     #[test]
     fn test_config_hash_distinguishes_dimensions() {
-        let mut cfg = crate::tts::config::ResolvedTtsConfig::default();
-        cfg.model_type = crate::tts::config::TtsModelKind::Qwen3Tts06;
+        let mut cfg = crate::tts::config::ResolvedTtsConfig {
+            model_type: crate::tts::config::TtsModelKind::Qwen3Tts06,
+            ..Default::default()
+        };
         let engine = std::path::Path::new("/engines/audiocpp_server");
         let spec = ServerInstanceSpec::from_tts(&cfg).unwrap();
         let h1 = config_hash(&spec, engine);

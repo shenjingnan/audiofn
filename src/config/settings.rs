@@ -794,8 +794,10 @@ mod tests {
 
     /// 用 AppConfig + save_settings 写 data_dir（TOML 序列化器正确转义 Windows 反斜杠）。
     fn write_data_dir_settings(data_dir: Option<&str>) {
-        let mut config = AppConfig::default();
-        config.data_dir = data_dir.map(|s| s.to_string());
+        let config = AppConfig {
+            data_dir: data_dir.map(|s| s.to_string()),
+            ..AppConfig::default()
+        };
         save_settings(&config).unwrap();
     }
 
