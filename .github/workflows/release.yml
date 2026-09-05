@@ -96,7 +96,7 @@ jobs:
         run: pnpm install --filter '!audiofn-docs' --frozen-lockfile
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@1.97.1
+        uses: dtolnay/rust-toolchain@1.120.0
 
       - name: Install macOS cross-compile targets
         if: matrix.platform == 'macos-latest'
