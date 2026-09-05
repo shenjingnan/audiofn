@@ -1672,16 +1672,12 @@ pub fn run() {
             // 静默启动，设置窗不自动弹出、不抢焦点。
             let launched_by_autostart = is_launched_by_autostart(std::env::args());
 
-            // 自动打开设置窗口：仅用于「无全局菜单栏」的平台（非 macOS）——
-            // 这些平台不设 app 级菜单，自动打开可避免「找不到设置」；macOS 恒有
-            // 全局菜单栏（偏好设置 Cmd+, + 托盘菜单），无需自动弹出。
+            // 自动打开设置窗口（三平台一致）：audiofn 无常驻角色窗口，设置窗即
+            // 唯一主界面，普通启动必须可见，否则「有 Dock 图标却无窗口」（zapmomo
+            // 时代 macOS 靠角色窗口常驻，无需弹出；该前提已随角色裁剪失效）。
             // 弹出走 show_settings_window_unfocused：只为可发现性，不抢键盘焦点。
-            // 自启动拉起（--autostart）时跳过：静默启动，手动启动行为不变。
-            #[cfg(target_os = "macos")]
-            let auto_open_settings = false;
-            #[cfg(not(target_os = "macos"))]
-            let auto_open_settings = true;
-            if auto_open_settings && !launched_by_autostart {
+            // 自启动拉起（--autostart）时跳过：静默启动，仅驻托盘。
+            if !launched_by_autostart {
                 let app_handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -1772,9 +1768,14 @@ pub fn run() {
         // 出口与系统强退前的钩子），与三处显式 shutdown_blocking（幂等）双保险。
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                audiofn::audiocpp::server::shutdown_blocking();
+        .run(|app, event| {
+            match event {
+                tauri::RunEvent::Exit => audiofn::audiocpp::server::shutdown_blocking(),
+                // macOS：应用运行中点 Dock 图标 → 唤起主窗（无 Reopen 处理时点击
+                // 无任何反馈）。Reopen 变体仅 macOS 存在，arm 需 cfg 门控。
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => show_settings_window(app),
+                _ => {}
             }
         });
 }
